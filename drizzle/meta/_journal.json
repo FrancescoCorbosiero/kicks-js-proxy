@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1781652829471,
+      "tag": "0000_sudden_kronos",
+      "breakpoints": true
+    }
+  ]
+}

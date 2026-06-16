@@ -12,6 +12,9 @@
  * TODOs to your HTTP client and DB.
  */
 
+import type { AppConfig, EffectivePricingRule } from "./config";
+import { resolveEffectiveRule } from "./config";
+
 /* ========================================================================== *
  * 1. DOMAIN MODEL  (the shared language; sources and stores map to/from this)
  * ========================================================================== */
@@ -97,14 +100,55 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
     };
 }
 // NOTE: the batch-prices endpoint returns a flatter variant shape (price/asks/type
-// at the variant level, no nested product fields). Add a sibling mapKicksPrices()
-// that produces the same SourceVariant[]; everything downstream is identical.
+// at the variant level, no nested product fields). The sibling mapKicksPrices()
+// below produces the same SourceVariant[]; everything downstream is identical.
+
+/** Raw shape of the batch-prices endpoint: priced variants grouped by product,
+ *  but product metadata (title/brand/image/sku) may be absent. Validate w/ Zod. */
+interface KicksPricesProductRaw {
+    id: string;
+    sku?: string;
+    title?: string;
+    brand?: string;
+    image?: string;
+    variants?: KicksVariantRaw[];
+}
+
+export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): SourceProduct {
+    const variants = (raw.variants ?? []).map<SourceVariant>((v) => ({
+        stockxVariantId: v.id,
+        sizeLabel: v.size,
+        sizeType: v.size_type,
+        upc: pickUpc(v),
+        offers: (v.prices ?? []).map((p) => ({
+            deliveryType: p.type,
+            lowestAsk: p.price,
+            asks: p.asks,
+        })),
+    }));
+    const currency = raw.variants?.[0]?.currency ?? "EUR";
+    return {
+        stockxId: raw.id,
+        sku: raw.sku ?? "",
+        title: raw.title ?? "",
+        brand: raw.brand ?? "",
+        image: raw.image ?? "",
+        market,
+        currency,
+        variants,
+    };
+}
 
 /* ========================================================================== *
  * 3. PRICING-RULE ENGINE  (ask -> your retail price). This is mandatory:
  *    the API gives raw asks, never your shelf price.
  * ========================================================================== */
 
+/**
+ * Legacy flat rule shape. Retained for back-compat / readability; the canonical
+ * input to computePrice() is `EffectivePricingRule` (config.ts), produced per
+ * variant by resolveEffectiveRule().
+ */
 export interface PricingRule {
     sourceDeliveryType: DeliveryType; // which offer to read from
     markupPercent: number;            // e.g. 12 => +12%
@@ -113,20 +157,45 @@ export interface PricingRule {
     rounding: "none" | "integer" | "charm"; // charm => .99
 }
 
-/** Returns the proposed retail price, or null if the rule says "don't price". */
-export function computePrice(variant: SourceVariant, rule: PricingRule): number | null {
+/** Apply a RoundingConfig (mode + increment) to a price. */
+export function roundPrice(price: number, rounding: EffectivePricingRule["rounding"]): number {
+    switch (rounding.mode) {
+        case "integer":
+            return Math.round(price);
+        case "charm": {
+            // increment is the charm tail, e.g. .99 => floor + .99, .95 => floor + .95
+            const tail = rounding.increment ?? 0.99;
+            return Math.floor(price) + tail;
+        }
+        case "nearest": {
+            // increment is the step, e.g. 5 => nearest multiple of 5
+            const step = rounding.increment ?? 1;
+            return step > 0 ? Math.round(price / step) * step : price;
+        }
+        case "none":
+        default:
+            return Math.round(price * 100) / 100;
+    }
+}
+
+/**
+ * Returns the proposed retail price for a variant under an effective rule, or
+ * null if the rule says "don't price" (no offer for the chosen delivery type,
+ * or liquidity below minAsks). Applies, in order: delivery-type selection,
+ * minAsks skip, markup, floor, VAT, rounding. The maxDeltaPercent guardrail is
+ * NOT applied here — it is a plan-time compare against the current price.
+ */
+export function computePrice(variant: SourceVariant, rule: EffectivePricingRule): number | null {
     const offer = variant.offers.find((o) => o.deliveryType === rule.sourceDeliveryType);
     if (!offer) return null;
     if (rule.minAsks != null && offer.asks < rule.minAsks) return null;
 
     let price = offer.lowestAsk * (1 + rule.markupPercent / 100);
     if (rule.floor != null) price = Math.max(price, rule.floor);
-
-    switch (rule.rounding) {
-        case "integer": return Math.round(price);
-        case "charm": return Math.floor(price) + 0.99;
-        default: return Math.round(price * 100) / 100;
+    if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
+        price = price * (1 + rule.tax.vatRatePercent / 100);
     }
+    return roundPrice(price, rule.rounding);
 }
 
 /* ========================================================================== *
@@ -165,13 +234,18 @@ export interface VariantMapping {
 
 export function buildPlan(
     product: SourceProduct,
-    rule: PricingRule,
+    config: AppConfig,
     mappings: Map<string, VariantMapping>, // keyed by stockxVariantId (or by upc)
 ): Plan {
     const items = product.variants.map<PlanItem>((v) => {
-        const proposed = computePrice(v, rule);
+        const rule = resolveEffectiveRule(product, v, config);
         const m = mappings.get(v.stockxVariantId);
 
+        if (!rule) {
+            return baseItem(v, m, null, "skip", "no pricing rule matches");
+        }
+
+        const proposed = computePrice(v, rule);
         if (proposed == null) {
             return baseItem(v, m, null, "skip", "no priceable offer");
         }
@@ -179,8 +253,24 @@ export function buildPlan(
             // Not on the store yet -> upsert path would create it.
             return baseItem(v, undefined, proposed, "create");
         }
-        const action = m.currentPrice === proposed ? "noop" : "update";
-        return baseItem(v, m, proposed, action);
+        if (m.currentPrice === proposed) {
+            return baseItem(v, m, proposed, "noop");
+        }
+        // Plan-time guardrail: reject a change larger than maxDeltaPercent.
+        if (
+            rule.maxDeltaPercent != null &&
+            m.currentPrice != null &&
+            exceedsDelta(m.currentPrice, proposed, rule.maxDeltaPercent)
+        ) {
+            return baseItem(
+                v,
+                m,
+                proposed,
+                "skip",
+                `change exceeds maxDeltaPercent (${rule.maxDeltaPercent}%)`,
+            );
+        }
+        return baseItem(v, m, proposed, "update");
     });
 
     return {
@@ -189,6 +279,12 @@ export function buildPlan(
         generatedAt: new Date().toISOString(),
         items,
     };
+}
+
+/** True if |proposed - current| / |current| (as a percent) exceeds maxPercent. */
+function exceedsDelta(current: number, proposed: number, maxPercent: number): boolean {
+    if (current === 0) return proposed !== 0; // any change off a zero base is "infinite"
+    return (Math.abs(proposed - current) / Math.abs(current)) * 100 > maxPercent;
 }
 
 function baseItem(
