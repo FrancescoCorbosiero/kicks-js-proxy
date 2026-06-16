@@ -16,6 +16,8 @@
     "guard:tanstack": "node scripts/guard-tanstack.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-checkbox": "1.3.5",
+    "@radix-ui/react-slot": "1.3.0",
     "bullmq": "5.78.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
