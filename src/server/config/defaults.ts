@@ -24,7 +24,7 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         scope: {}, // matches everything
         enabled: true,
         sourceDeliveryType: "standard",
-        markupPercent: 12,
+        markupPercent: 17,
         minAsks: 1,
         rounding: { mode: "charm", increment: 0.99 },
         tax: { priceIncludesVat: true, vatRatePercent: 22 },
