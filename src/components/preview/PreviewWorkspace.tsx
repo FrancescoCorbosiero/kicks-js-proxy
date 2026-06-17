@@ -12,14 +12,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import type { SnapshotInfo } from "@/server/store-json/repo";
 import { ProductGroup } from "./ProductGroup";
-import { ApplyBar } from "./ApplyBar";
+import { ExportBar } from "./ExportBar";
+import { StoreSnapshotPanel } from "./StoreSnapshotPanel";
 
 type Mode = "skus" | "query";
 
 const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 
-export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
+export function PreviewWorkspace({
+  defaultMarket,
+  snapshotInfo,
+}: {
+  defaultMarket: string;
+  snapshotInfo: SnapshotInfo | null;
+}) {
   const [mode, setMode] = React.useState<Mode>("skus");
   const [skusText, setSkusText] = React.useState("");
   const [query, setQuery] = React.useState("");
@@ -132,16 +140,9 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
     }))
     .filter((s) => s.variantIds.length > 0);
 
-  const createPlanIds = plans
-    .filter((p) =>
-      p.plan.items.some(
-        (i) => i.action === "create" && selected.has(selKey(p.planId, i.stockxVariantId)),
-      ),
-    )
-    .map((p) => p.planId);
-
   return (
     <div className="space-y-6">
+      <StoreSnapshotPanel initialInfo={snapshotInfo} />
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
         <div className="inline-flex rounded-lg border border-neutral-200 p-0.5 text-sm">
           {(["skus", "query"] as const).map((m) => (
@@ -294,7 +295,7 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
             />
           ))}
 
-          <ApplyBar selections={applySelections} createPlanIds={createPlanIds} />
+          <ExportBar selections={applySelections} />
         </div>
       )}
     </div>

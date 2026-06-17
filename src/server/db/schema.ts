@@ -102,6 +102,20 @@ export const catalogProducts = pgTable(
 
 export type CatalogProductRow = typeof catalogProducts.$inferSelect;
 
+/**
+ * The uploaded WooCommerce round-trip model (single active snapshot). Preview and
+ * the JSON export both read it. Stored whole as jsonb so nothing is lost.
+ */
+export const storeSnapshot = pgTable("store_snapshot", {
+  id: text("id").primaryKey().default("current"),
+  siteUrl: text("site_url"),
+  productCount: integer("product_count").notNull().default(0),
+  data: jsonb("data").$type<unknown>().notNull(),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type StoreSnapshotRow = typeof storeSnapshot.$inferSelect;
+
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;

@@ -11,10 +11,10 @@ const EnvSchema = z.object({
   KICKS_SECRET: z.string().min(1, "KICKS_SECRET is required"),
   KICKS_BASE_URL: z.url().default("https://api.kicks.dev/v3"),
 
-  // WooCommerce
-  WOO_BASE_URL: z.url(),
-  WOO_CONSUMER_KEY: z.string().min(1),
-  WOO_CONSUMER_SECRET: z.string().min(1),
+  // WooCommerce — optional: the store integration is JSON round-trip, not live REST.
+  WOO_BASE_URL: z.url().optional(),
+  WOO_CONSUMER_KEY: z.string().optional(),
+  WOO_CONSUMER_SECRET: z.string().optional(),
 
   // Persistence
   DATABASE_URL: z.url(),
@@ -47,9 +47,9 @@ export function connectionFromEnv() {
   return {
     kicksDbApiKey: env.KICKS_SECRET,
     woo: {
-      baseUrl: env.WOO_BASE_URL,
-      consumerKey: env.WOO_CONSUMER_KEY,
-      consumerSecret: env.WOO_CONSUMER_SECRET,
+      baseUrl: env.WOO_BASE_URL ?? "",
+      consumerKey: env.WOO_CONSUMER_KEY ?? "",
+      consumerSecret: env.WOO_CONSUMER_SECRET ?? "",
     },
     marketToCurrency: { IT: "EUR", US: "USD", GB: "GBP", DE: "EUR" } as Record<string, string>,
   };

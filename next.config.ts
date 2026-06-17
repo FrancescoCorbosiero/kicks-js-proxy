@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // The apply worker uses ioredis/bullmq/pg — keep them external to the server bundle.
-  serverExternalPackages: ["bullmq", "ioredis", "pg"],
+  // Keep native/IO deps external to the server bundle.
+  serverExternalPackages: ["ioredis", "pg"],
 };
 
 export default nextConfig;
