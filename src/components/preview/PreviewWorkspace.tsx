@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { PlanItem } from "@core/core-spine";
 import { fetchAndPreview, type PreviewInput, type FetchStats } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import type { PreviewPlan } from "@/lib/plan";
@@ -56,10 +57,15 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
         setSelected(new Set());
         return;
       }
+      // SKU mode is an explicit list the operator typed -> default to all
+      // actionable selected. Query mode is exploratory -> select nothing; the
+      // operator picks granularly (or uses a quick-select preset).
       const next = new Set<string>();
-      for (const p of res.plans) {
-        for (const item of p.plan.items) {
-          if (isActionable(item.action)) next.add(selKey(p.planId, item.stockxVariantId));
+      if (input.mode === "skus") {
+        for (const p of res.plans) {
+          for (const item of p.plan.items) {
+            if (isActionable(item.action)) next.add(selKey(p.planId, item.stockxVariantId));
+          }
         }
       }
       setStats(res.stats ?? null);
@@ -67,6 +73,19 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
       setSelected(next);
       setAllOpen(res.plans.length <= 3); // auto-expand only for small result sets
     });
+  }
+
+  /** Rebuild the selection from a predicate over (plan, item). Quick-select. */
+  function selectWhere(predicate: (p: PreviewPlan, item: PlanItem) => boolean) {
+    const next = new Set<string>();
+    for (const p of plans) {
+      for (const item of p.plan.items) {
+        if (isActionable(item.action) && predicate(p, item)) {
+          next.add(selKey(p.planId, item.stockxVariantId));
+        }
+      }
+    }
+    setSelected(next);
   }
 
   function toggle(planId: string, variantId: string, checked: boolean) {
@@ -215,6 +234,42 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
             >
               {allOpen ? "Collapse all" : "Expand all"}
             </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 px-1 text-sm">
+            <span className="mr-1 text-xs font-medium text-neutral-500">Quick select:</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => selectWhere(() => true)}>
+              All ({totals.update + totals.create})
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+              None
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => selectWhere((_, i) => i.action === "update")}
+            >
+              Updates ({totals.update})
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => selectWhere((_, i) => i.action === "create")}
+            >
+              New ({totals.create})
+            </Button>
+            {plans.some((p) => p.exactMatch) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => selectWhere((p) => p.exactMatch)}
+              >
+                Exact match
+              </Button>
+            )}
           </div>
 
           {plans.map((p) => (
