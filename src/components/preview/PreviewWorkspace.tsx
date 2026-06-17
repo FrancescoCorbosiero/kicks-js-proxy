@@ -4,14 +4,14 @@ import * as React from "react";
 import { fetchAndPreview, type PreviewInput, type FetchStats } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import type { PreviewPlan } from "@/lib/plan";
-import { emptySummary, summarize } from "@/lib/plan";
+import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { PreviewTable, isActionable } from "./PreviewTable";
+import { ProductGroup } from "./ProductGroup";
 
 type Mode = "skus" | "query";
 
@@ -28,6 +28,8 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
   const [plans, setPlans] = React.useState<PreviewPlan[]>([]);
   const [stats, setStats] = React.useState<FetchStats | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [allOpen, setAllOpen] = React.useState(false);
+
   const [ping, setPing] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [pinging, startPing] = React.useTransition();
 
@@ -53,16 +55,16 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
         setSelected(new Set());
         return;
       }
-      setStats(res.stats ?? null);
-      // Default selection: every actionable row included.
       const next = new Set<string>();
       for (const p of res.plans) {
         for (const item of p.plan.items) {
           if (isActionable(item.action)) next.add(selKey(p.planId, item.stockxVariantId));
         }
       }
+      setStats(res.stats ?? null);
       setPlans(res.plans);
       setSelected(next);
+      setAllOpen(res.plans.length <= 3); // auto-expand only for small result sets
     });
   }
 
@@ -89,7 +91,6 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
     });
   }
 
-  // Overall summary across all plans (what the fetch produced).
   const totals = plans.reduce((acc, p) => {
     const s = summarize(p.plan.items);
     acc.update += s.update;
@@ -102,30 +103,24 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
 
   return (
     <div className="space-y-6">
-      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-neutral-200 p-4">
-        <div className="flex gap-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "skus"}
-              onChange={() => setMode("skus")}
-            />
-            By SKUs
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="mode"
-              checked={mode === "query"}
-              onChange={() => setMode("query")}
-            />
-            By query
-          </label>
+      <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
+        <div className="inline-flex rounded-lg border border-neutral-200 p-0.5 text-sm">
+          {(["skus", "query"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+                mode === m ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"
+              }`}
+            >
+              {m === "skus" ? "By SKUs" : "By query"}
+            </button>
+          ))}
         </div>
 
         {mode === "skus" ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor="skus">StockX style codes (comma / space / newline separated)</Label>
             <Textarea
               id="skus"
@@ -135,7 +130,7 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
             />
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor="query">Search query</Label>
             <Input
               id="query"
@@ -146,12 +141,12 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
           </div>
         )}
 
-        <div className="flex items-end gap-4">
-          <div className="space-y-1">
+        <div className="flex items-end gap-3">
+          <div className="space-y-1.5">
             <Label htmlFor="market">Market</Label>
             <Input
               id="market"
-              className="w-28"
+              className="w-24"
               value={market}
               onChange={(e) => setMarket(e.target.value.toUpperCase())}
             />
@@ -170,27 +165,46 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
         {error && <p className="text-sm text-rose-600">{error}</p>}
       </form>
 
+      {stats?.notFound && stats.notFound.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="font-medium">Not found on StockX:</span> {stats.notFound.join(", ")}
+        </div>
+      )}
+
       {plans.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium">Summary:</span>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm shadow-sm">
+            <span className="font-semibold">{plans.length} products</span>
+            <span className="text-neutral-300">·</span>
             <Badge variant="update">{totals.update} update</Badge>
             <Badge variant="create">{totals.create} create</Badge>
             <Badge variant="skip">{totals.skip} skip</Badge>
             <Badge variant="noop">{totals.noop} noop</Badge>
-            <span className="ml-2 text-neutral-500">{selectedCount} selected for apply</span>
+            <span className="ml-1 text-neutral-500">{selectedCount} selected for apply</span>
+            {stats && (
+              <span className="ml-auto text-xs text-neutral-400">
+                {stats.fromCache} cached · {stats.fetched} fetched live
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setAllOpen((o) => !o)}
+              className="text-neutral-600"
+            >
+              {allOpen ? "Collapse all" : "Expand all"}
+            </Button>
           </div>
 
-          {stats && (
-            <p className="text-xs text-neutral-500">
-              {stats.products} product(s) · {stats.fromCache} from cache · {stats.fetched} fetched live
-            </p>
-          )}
-
           {plans.map((p) => (
-            <PreviewTable
-              key={p.planId}
+            <ProductGroup
+              // Re-mount on allOpen change so expand/collapse-all propagates.
+              key={`${p.planId}-${allOpen}`}
               plan={p.plan}
+              title={p.title}
+              brand={p.brand}
+              defaultOpen={allOpen}
               selected={
                 new Set(
                   p.plan.items

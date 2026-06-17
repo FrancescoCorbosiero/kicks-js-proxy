@@ -5,13 +5,14 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 import type { AppConfig } from "@core/config";
-import type { Plan, PlanItem, ApplyResult } from "@core/core-spine";
+import type { Plan, PlanItem, ApplyResult, SourceProduct } from "@core/core-spine";
 
 /**
  * The persisted AppConfig. Secrets (in ConnectionConfig) are injected from env at
@@ -79,6 +80,28 @@ export const applyAudit = pgTable("apply_audit", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
+
+/**
+ * Persistent "smart" catalog cache: every StockX product successfully looked up
+ * on KicksDB is upserted here, keyed by (market, sku). Survives restarts and
+ * builds a known-SKU catalog; freshness is decided by fetchedAt + the config TTL.
+ */
+export const catalogProducts = pgTable(
+  "catalog_products",
+  {
+    market: text("market").notNull(),
+    sku: text("sku").notNull(),
+    stockxId: text("stockx_id").notNull(),
+    title: text("title").notNull().default(""),
+    brand: text("brand").notNull().default(""),
+    data: jsonb("data").$type<SourceProduct>().notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.market, t.sku] }), index("catalog_brand_idx").on(t.brand)],
+);
+
+export type CatalogProductRow = typeof catalogProducts.$inferSelect;
 
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;

@@ -8,6 +8,13 @@
       "when": 1781652829471,
       "tag": "0000_sudden_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781697262914,
+      "tag": "0001_neat_spot",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,11 @@ import type { Plan, PlanAction, PlanItem } from "@core/core-spine";
 
 export type PlanSummary = Record<PlanAction, number>;
 
+/** Only update/create rows can be applied; noop/skip are informational. */
+export function isActionable(action: PlanAction): boolean {
+  return action === "update" || action === "create";
+}
+
 export function emptySummary(): PlanSummary {
   return { update: 0, create: 0, noop: 0, skip: 0 };
 }
@@ -17,6 +22,8 @@ export function summarize(items: Pick<PlanItem, "action">[]): PlanSummary {
 export interface PreviewPlan {
   planId: string;
   market: string;
+  title: string;
+  brand: string;
   plan: Plan;
   summary: PlanSummary;
 }

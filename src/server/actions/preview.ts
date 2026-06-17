@@ -7,7 +7,9 @@ import { getSource } from "@/server/adapters/kicksdb";
 import { getMappingsForVariants } from "@/server/mappings/repo";
 import { savePlan } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
-import { fetchPricesCached, fetchProductsCached } from "@/server/kicks/service";
+import { fetchProductsCached } from "@/server/kicks/service";
+import { resolveSkusViaCatalog } from "@/server/catalog/service";
+import { dbCatalogStore } from "@/server/catalog/store";
 import type { PreviewPlan } from "@/lib/plan";
 
 const InputSchema = z
@@ -28,6 +30,7 @@ export interface FetchStats {
   products: number;
   fromCache: number;
   fetched: number;
+  notFound: string[];
 }
 
 export interface PreviewResult {
@@ -55,10 +58,12 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const ttl = config.source.cacheTtlSeconds;
 
   try {
+    // SKU mode resolves through the persistent catalog (smart cache, upsert on
+    // fresh fetch). Query mode uses the Redis whole-result cache.
     const result =
       parsed.data.mode === "skus"
-        ? await fetchPricesCached(source, cache, parsed.data.skus!, market, ttl)
-        : await fetchProductsCached(source, cache, parsed.data.query!, market, ttl);
+        ? await resolveSkusViaCatalog(source, dbCatalogStore, parsed.data.skus!, market, ttl)
+        : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
     const out: PreviewPlan[] = [];
     for (const product of result.products) {
@@ -67,12 +72,17 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
       );
       const plan = buildPlan(product, config, mappings);
       const { id, summary } = await savePlan(plan, market);
-      out.push({ planId: id, market, plan, summary });
+      out.push({ planId: id, market, title: product.title, brand: product.brand, plan, summary });
     }
     return {
       ok: true,
       plans: out,
-      stats: { products: result.products.length, fromCache: result.fromCache, fetched: result.fetched },
+      stats: {
+        products: result.products.length,
+        fromCache: result.fromCache,
+        fetched: result.fetched,
+        notFound: result.notFound,
+      },
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e), plans: [] };
