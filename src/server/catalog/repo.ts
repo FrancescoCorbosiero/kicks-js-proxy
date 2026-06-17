@@ -9,6 +9,9 @@ import { skuKey } from "@/lib/skus";
  * Return catalog entries for the given SKUs that are still FRESH (fetched within
  * ttlSeconds), keyed by canonical SKU. Stale or missing SKUs are simply absent,
  * so the caller refetches and upserts them.
+ *
+ * Best-effort: the catalog is a cache, so a DB error (e.g. the table not yet
+ * migrated) degrades to "no cache" rather than failing the whole preview.
  */
 export async function getFreshBySkus(
   market: string,
@@ -21,18 +24,21 @@ export async function getFreshBySkus(
   const keys = skus.map(skuKey);
   const threshold = new Date(Date.now() - ttlSeconds * 1000);
 
-  const rows = await db
-    .select()
-    .from(catalogProducts)
-    .where(
-      and(
-        eq(catalogProducts.market, market),
-        inArray(catalogProducts.sku, keys),
-        gte(catalogProducts.fetchedAt, threshold),
-      ),
-    );
-
-  for (const r of rows) out.set(r.sku, r.data);
+  try {
+    const rows = await db
+      .select()
+      .from(catalogProducts)
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          inArray(catalogProducts.sku, keys),
+          gte(catalogProducts.fetchedAt, threshold),
+        ),
+      );
+    for (const r of rows) out.set(r.sku, r.data);
+  } catch (e) {
+    console.warn("[catalog] read skipped (cache unavailable):", describeDbError(e));
+  }
   return out;
 }
 
@@ -52,18 +58,29 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     updatedAt: now,
   }));
 
-  await db
-    .insert(catalogProducts)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [catalogProducts.market, catalogProducts.sku],
-      set: {
-        stockxId: sql`excluded.stockx_id`,
-        title: sql`excluded.title`,
-        brand: sql`excluded.brand`,
-        data: sql`excluded.data`,
-        fetchedAt: sql`excluded.fetched_at`,
-        updatedAt: sql`excluded.updated_at`,
-      },
-    });
+  try {
+    await db
+      .insert(catalogProducts)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [catalogProducts.market, catalogProducts.sku],
+        set: {
+          stockxId: sql`excluded.stockx_id`,
+          title: sql`excluded.title`,
+          brand: sql`excluded.brand`,
+          data: sql`excluded.data`,
+          fetchedAt: sql`excluded.fetched_at`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+  } catch (e) {
+    console.warn("[catalog] write skipped (cache unavailable):", describeDbError(e));
+  }
+}
+
+/** Surface the underlying pg message (drizzle wraps it) for actionable logs. */
+function describeDbError(e: unknown): string {
+  const cause = (e as { cause?: { message?: string } })?.cause;
+  if (cause?.message) return cause.message;
+  return e instanceof Error ? e.message : String(e);
 }

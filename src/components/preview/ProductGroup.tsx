@@ -42,6 +42,8 @@ interface Props {
   plan: Plan;
   title?: string;
   brand?: string;
+  euSizes?: Record<string, string>;
+  highlighted?: boolean;
   selected: Set<string>; // stockxVariantIds included for apply
   onToggle: (variantId: string, checked: boolean) => void;
   onToggleAll: (checked: boolean) => void;
@@ -52,6 +54,8 @@ export function ProductGroup({
   plan,
   title,
   brand,
+  euSizes,
+  highlighted = false,
   selected,
   onToggle,
   onToggleAll,
@@ -69,7 +73,11 @@ export function ProductGroup({
         : "indeterminate";
 
   return (
-    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
+    <div
+      className={`overflow-hidden rounded-lg border bg-white ${
+        highlighted ? "border-neutral-900 ring-1 ring-neutral-900" : "border-neutral-200"
+      }`}
+    >
       <div className="flex items-center gap-3 px-3 py-2.5">
         <button
           type="button"
@@ -79,8 +87,9 @@ export function ProductGroup({
         >
           <Chevron open={open} />
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">
+            <div className="flex items-center gap-2 truncate text-sm font-semibold">
               {title || plan.sku || "(no SKU)"}
+              {highlighted && <Badge variant="create">match</Badge>}
             </div>
             <div className="truncate text-xs text-neutral-500">
               {plan.sku}
@@ -114,7 +123,7 @@ export function ProductGroup({
                     onCheckedChange={(c) => onToggleAll(c === true)}
                   />
                 </TableHead>
-                <TableHead>Size</TableHead>
+                <TableHead>Size (EU)</TableHead>
                 <TableHead>UPC</TableHead>
                 <TableHead className="text-right">Current</TableHead>
                 <TableHead className="text-right">Proposed</TableHead>
@@ -136,7 +145,16 @@ export function ProductGroup({
                         onCheckedChange={(c) => onToggle(item.stockxVariantId, c === true)}
                       />
                     </TableCell>
-                    <TableCell className="font-medium">{item.sizeLabel}</TableCell>
+                    <TableCell>
+                      {euSizes?.[item.stockxVariantId] ? (
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="font-medium">EU {euSizes[item.stockxVariantId]}</span>
+                          <span className="text-xs text-neutral-400">({item.sizeLabel})</span>
+                        </span>
+                      ) : (
+                        <span className="font-medium">{item.sizeLabel}</span>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-neutral-500">
                       {item.upc ?? "—"}
                     </TableCell>

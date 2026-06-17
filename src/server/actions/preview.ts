@@ -10,6 +10,8 @@ import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
+import { euSize } from "@/lib/sizes";
+import { isExactMatch } from "@/lib/match";
 import type { PreviewPlan } from "@/lib/plan";
 
 const InputSchema = z
@@ -65,6 +67,8 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
         ? await resolveSkusViaCatalog(source, dbCatalogStore, parsed.data.skus!, market, ttl)
         : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
+    const term = parsed.data.mode === "query" ? parsed.data.query! : null;
+
     const out: PreviewPlan[] = [];
     for (const product of result.products) {
       const mappings = await getMappingsForVariants(
@@ -72,7 +76,23 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
       );
       const plan = buildPlan(product, config, mappings);
       const { id, summary } = await savePlan(plan, market);
-      out.push({ planId: id, market, title: product.title, brand: product.brand, plan, summary });
+
+      const euSizes: Record<string, string> = {};
+      for (const v of product.variants) {
+        const eu = euSize(v.sizes);
+        if (eu) euSizes[v.stockxVariantId] = eu;
+      }
+
+      out.push({
+        planId: id,
+        market,
+        title: product.title,
+        brand: product.brand,
+        plan,
+        summary,
+        euSizes,
+        exactMatch: term ? isExactMatch(term, product.sku, product.title) : false,
+      });
     }
     return {
       ok: true,
@@ -85,6 +105,8 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
       },
     };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e), plans: [] };
+    const cause = (e as { cause?: { message?: string } })?.cause;
+    const msg = cause?.message ?? (e instanceof Error ? e.message : String(e));
+    return { ok: false, error: msg, plans: [] };
   }
 }

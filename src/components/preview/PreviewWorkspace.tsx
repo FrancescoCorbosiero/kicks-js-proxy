@@ -204,6 +204,8 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
               plan={p.plan}
               title={p.title}
               brand={p.brand}
+              euSizes={p.euSizes}
+              highlighted={p.exactMatch}
               defaultOpen={allOpen}
               selected={
                 new Set(

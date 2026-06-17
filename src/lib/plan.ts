@@ -26,4 +26,6 @@ export interface PreviewPlan {
   brand: string;
   plan: Plan;
   summary: PlanSummary;
+  euSizes: Record<string, string>; // stockxVariantId -> EU size, when known
+  exactMatch: boolean; // sku/title exactly matches the search term
 }

@@ -29,10 +29,14 @@ const IdentifierSchema = z.object({
 // (`?:`) raw params rather than `T | null`.
 const undef = <T>(v: T | null | undefined): T | undefined => v ?? undefined;
 
+// Loose: KicksDB size-conversion key names vary; the mapper normalizes them.
+const SizeSchema = z.looseObject({});
+
 export const KicksVariantSchema = z.object({
   id: z.string(),
   size: z.string(),
   size_type: z.string(),
+  sizes: z.array(SizeSchema).nullish().transform(undef),
   identifiers: z.array(IdentifierSchema).nullish().transform(undef),
   prices: z.array(PriceSchema).nullish().transform(undef),
   currency: z.string().nullish().transform(undef),

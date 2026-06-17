@@ -28,11 +28,18 @@ export interface PriceOffer {
     asks: number;      // depth, useful for "don't reprice on thin liquidity" rules
 }
 
+/** One size in a particular sizing system (e.g. { system: "eu", size: "42.5" }). */
+export interface SourceSize {
+    system: string;           // normalized lowercase: "us m", "eu", "uk", "cm", ...
+    size: string;             // e.g. "42.5"
+}
+
 /** One size variant of a product, as seen on the source (StockX via KicksDB). */
 export interface SourceVariant {
     stockxVariantId: string;
-    sizeLabel: string;        // e.g. "3.5"
+    sizeLabel: string;        // e.g. "3.5" (the variant's primary/default system)
     sizeType: string;         // e.g. "us m"
+    sizes?: SourceSize[];     // all known conversions (EU/UK/CM/...), when provided
     upc?: string;             // join key against Woo's global_unique_id
     offers: PriceOffer[];     // empty if the variant has no asks
 }
@@ -53,16 +60,34 @@ export interface SourceProduct {
  * 2. KICKSDB MAPPING  (raw API JSON -> domain). Validate with Zod upstream.
  * ========================================================================== */
 
+/** Loose shape of a size-conversion entry; KicksDB key names vary, so be tolerant. */
+interface KicksSizeRaw {
+    size?: string | number;
+    value?: string | number;
+    size_type?: string;
+    type?: string;
+    system?: string;
+}
+
 /** Minimal shape of the KicksDB product-endpoint variant we depend on. */
 interface KicksVariantRaw {
     id: string;
     size: string;
     size_type: string;
+    sizes?: KicksSizeRaw[] | null;
     identifiers?: { identifier: string; identifier_type: string }[] | null;
     prices?: { price: number; asks: number; type: DeliveryType }[] | null;
     currency?: string;
     market?: string;
 }
+
+const normalizeSizes = (v: KicksVariantRaw): SourceSize[] =>
+    (v.sizes ?? [])
+        .map((s) => ({
+            system: String(s.size_type ?? s.type ?? s.system ?? "").toLowerCase().trim(),
+            size: String(s.size ?? s.value ?? "").trim(),
+        }))
+        .filter((s) => s.size.length > 0);
 interface KicksProductRaw {
     id: string;
     sku: string;
@@ -80,6 +105,7 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         stockxVariantId: v.id,
         sizeLabel: v.size,
         sizeType: v.size_type,
+        sizes: normalizeSizes(v),
         upc: pickUpc(v),
         offers: (v.prices ?? []).map((p) => ({
             deliveryType: p.type,
@@ -119,6 +145,7 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
         stockxVariantId: v.id,
         sizeLabel: v.size,
         sizeType: v.size_type,
+        sizes: normalizeSizes(v),
         upc: pickUpc(v),
         offers: (v.prices ?? []).map((p) => ({
             deliveryType: p.type,
