@@ -15,6 +15,13 @@
       "when": 1781697262914,
       "tag": "0001_neat_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781707786071,
+      "tag": "0002_curved_anthem",
+      "breakpoints": true
     }
   ]
 }

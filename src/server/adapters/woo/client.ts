@@ -1,11 +1,13 @@
 import "server-only";
 import { WooStoreAdapter } from "@core/core-spine";
+import type { MatchingConfig } from "@core/config";
 import { requestJson, type RetryPolicy, DEFAULT_RETRY } from "../http";
 
 export interface WooConfig {
   baseUrl: string; // store root, e.g. https://shop.example.com
   consumerKey: string;
   consumerSecret: string;
+  matching?: MatchingConfig;
   retry?: RetryPolicy;
 }
 
@@ -59,5 +61,5 @@ export class WooHttpClient {
 
 /** Build the StorePort-implementing adapter from a Woo config. */
 export function createWooStore(cfg: WooConfig): WooStoreAdapter {
-  return new WooStoreAdapter(new WooHttpClient(cfg));
+  return new WooStoreAdapter(new WooHttpClient(cfg), cfg.matching);
 }

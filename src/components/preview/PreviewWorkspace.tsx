@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ProductGroup } from "./ProductGroup";
+import { ApplyBar } from "./ApplyBar";
 
 type Mode = "skus" | "query";
 
@@ -100,6 +101,25 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
     return acc;
   }, emptySummary());
   const selectedCount = selected.size;
+
+  // Build apply selections (only plans with selected variants) and the set of
+  // plans whose selection includes a "create" row (candidates for M3 import).
+  const applySelections = plans
+    .map((p) => ({
+      planId: p.planId,
+      variantIds: p.plan.items
+        .filter((i) => selected.has(selKey(p.planId, i.stockxVariantId)))
+        .map((i) => i.stockxVariantId),
+    }))
+    .filter((s) => s.variantIds.length > 0);
+
+  const createPlanIds = plans
+    .filter((p) =>
+      p.plan.items.some(
+        (i) => i.action === "create" && selected.has(selKey(p.planId, i.stockxVariantId)),
+      ),
+    )
+    .map((p) => p.planId);
 
   return (
     <div className="space-y-6">
@@ -218,6 +238,8 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
               onToggleAll={(checked) => toggleAll(p, checked)}
             />
           ))}
+
+          <ApplyBar selections={applySelections} createPlanIds={createPlanIds} />
         </div>
       )}
     </div>

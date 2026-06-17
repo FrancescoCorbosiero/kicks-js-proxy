@@ -12,7 +12,7 @@
  * TODOs to your HTTP client and DB.
  */
 
-import type { AppConfig, EffectivePricingRule } from "./config";
+import type { AppConfig, EffectivePricingRule, MatchingConfig } from "./config";
 import { resolveEffectiveRule } from "./config";
 
 /* ========================================================================== *
@@ -371,16 +371,100 @@ interface WooClient {
     get<T>(path: string, query?: Record<string, string>): Promise<T>;
 }
 
+/** Minimal Woo shapes we read. */
+interface WooProduct {
+    id: number;
+    sku?: string;
+}
+interface WooVariation {
+    id: number;
+    sku?: string;
+    global_unique_id?: string;
+    regular_price?: string;
+}
+
+const parsePrice = (s?: string): number | null => {
+    if (s == null || s === "") return null;
+    const n = Number.parseFloat(s);
+    return Number.isNaN(n) ? null : n;
+};
+
+const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
+
+/**
+ * Render a Woo variation SKU from the configured template. Tokens:
+ * {sku} {size} {sizeType} {brand}. e.g. "{sku}-{sizeType}-{size}".
+ */
+export function renderSkuTemplate(
+    template: string,
+    product: Pick<SourceProduct, "sku" | "brand">,
+    variant: Pick<SourceVariant, "sizeLabel" | "sizeType">,
+): string {
+    return template
+        .replaceAll("{sku}", product.sku)
+        .replaceAll("{brand}", product.brand)
+        .replaceAll("{size}", variant.sizeLabel)
+        .replaceAll("{sizeType}", variant.sizeType)
+        .replaceAll(" ", "-");
+}
+
+const DEFAULT_MATCHING: MatchingConfig = {
+    strategyOrder: ["upc", "skuPattern", "manual"],
+    skuTemplate: "{sku}-{size}",
+};
+
 export class WooStoreAdapter implements StorePort {
-    constructor(private readonly woo: WooClient) { }
+    private readonly matching: MatchingConfig;
+
+    constructor(private readonly woo: WooClient, matching: MatchingConfig = DEFAULT_MATCHING) {
+        this.matching = matching;
+    }
+
+    /** Find the parent Woo product whose SKU equals the StockX style code. */
+    private async findParent(product: SourceProduct): Promise<WooProduct | undefined> {
+        const found = await this.woo.get<WooProduct[]>("products", { sku: product.sku });
+        return Array.isArray(found) ? found[0] : undefined;
+    }
+
+    private async listVariations(productId: number): Promise<WooVariation[]> {
+        const v = await this.woo.get<WooVariation[]>(`products/${productId}/variations`, {
+            per_page: "100",
+        });
+        return Array.isArray(v) ? v : [];
+    }
 
     async resolveMappings(product: SourceProduct): Promise<Map<string, VariantMapping>> {
-        // TODO: look up the parent Woo product (by your own SKU/meta), then fetch its
-        // variations and match each StockX variant by UPC (global_unique_id) first,
-        // falling back to an SKU convention. Persist confirmed matches to your DB so
-        // this is cheap on subsequent runs.
-        void product;
-        return new Map();
+        const map = new Map<string, VariantMapping>();
+        const parent = await this.findParent(product);
+        if (!parent) return map; // not on the store yet -> everything is a "create"
+
+        const variations = await this.listVariations(parent.id);
+        const byUpc = new Map<string, WooVariation>();
+        const bySku = new Map<string, WooVariation>();
+        for (const v of variations) {
+            if (v.global_unique_id) byUpc.set(v.global_unique_id, v);
+            if (v.sku) bySku.set(v.sku, v);
+        }
+
+        for (const variant of product.variants) {
+            let match: WooVariation | undefined;
+            for (const strat of this.matching.strategyOrder) {
+                if (match) break;
+                if (strat === "upc" && variant.upc) match = byUpc.get(variant.upc);
+                else if (strat === "skuPattern")
+                    match = bySku.get(renderSkuTemplate(this.matching.skuTemplate, product, variant));
+                // "manual" has no automatic resolution
+            }
+            if (match) {
+                map.set(variant.stockxVariantId, {
+                    stockxVariantId: variant.stockxVariantId,
+                    storeProductId: parent.id,
+                    storeVariationId: match.id,
+                    currentPrice: parsePrice(match.regular_price),
+                });
+            }
+        }
+        return map;
     }
 
     async applyPrices(plan: Plan): Promise<ApplyResult> {
@@ -421,10 +505,51 @@ export class WooStoreAdapter implements StorePort {
     }
 
     async upsertProduct(product: SourceProduct): Promise<{ storeProductId: number }> {
-        // TODO: find existing variable product by SKU; if absent POST /products
-        // (type: "variable") then POST /products/{id}/variations/batch with the size
-        // variants, writing UPC into global_unique_id so future matching is exact.
-        void product;
-        return { storeProductId: 0 };
+        // 1. Find or create the parent variable product (keyed by StockX style code).
+        let parent = await this.findParent(product);
+        if (!parent) {
+            const created = await this.woo.post<WooProduct>("products", {
+                name: product.title,
+                type: "variable",
+                sku: product.sku,
+                images: product.image ? [{ src: product.image }] : [],
+                attributes: [
+                    {
+                        name: "Size",
+                        variation: true,
+                        visible: true,
+                        options: uniq(product.variants.map((v) => v.sizeLabel)),
+                    },
+                ],
+            });
+            parent = { id: created.id, sku: product.sku };
+        }
+
+        // 2. Create any missing variations, writing UPC into global_unique_id so
+        //    future matching is exact. Existing ones (by sku/upc) are left alone.
+        const existing = await this.listVariations(parent.id);
+        const existingSkus = new Set(existing.map((v) => v.sku).filter(Boolean));
+        const existingUpcs = new Set(existing.map((v) => v.global_unique_id).filter(Boolean));
+
+        const create = product.variants
+            .map((v) => ({
+                variant: v,
+                sku: renderSkuTemplate(this.matching.skuTemplate, product, v),
+            }))
+            .filter(({ variant, sku }) => {
+                if (existingSkus.has(sku)) return false;
+                if (variant.upc && existingUpcs.has(variant.upc)) return false;
+                return true;
+            })
+            .map(({ variant, sku }) => ({
+                sku,
+                global_unique_id: variant.upc,
+                attributes: [{ name: "Size", option: variant.sizeLabel }],
+            }));
+
+        if (create.length > 0) {
+            await this.woo.post(`products/${parent.id}/variations/batch`, { create });
+        }
+        return { storeProductId: parent.id };
     }
 }

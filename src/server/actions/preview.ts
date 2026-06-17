@@ -4,7 +4,8 @@ import { z } from "zod";
 import { buildPlan } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource } from "@/server/adapters/kicksdb";
-import { getMappingsForVariants } from "@/server/mappings/repo";
+import { getStore } from "@/server/adapters/woo";
+import { resolveLiveMappings } from "@/server/mappings/service";
 import { savePlan } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
@@ -56,6 +57,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const config = await getActiveConfig();
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
+  const store = getStore(config);
   const cache = getCache();
   const ttl = config.source.cacheTtlSeconds;
 
@@ -71,9 +73,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
 
     const out: PreviewPlan[] = [];
     for (const product of result.products) {
-      const mappings = await getMappingsForVariants(
-        product.variants.map((v) => v.stockxVariantId),
-      );
+      const mappings = await resolveLiveMappings(store, product);
       const plan = buildPlan(product, config, mappings);
       const { id, summary } = await savePlan(plan, market);
 

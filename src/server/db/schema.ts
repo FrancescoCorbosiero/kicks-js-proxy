@@ -64,12 +64,10 @@ export const plans = pgTable("plans", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** One row per apply attempt (including dry runs). */
+/** One row per apply attempt (including dry runs). Job-level: planId optional. */
 export const applyAudit = pgTable("apply_audit", {
   id: uuid("id").primaryKey().defaultRandom(),
-  planId: uuid("plan_id")
-    .notNull()
-    .references(() => plans.id),
+  planId: uuid("plan_id").references(() => plans.id),
   jobId: text("job_id"),
   status: text("status", {
     enum: ["queued", "running", "dry_run", "applied", "partial", "failed"],
@@ -77,6 +75,7 @@ export const applyAudit = pgTable("apply_audit", {
   dryRun: boolean("dry_run").notNull(),
   updatedCount: integer("updated_count").notNull().default(0),
   failed: jsonb("failed").$type<ApplyResult["failed"]>().notNull().default([]),
+  result: jsonb("result").$type<Record<string, unknown>>(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });

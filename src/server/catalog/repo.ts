@@ -42,6 +42,25 @@ export async function getFreshBySkus(
   return out;
 }
 
+/** Load catalog products by SKU regardless of freshness (used by apply). */
+export async function getAnyBySkus(
+  market: string,
+  skus: string[],
+): Promise<Map<string, SourceProduct>> {
+  const out = new Map<string, SourceProduct>();
+  if (skus.length === 0) return out;
+  try {
+    const rows = await db
+      .select()
+      .from(catalogProducts)
+      .where(and(eq(catalogProducts.market, market), inArray(catalogProducts.sku, skus.map(skuKey))));
+    for (const r of rows) out.set(r.sku, r.data);
+  } catch (e) {
+    console.warn("[catalog] read skipped (cache unavailable):", describeDbError(e));
+  }
+  return out;
+}
+
 /** Upsert (insert-or-refresh) the products that were just fetched from KicksDB. */
 export async function upsertCatalog(market: string, products: SourceProduct[]): Promise<void> {
   if (products.length === 0) return;
