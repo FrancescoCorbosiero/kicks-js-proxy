@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { fetchAndPreview, type PreviewInput } from "@/server/actions/preview";
+import { fetchAndPreview, type PreviewInput, type FetchStats } from "@/server/actions/preview";
+import { pingKicksDb } from "@/server/actions/health";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -25,7 +26,15 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [plans, setPlans] = React.useState<PreviewPlan[]>([]);
+  const [stats, setStats] = React.useState<FetchStats | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [ping, setPing] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const [pinging, startPing] = React.useTransition();
+
+  function onPing() {
+    setPing(null);
+    startPing(async () => setPing(await pingKicksDb()));
+  }
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,9 +49,11 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
       if (!res.ok) {
         setError(res.error ?? "Unknown error");
         setPlans([]);
+        setStats(null);
         setSelected(new Set());
         return;
       }
+      setStats(res.stats ?? null);
       // Default selection: every actionable row included.
       const next = new Set<string>();
       for (const p of res.plans) {
@@ -148,8 +159,14 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
           <Button type="submit" disabled={pending}>
             {pending ? "Fetching…" : "Fetch & preview"}
           </Button>
+          <Button type="button" variant="outline" onClick={onPing} disabled={pinging}>
+            {pinging ? "Checking…" : "Test KicksDB"}
+          </Button>
         </div>
 
+        {ping && (
+          <p className={ping.ok ? "text-sm text-emerald-600" : "text-sm text-rose-600"}>{ping.message}</p>
+        )}
         {error && <p className="text-sm text-rose-600">{error}</p>}
       </form>
 
@@ -163,6 +180,12 @@ export function PreviewWorkspace({ defaultMarket }: { defaultMarket: string }) {
             <Badge variant="noop">{totals.noop} noop</Badge>
             <span className="ml-2 text-neutral-500">{selectedCount} selected for apply</span>
           </div>
+
+          {stats && (
+            <p className="text-xs text-neutral-500">
+              {stats.products} product(s) · {stats.fromCache} from cache · {stats.fetched} fetched live
+            </p>
+          )}
 
           {plans.map((p) => (
             <PreviewTable

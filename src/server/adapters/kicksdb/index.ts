@@ -9,6 +9,7 @@ export function getSource(config: AppConfig): KicksDbSource {
     baseUrl: env.KICKS_BASE_URL,
     apiKey: env.KICKS_SECRET,
     batchChunkSize: config.source.batchChunkSize,
+    query: config.source.query,
     retry: { attempts: config.apply.retry.attempts, backoffMs: config.apply.retry.backoffMs, timeoutMs: 20_000 },
   });
 }

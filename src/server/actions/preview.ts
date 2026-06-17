@@ -6,6 +6,8 @@ import { getActiveConfig } from "@/server/config/repo";
 import { getSource } from "@/server/adapters/kicksdb";
 import { getMappingsForVariants } from "@/server/mappings/repo";
 import { savePlan } from "@/server/plans/repo";
+import { getCache } from "@/server/cache/redis";
+import { fetchPricesCached, fetchProductsCached } from "@/server/kicks/service";
 import type { PreviewPlan } from "@/lib/plan";
 
 const InputSchema = z
@@ -22,10 +24,17 @@ const InputSchema = z
 
 export type PreviewInput = z.infer<typeof InputSchema>;
 
+export interface FetchStats {
+  products: number;
+  fromCache: number;
+  fetched: number;
+}
+
 export interface PreviewResult {
   ok: boolean;
   error?: string;
   plans: PreviewPlan[];
+  stats?: FetchStats;
 }
 
 /**
@@ -42,15 +51,17 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const config = await getActiveConfig();
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
+  const cache = getCache();
+  const ttl = config.source.cacheTtlSeconds;
 
   try {
-    const products =
+    const result =
       parsed.data.mode === "skus"
-        ? await source.getPricesBatch(parsed.data.skus!, market)
-        : await source.getProduct(parsed.data.query!, market);
+        ? await fetchPricesCached(source, cache, parsed.data.skus!, market, ttl)
+        : await fetchProductsCached(source, cache, parsed.data.query!, market, ttl);
 
     const out: PreviewPlan[] = [];
-    for (const product of products) {
+    for (const product of result.products) {
       const mappings = await getMappingsForVariants(
         product.variants.map((v) => v.stockxVariantId),
       );
@@ -58,7 +69,11 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
       const { id, summary } = await savePlan(plan, market);
       out.push({ planId: id, market, plan, summary });
     }
-    return { ok: true, plans: out };
+    return {
+      ok: true,
+      plans: out,
+      stats: { products: result.products.length, fromCache: result.fromCache, fetched: result.fetched },
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e), plans: [] };
   }
