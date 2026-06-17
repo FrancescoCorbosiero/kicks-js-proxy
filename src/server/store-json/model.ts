@@ -11,6 +11,7 @@ const VariationSchema = z.looseObject({
   id: z.number(),
   sku: z.string().nullish(),
   regular_price: z.string().nullish(),
+  global_unique_id: z.string().nullish(),
   attributes: z.looseObject({}).nullish(),
 });
 
@@ -33,6 +34,7 @@ export interface StoreVariation {
   id: number;
   sku?: string | null;
   regular_price?: string | null;
+  global_unique_id?: string | null;
   attributes?: Record<string, unknown> | null;
   [k: string]: unknown;
 }

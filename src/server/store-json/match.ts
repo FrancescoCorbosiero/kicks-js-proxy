@@ -49,16 +49,23 @@ export function resolveFromModel(
   const prod = model.products.find((p) => skuKey(p.sku) === skuKey(product.sku));
   if (!prod) return map;
 
+  // Index variations by GTIN (global_unique_id) and by EU size.
+  const byGtin = new Map<string, StoreVariation>();
   const bySize = new Map<string, StoreVariation>();
   for (const vrt of prod.variations) {
+    if (vrt.global_unique_id) byGtin.set(vrt.global_unique_id, vrt);
     const e = variationEuSize(prod.sku, vrt);
     if (e && !bySize.has(e)) bySize.set(e, vrt);
   }
 
   for (const v of product.variants) {
-    const e = sourceEuSize(v);
-    if (!e) continue;
-    const vrt = bySize.get(e);
+    // Prefer GTIN when both sides have it (robust across size-label drift);
+    // otherwise fall back to EU size.
+    let vrt = v.upc ? byGtin.get(v.upc) : undefined;
+    if (!vrt) {
+      const e = sourceEuSize(v);
+      if (e) vrt = bySize.get(e);
+    }
     if (!vrt) continue;
     map.set(v.stockxVariantId, {
       stockxVariantId: v.stockxVariantId,

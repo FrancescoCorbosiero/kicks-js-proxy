@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getActiveSnapshot } from "@/server/store-json/repo";
-import { applyPricesToModel } from "@/server/store-json/patch";
+import { applyModelPatch, type VariationPatch } from "@/server/store-json/patch";
 import { getPlanById } from "@/server/plans/repo";
 
 const ExportInputSchema = z.object({
@@ -17,7 +17,12 @@ export interface ExportResult {
   error?: string;
   json?: string;
   filename?: string;
-  summary?: { productsChanged: number; variationsChanged: number; unmatched: number };
+  summary?: {
+    productsChanged: number;
+    variationsChanged: number;
+    gtinsWritten: number;
+    unmatched: number;
+  };
 }
 
 /**
@@ -32,7 +37,7 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
   const snapshot = await getActiveSnapshot();
   if (!snapshot) return { ok: false, error: "No store snapshot — upload your store JSON first." };
 
-  const changes = new Map<number, number>();
+  const patches = new Map<number, VariationPatch>();
   let unmatched = 0;
 
   for (const sel of parsed.data.selections) {
@@ -45,19 +50,22 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
         if (item.action === "create") unmatched += 1;
         continue;
       }
-      if (item.storeVariationId != null && item.proposedPrice != null) {
-        changes.set(item.storeVariationId, item.proposedPrice);
-      }
+      if (item.storeVariationId == null || item.proposedPrice == null) continue;
+      // Reprice + stamp the GTIN (for GMC) on the same matched variation.
+      patches.set(item.storeVariationId, { price: item.proposedPrice, gtin: item.upc ?? undefined });
     }
   }
 
-  const { output, productsChanged, variationsChanged } = applyPricesToModel(snapshot, changes);
+  const { output, productsChanged, variationsChanged, gtinsWritten } = applyModelPatch(
+    snapshot,
+    patches,
+  );
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
 
   return {
     ok: true,
     json: JSON.stringify(output, null, 2),
     filename: `repriced-${stamp}.json`,
-    summary: { productsChanged, variationsChanged, unmatched },
+    summary: { productsChanged, variationsChanged, gtinsWritten, unmatched },
   };
 }

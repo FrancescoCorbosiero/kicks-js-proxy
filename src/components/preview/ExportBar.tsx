@@ -22,7 +22,7 @@ export function ExportBar({ selections }: Props) {
   const [pending, start] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [summary, setSummary] = React.useState<
-    { productsChanged: number; variationsChanged: number; unmatched: number } | null
+    { productsChanged: number; variationsChanged: number; gtinsWritten: number; unmatched: number } | null
   >(null);
 
   const totalSelected = selections.reduce((n, s) => n + s.variantIds.length, 0);
@@ -57,6 +57,9 @@ export function ExportBar({ selections }: Props) {
         <div className="mt-2 flex flex-wrap items-center gap-x-4 text-sm">
           <span className="font-medium">{summary.variationsChanged} variations repriced</span>
           <span className="text-neutral-500">{summary.productsChanged} products in file</span>
+          {summary.gtinsWritten > 0 && (
+            <span className="text-emerald-700">{summary.gtinsWritten} GTINs written</span>
+          )}
           {summary.unmatched > 0 && (
             <span className="text-amber-700">{summary.unmatched} not on store (create)</span>
           )}

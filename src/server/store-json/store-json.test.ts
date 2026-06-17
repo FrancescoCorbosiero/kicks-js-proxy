@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import { parseStoreModel, type StoreModel } from "./model";
 import { resolveFromModel, normSize, variationEuSize } from "./match";
-import { applyPricesToModel } from "./patch";
+import { applyModelPatch } from "./patch";
 
 const model: StoreModel = {
   format: "rp_cm_roundtrip",
@@ -91,26 +91,43 @@ describe("resolveFromModel", () => {
   });
 });
 
-describe("applyPricesToModel", () => {
-  it("patches only changed variations, keeps changed products, preserves other fields", () => {
-    const { output, productsChanged, variationsChanged } = applyPricesToModel(
+describe("applyModelPatch", () => {
+  it("patches price + GTIN, keeps changed products, preserves other fields", () => {
+    const { output, productsChanged, variationsChanged, gtinsWritten } = applyModelPatch(
       model,
-      new Map([[334133, 248.99]]),
+      new Map([[334133, { price: 248.99, gtin: "00194501234567" }]]),
     );
     expect(variationsChanged).toBe(1);
     expect(productsChanged).toBe(1);
+    expect(gtinsWritten).toBe(1);
     expect(output.products).toHaveLength(1);
 
     const prod = output.products[0];
     expect(prod.meta_title).toBe("Nike Travis Scott Shy Pink | Sneaker Originali 2026"); // SEO preserved
     const changed = prod.variations.find((v) => v.id === 334133)!;
     expect(changed.regular_price).toBe("248.99");
+    expect(changed.global_unique_id).toBe("00194501234567"); // GMC GTIN written
     expect(changed.stock_quantity).toBe(25); // untouched
   });
 
   it("does not mutate the input snapshot", () => {
-    applyPricesToModel(model, new Map([[334133, 1]]));
+    applyModelPatch(model, new Map([[334133, { price: 1 }]]));
     expect(model.products[0].variations[0].regular_price).toBe("566.03");
+  });
+});
+
+describe("resolveFromModel — GTIN-first matching", () => {
+  it("prefers global_unique_id over EU size when both sides have a GTIN", () => {
+    const m: StoreModel = structuredClone(model);
+    // Give the 42 variation a GTIN and make the source variant carry it, but with
+    // a mismatched EU size so only GTIN could link them.
+    m.products[0].variations[1].global_unique_id = "GTIN-42";
+    const src = source();
+    src.variants[1].upc = "GTIN-42";
+    src.variants[1].sizes = [{ system: "eu", size: "99" }]; // wrong size on purpose
+
+    const map = resolveFromModel(m, src);
+    expect(map.get("v-42")?.storeVariationId).toBe(334132); // matched by GTIN, not size
   });
 });
 
