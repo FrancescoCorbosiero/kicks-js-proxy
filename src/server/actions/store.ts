@@ -17,8 +17,20 @@ export async function uploadStoreSnapshot(text: string): Promise<UploadResult> {
     const info = await getSnapshotInfo();
     return { ok: true, info: info ?? undefined };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: describeError(e) };
   }
+}
+
+/** Surface the real Postgres cause (drizzle wraps it) and hint at the fix. */
+function describeError(e: unknown): string {
+  const cause = (e as { cause?: { message?: string; code?: string } })?.cause;
+  const code = cause?.code;
+  const message = cause?.message ?? (e instanceof Error ? e.message : String(e));
+  // 42P01 = undefined_table -> migrations not applied yet.
+  if (code === "42P01" || /relation .* does not exist/i.test(message)) {
+    return "Database not migrated: the store_snapshot table is missing. Run `npm run db:migrate`, then retry.";
+  }
+  return message;
 }
 
 export async function snapshotInfo(): Promise<SnapshotInfo | null> {
