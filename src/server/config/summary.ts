@@ -1,9 +1,13 @@
 import type { AppConfig } from "@core/config";
 
+export type RoundingMode = "none" | "integer" | "charm" | "nearest";
+
 export interface PricingSummary {
   markupPercent: number | null;
   vatRatePercent: number | null;
-  rounding: string | null;
+  roundingMode: RoundingMode | null;
+  increment: number | null;
+  minAsks: number | null;
   hasGuardrail: boolean;
 }
 
@@ -13,7 +17,9 @@ export function pricingSummary(cfg: AppConfig): PricingSummary {
   return {
     markupPercent: r?.markupPercent ?? null,
     vatRatePercent: r?.tax?.vatRatePercent ?? null,
-    rounding: r?.rounding ? `${r.rounding.mode}${r.rounding.increment ? ` ${r.rounding.increment}` : ""}` : null,
+    roundingMode: r?.rounding?.mode ?? null,
+    increment: r?.rounding?.increment ?? null,
+    minAsks: r?.minAsks ?? null,
     hasGuardrail: cfg.pricingRules.some((x) => x.maxDeltaPercent != null),
   };
 }

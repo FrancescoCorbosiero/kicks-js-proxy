@@ -41,3 +41,20 @@ export function stripSecrets(cfg: AppConfig): AppConfig {
 export async function clearConfig(): Promise<void> {
   await db.delete(configTable);
 }
+
+/** Persist edits to the active config (secrets stripped); insert if none exists. */
+export async function saveActiveConfig(cfg: AppConfig): Promise<void> {
+  const rows = await db
+    .select({ id: configTable.id })
+    .from(configTable)
+    .where(eq(configTable.isActive, true))
+    .limit(1);
+  if (rows.length) {
+    await db
+      .update(configTable)
+      .set({ data: stripSecrets(cfg), updatedAt: new Date() })
+      .where(eq(configTable.id, rows[0].id));
+  } else {
+    await db.insert(configTable).values({ name: "default", data: stripSecrets(cfg), isActive: true });
+  }
+}

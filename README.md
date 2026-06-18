@@ -44,8 +44,8 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 ## Pricing config
 
 Defaults in `src/server/config/defaults.ts` (general rule: 17% markup, 22% VAT, charm
-`.99`). Seeded into Postgres on first run; to pick up edits, re-seed:
-`psql "$DATABASE_URL" -c "delete from config;"` then reload. (A config UI is M4.)
+`.99`, no delta cap). Edit markup / VAT / rounding / minAsks live from the **Pricing**
+bar on `/preview` (saved to Postgres), or **Reset** it back to the defaults — no SQL.
 
 ## Scripts
 

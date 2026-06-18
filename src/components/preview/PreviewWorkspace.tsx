@@ -11,8 +11,8 @@ import {
 } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch } from "@/server/actions/debug";
-import { resetPricingToDefaults } from "@/server/actions/config";
-import type { PricingSummary } from "@/server/config/summary";
+import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
+import type { PricingSummary, RoundingMode } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -59,11 +59,49 @@ export function PreviewWorkspace({
   const [diagPending, startDiag] = React.useTransition();
   const [price, setPrice] = React.useState<PricingSummary>(pricing);
   const [resetting, startReset] = React.useTransition();
+  const [editing, setEditing] = React.useState(false);
+  const [saving, startSave] = React.useTransition();
+
+  // Draft fields for the pricing editor (strings so inputs stay controlled).
+  const [dMarkup, setDMarkup] = React.useState("");
+  const [dVat, setDVat] = React.useState("");
+  const [dRounding, setDRounding] = React.useState<RoundingMode>("charm");
+  const [dIncrement, setDIncrement] = React.useState("");
+  const [dMinAsks, setDMinAsks] = React.useState("");
+
+  function openEditor() {
+    setDMarkup(String(price.markupPercent ?? 0));
+    setDVat(String(price.vatRatePercent ?? 0));
+    setDRounding(price.roundingMode ?? "charm");
+    setDIncrement(price.increment != null ? String(price.increment) : "");
+    setDMinAsks(String(price.minAsks ?? 0));
+    setEditing(true);
+  }
+
+  function savePricing() {
+    startSave(async () => {
+      const res = await updatePricing({
+        markupPercent: Number(dMarkup),
+        vatRatePercent: Number(dVat),
+        roundingMode: dRounding,
+        increment: dIncrement.trim() === "" ? undefined : Number(dIncrement),
+        minAsks: Number(dMinAsks),
+      });
+      if (!res.ok || !res.summary) {
+        setError(res.error ?? "Could not save pricing");
+        return;
+      }
+      setPrice(res.summary);
+      setEditing(false);
+      if (hasSnapshot && plans.length > 0) loadFromStore(); // recompute with new pricing
+    });
+  }
 
   function onResetPricing() {
     startReset(async () => {
       const next = await resetPricingToDefaults();
       setPrice(next);
+      setEditing(false);
       if (hasSnapshot && plans.length > 0) loadFromStore(); // recompute with new pricing
     });
   }
@@ -183,24 +221,72 @@ export function PreviewWorkspace({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm">
-        <span className="font-semibold">Pricing</span>
-        <span className="text-neutral-500">
-          {price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup"}
-          {price.vatRatePercent ? ` · ${price.vatRatePercent}% VAT` : ""}
-          {price.rounding ? ` · round ${price.rounding}` : ""}
-          {` · ${price.hasGuardrail ? "delta guardrail on" : "no delta cap (KicksDB wins)"}`}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onResetPricing}
-          disabled={resetting}
-          className="ml-auto text-neutral-600"
-        >
-          {resetting ? "Resetting…" : "Reset to defaults"}
-        </Button>
+      <div className="rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold">Pricing</span>
+          <span className="text-neutral-500">
+            {price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup"}
+            {price.vatRatePercent ? ` · ${price.vatRatePercent}% VAT` : ""}
+            {price.roundingMode
+              ? ` · round ${price.roundingMode}${price.increment != null ? ` ${price.increment}` : ""}`
+              : ""}
+            {price.minAsks != null ? ` · minAsks ${price.minAsks}` : ""}
+            {` · ${price.hasGuardrail ? "delta guardrail on" : "no delta cap"}`}
+          </span>
+          <div className="ml-auto flex gap-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
+              {editing ? "Cancel" : "Edit"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onResetPricing}
+              disabled={resetting}
+              className="text-neutral-600"
+            >
+              {resetting ? "Resetting…" : "Reset"}
+            </Button>
+          </div>
+        </div>
+
+        {editing && (
+          <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-neutral-200 pt-3">
+            <div className="space-y-1">
+              <Label htmlFor="p-markup">Markup %</Label>
+              <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="p-vat">VAT %</Label>
+              <Input id="p-vat" className="w-24" value={dVat} onChange={(e) => setDVat(e.target.value)} inputMode="decimal" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="p-round">Rounding</Label>
+              <select
+                id="p-round"
+                value={dRounding}
+                onChange={(e) => setDRounding(e.target.value as RoundingMode)}
+                className="h-9 rounded-md border border-neutral-300 bg-white px-2 text-sm"
+              >
+                <option value="none">none</option>
+                <option value="integer">integer</option>
+                <option value="charm">charm (.99)</option>
+                <option value="nearest">nearest</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="p-inc">Increment</Label>
+              <Input id="p-inc" className="w-24" placeholder="0.99 / 5" value={dIncrement} onChange={(e) => setDIncrement(e.target.value)} inputMode="decimal" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="p-min">Min asks</Label>
+              <Input id="p-min" className="w-20" value={dMinAsks} onChange={(e) => setDMinAsks(e.target.value)} inputMode="numeric" />
+            </div>
+            <Button type="button" onClick={savePricing} disabled={saving}>
+              {saving ? "Saving…" : "Save & recompute"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <StoreSnapshotPanel
