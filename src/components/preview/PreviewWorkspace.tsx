@@ -11,6 +11,8 @@ import {
 } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch } from "@/server/actions/debug";
+import { resetPricingToDefaults } from "@/server/actions/config";
+import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -31,9 +33,11 @@ const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 export function PreviewWorkspace({
   defaultMarket,
   snapshotInfo,
+  pricing,
 }: {
   defaultMarket: string;
   snapshotInfo: SnapshotInfo | null;
+  pricing: PricingSummary;
 }) {
   const [mode, setMode] = React.useState<Mode>("skus");
   const [skusText, setSkusText] = React.useState("");
@@ -53,6 +57,16 @@ export function PreviewWorkspace({
   const [storeCount, setStoreCount] = React.useState(snapshotInfo?.productCount ?? 0);
   const [diag, setDiag] = React.useState<string | null>(null);
   const [diagPending, startDiag] = React.useTransition();
+  const [price, setPrice] = React.useState<PricingSummary>(pricing);
+  const [resetting, startReset] = React.useTransition();
+
+  function onResetPricing() {
+    startReset(async () => {
+      const next = await resetPricingToDefaults();
+      setPrice(next);
+      if (hasSnapshot && plans.length > 0) loadFromStore(); // recompute with new pricing
+    });
+  }
 
   function onDiagnose() {
     setDiag(null);
@@ -169,6 +183,26 @@ export function PreviewWorkspace({
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm">
+        <span className="font-semibold">Pricing</span>
+        <span className="text-neutral-500">
+          {price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup"}
+          {price.vatRatePercent ? ` · ${price.vatRatePercent}% VAT` : ""}
+          {price.rounding ? ` · round ${price.rounding}` : ""}
+          {` · ${price.hasGuardrail ? "delta guardrail on" : "no delta cap (KicksDB wins)"}`}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onResetPricing}
+          disabled={resetting}
+          className="ml-auto text-neutral-600"
+        >
+          {resetting ? "Resetting…" : "Reset to defaults"}
+        </Button>
+      </div>
+
       <StoreSnapshotPanel
         initialInfo={snapshotInfo}
         onLoaded={(info) => {

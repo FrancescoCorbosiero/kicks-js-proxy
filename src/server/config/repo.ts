@@ -36,3 +36,8 @@ export function stripSecrets(cfg: AppConfig): AppConfig {
     },
   };
 }
+
+/** Delete all stored config rows so the next read re-seeds from defaults.ts. */
+export async function clearConfig(): Promise<void> {
+  await db.delete(configTable);
+}
