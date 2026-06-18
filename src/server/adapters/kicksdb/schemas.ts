@@ -39,6 +39,8 @@ export const KicksVariantSchema = z.object({
   sizes: z.array(SizeSchema).nullish().transform(undef),
   identifiers: z.array(IdentifierSchema).nullish().transform(undef),
   prices: z.array(PriceSchema).nullish().transform(undef),
+  lowest_ask: z.number().nullish().transform(undef),
+  total_asks: z.number().nullish().transform(undef),
   currency: z.string().nullish().transform(undef),
   market: z.string().nullish().transform(undef),
 });

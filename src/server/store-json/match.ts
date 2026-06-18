@@ -3,10 +3,15 @@ import { euSize } from "@/lib/sizes";
 import { skuKey } from "@/lib/skus";
 import type { StoreModel, StoreVariation } from "./model";
 
-/** Canonical numeric size key: "35-5" -> "35.5", "42.5" -> "42.5", "44" -> "44". */
+/**
+ * Canonical numeric size key, tolerant of prefixes and dash-decimals:
+ *   "EU 38.5" -> "38.5", "US M 6" -> "6", "40-5" -> "40.5", "42.5" -> "42.5".
+ */
 export function normSize(s: string | null | undefined): string | null {
   if (s == null) return null;
-  const n = Number.parseFloat(String(s).trim().replace(",", ".").replace("-", "."));
+  const m = String(s).match(/\d+(?:[.,-]\d+)?/);
+  if (!m) return null;
+  const n = Number.parseFloat(m[0].replace(",", ".").replace("-", "."));
   return Number.isNaN(n) ? null : String(n);
 }
 

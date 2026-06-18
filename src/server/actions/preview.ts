@@ -5,13 +5,12 @@ import { buildPlan } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource } from "@/server/adapters/kicksdb";
 import { getActiveSnapshot } from "@/server/store-json/repo";
-import { resolveFromModel } from "@/server/store-json/match";
+import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
 import { savePlan } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
-import { euSize } from "@/lib/sizes";
 import { isExactMatch } from "@/lib/match";
 import type { PreviewPlan } from "@/lib/plan";
 
@@ -62,7 +61,7 @@ async function assemblePlans(
 
     const euSizes: Record<string, string> = {};
     for (const v of product.variants) {
-      const eu = euSize(v.sizes);
+      const eu = sourceEuSize(v); // normalized number, e.g. "42.5"
       if (eu) euSizes[v.stockxVariantId] = eu;
     }
 

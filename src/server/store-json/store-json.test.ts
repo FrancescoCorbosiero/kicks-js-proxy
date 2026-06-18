@@ -44,17 +44,18 @@ function source(): SourceProduct {
     currency: "EUR",
     variants: [
       {
+        // Real KicksDB shape: size strings are prefixed, e.g. "EU 42.5".
         stockxVariantId: "v-425",
         sizeLabel: "9",
         sizeType: "us m",
-        sizes: [{ system: "us m", size: "9" }, { system: "eu", size: "42.5" }],
+        sizes: [{ system: "us m", size: "US M 9" }, { system: "eu", size: "EU 42.5" }],
         offers: [{ deliveryType: "standard", lowestAsk: 200, asks: 5 }],
       },
       {
         stockxVariantId: "v-42",
         sizeLabel: "8.5",
         sizeType: "us m",
-        sizes: [{ system: "eu", size: "42" }],
+        sizes: [{ system: "eu", size: "EU 42" }],
         offers: [],
       },
     ],
@@ -62,10 +63,12 @@ function source(): SourceProduct {
 }
 
 describe("normSize / variationEuSize", () => {
-  it("normalizes dash and dot size notations to one key", () => {
+  it("normalizes dash, dot, and prefixed notations to one key", () => {
     expect(normSize("42-5")).toBe("42.5");
     expect(normSize("42.5")).toBe("42.5");
     expect(normSize("44")).toBe("44");
+    expect(normSize("EU 42.5")).toBe("42.5"); // KicksDB prefix
+    expect(normSize("US M 9")).toBe("9");
   });
   it("derives EU size from the sku suffix, falling back to pa_taglia", () => {
     expect(variationEuSize("IQ7604-100", { id: 1, sku: "IQ7604-100-42.5" })).toBe("42.5");

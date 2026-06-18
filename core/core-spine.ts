@@ -77,6 +77,8 @@ interface KicksVariantRaw {
     sizes?: KicksSizeRaw[] | null;
     identifiers?: { identifier: string; identifier_type: string }[] | null;
     prices?: { price: number; asks: number; type: DeliveryType }[] | null;
+    lowest_ask?: number | null;   // variant-level ask on the products/search endpoint
+    total_asks?: number | null;
     currency?: string;
     market?: string;
 }
@@ -88,6 +90,23 @@ const normalizeSizes = (v: KicksVariantRaw): SourceSize[] =>
             size: String(s.size ?? s.value ?? "").trim(),
         }))
         .filter((s) => s.size.length > 0);
+
+/**
+ * Build offers from the per-delivery-type prices[] when present; otherwise fall
+ * back to the variant-level lowest_ask/total_asks (the products/search endpoint
+ * carries the ask there, with prices[] often empty).
+ */
+const normalizeOffers = (v: KicksVariantRaw): PriceOffer[] => {
+    const offers = (v.prices ?? []).map((p) => ({
+        deliveryType: p.type,
+        lowestAsk: p.price,
+        asks: p.asks,
+    }));
+    if (offers.length === 0 && v.lowest_ask != null && v.lowest_ask > 0) {
+        return [{ deliveryType: "standard", lowestAsk: v.lowest_ask, asks: v.total_asks ?? 0 }];
+    }
+    return offers;
+};
 interface KicksProductRaw {
     id: string;
     sku: string;
@@ -107,11 +126,7 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         sizeType: v.size_type,
         sizes: normalizeSizes(v),
         upc: pickUpc(v),
-        offers: (v.prices ?? []).map((p) => ({
-            deliveryType: p.type,
-            lowestAsk: p.price,
-            asks: p.asks,
-        })),
+        offers: normalizeOffers(v),
     }));
     const currency = raw.variants?.[0]?.currency ?? "EUR";
     return {
@@ -147,11 +162,7 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
         sizeType: v.size_type,
         sizes: normalizeSizes(v),
         upc: pickUpc(v),
-        offers: (v.prices ?? []).map((p) => ({
-            deliveryType: p.type,
-            lowestAsk: p.price,
-            asks: p.asks,
-        })),
+        offers: normalizeOffers(v),
     }));
     const currency = raw.variants?.[0]?.currency ?? "EUR";
     return {
