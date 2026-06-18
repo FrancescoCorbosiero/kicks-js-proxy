@@ -89,7 +89,17 @@ export class KicksDbSource implements SourcePort {
       "display[variants]": String(d.variants),
       "display[identifiers]": String(d.identifiers),
       "display[prices]": String(d.prices),
+      "display[sizes]": "true",
     };
+  }
+
+  /** Raw, unparsed products response — for diagnostics only. */
+  async fetchProductsRaw(query: string, market: string): Promise<unknown> {
+    return requestJson(
+      this.url("stockx/products", { query, market, limit: "1", ...this.displayParams() }),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
   }
 
   /**

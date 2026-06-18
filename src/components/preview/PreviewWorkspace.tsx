@@ -10,6 +10,7 @@ import {
   type FetchStats,
 } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
+import { debugMatch } from "@/server/actions/debug";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -50,6 +51,16 @@ export function PreviewWorkspace({
   const [pinging, startPing] = React.useTransition();
   const [hasSnapshot, setHasSnapshot] = React.useState(!!snapshotInfo);
   const [storeCount, setStoreCount] = React.useState(snapshotInfo?.productCount ?? 0);
+  const [diag, setDiag] = React.useState<string | null>(null);
+  const [diagPending, startDiag] = React.useTransition();
+
+  function onDiagnose() {
+    setDiag(null);
+    startDiag(async () => {
+      const res = await debugMatch();
+      setDiag(res.ok ? (res.json ?? "") : `Error: ${res.error}`);
+    });
+  }
 
   function onPing() {
     setPing(null);
@@ -184,7 +195,23 @@ export function PreviewWorkspace({
           >
             {pending ? "Fetching…" : plans.length > 0 ? "Refresh from file" : "Fetch & preview"}
           </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onDiagnose}
+            disabled={diagPending}
+            className="text-neutral-300 hover:bg-white/10 hover:text-white"
+          >
+            {diagPending ? "…" : "Diagnose matching"}
+          </Button>
         </div>
+      )}
+
+      {diag && (
+        <pre className="max-h-96 overflow-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
+          {diag}
+        </pre>
       )}
 
       <details className="group rounded-xl border border-neutral-200 bg-white shadow-sm">
