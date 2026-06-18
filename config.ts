@@ -10,7 +10,7 @@
  * computePrice()/buildPlan() consume.
  */
 
-import type { DeliveryType, SourceProduct, SourceVariant } from "./core-spine";
+import type { DeliveryType, SourceProduct, SourceVariant } from "./core/core-spine";
 
 /* ------------------------------------------------------------------ */
 /* A. SOURCE / FETCH                                                   */

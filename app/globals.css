@@ -1,0 +1,251 @@
+/* ============================================================================
+   Kicks Repricer — Design System
+   A single source of truth for tokens, primitives, and motion.
+   Dark-first, with a light theme via [data-theme="light"].
+   ========================================================================== */
+
+/* ----- Tokens ------------------------------------------------------------- */
+:root {
+  /* Brand accent — electric lime, the "kicks" energy */
+  --accent: #c8f250;
+  --accent-strong: #b6e62e;
+  --accent-ink: #14210a;
+  --accent-glow: color-mix(in oklab, var(--accent) 40%, transparent);
+
+  /* Semantic */
+  --up: #ff6b5d;        /* price increase */
+  --down: #4fd6a8;      /* price decrease */
+  --warn: #f4c152;
+  --info: #6aa9ff;
+
+  /* Radii */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --fast: 130ms;
+  --med: 240ms;
+  --slow: 420ms;
+
+  /* Typography */
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+}
+
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
+  --bg: #0a0c0b;
+  --bg-elev: #111513;
+  --surface: #141917;
+  --surface-2: #1a201d;
+  --surface-hover: #1f2723;
+  --line: color-mix(in oklab, #ffffff 9%, transparent);
+  --line-strong: color-mix(in oklab, #ffffff 16%, transparent);
+  --ink: #eef2ee;
+  --ink-2: #aab4ad;
+  --ink-3: #6f7a74;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 30px -12px rgba(0, 0, 0, 0.7);
+  --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.8);
+  --grid: color-mix(in oklab, #ffffff 3.5%, transparent);
+  color-scheme: dark;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --bg: #f4f6f3;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f6f8f4;
+  --surface-hover: #eef2ec;
+  --line: color-mix(in oklab, #0a0c0b 10%, transparent);
+  --line-strong: color-mix(in oklab, #0a0c0b 18%, transparent);
+  --ink: #131815;
+  --ink-2: #4f5a53;
+  --ink-3: #8a958d;
+  --accent-ink: #1a2b08;
+  --shadow-1: 0 1px 2px rgba(20, 30, 22, 0.06);
+  --shadow-2: 0 12px 30px -14px rgba(20, 30, 22, 0.18);
+  --shadow-pop: 0 24px 60px -18px rgba(20, 30, 22, 0.22);
+  --grid: color-mix(in oklab, #0a0c0b 3%, transparent);
+  color-scheme: light;
+}
+
+/* ----- Reset -------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+* {
+  margin: 0;
+  padding: 0;
+}
+html,
+body {
+  height: 100%;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background var(--med) var(--ease), color var(--med) var(--ease);
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+::selection {
+  background: var(--accent-glow);
+  color: var(--ink);
+}
+
+/* Ambient page backdrop: subtle grid + accent bloom */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(120% 90% at 78% -10%, #000 0%, transparent 62%);
+  pointer-events: none;
+}
+body::after {
+  content: "";
+  position: fixed;
+  top: -18%;
+  right: -8%;
+  width: 46vw;
+  height: 46vw;
+  z-index: -1;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 66%);
+  opacity: 0.5;
+  filter: blur(28px);
+  pointer-events: none;
+}
+
+/* ----- Scrollbar ---------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+}
+
+/* ----- Numbers ------------------------------------------------------------ */
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ----- Motion primitives -------------------------------------------------- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
