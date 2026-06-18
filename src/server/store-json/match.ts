@@ -28,6 +28,12 @@ function parsePrice(s?: string | null): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+/** A variation is on a manual discount when it has a positive sale_price. */
+function hasActiveSale(s?: string | null): boolean {
+  const n = parsePrice(s);
+  return n != null && n > 0;
+}
+
 /** EU size of a StockX variant: from the size conversions, or the label if the
  *  variant's own system is already EU. */
 export function sourceEuSize(v: SourceVariant): string | null {
@@ -84,6 +90,7 @@ export function resolveFromModel(
       storeProductId: prod.id,
       storeVariationId: vrt.id,
       currentPrice: parsePrice(vrt.regular_price),
+      saleActive: hasActiveSale(vrt.sale_price),
     });
   }
   return map;

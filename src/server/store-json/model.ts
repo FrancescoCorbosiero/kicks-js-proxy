@@ -34,6 +34,7 @@ export interface StoreVariation {
   id: number;
   sku?: string | null;
   regular_price?: string | null;
+  sale_price?: string | null;
   global_unique_id?: string | null;
   attributes?: Record<string, unknown> | null;
   [k: string]: unknown;

@@ -54,6 +54,14 @@ describe("buildPlan", () => {
     expect(plan.items[0]).toMatchObject({ action: "update", currentPrice: 90, proposedPrice: 100 });
   });
 
+  it("skip — discounted variation is left untouched (sale price wins)", () => {
+    const cfg = makeConfig([flatRule()]);
+    const map = new Map([["v1", { ...mapping(11, 90), saleActive: true }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0].action).toBe("skip");
+    expect(plan.items[0].reason).toContain("discounted");
+  });
+
   it("skip — change exceeds maxDeltaPercent guardrail", () => {
     const cfg = makeConfig([flatRule({ maxDeltaPercent: 5 })]);
     const map = new Map([["v1", mapping(11, 90)]]); // 90 -> 100 is ~11% > 5%

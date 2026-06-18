@@ -287,6 +287,7 @@ export interface VariantMapping {
     storeProductId: number;
     storeVariationId: number;
     currentPrice: number | null;
+    saleActive?: boolean; // store variation has a manual discount (sale_price) -> preserve it
 }
 
 export function buildPlan(
@@ -309,6 +310,10 @@ export function buildPlan(
         if (!m) {
             // Not on the store yet -> upsert path would create it.
             return baseItem(v, undefined, proposed, "create");
+        }
+        if (m.saleActive) {
+            // Owner-set discount wins: leave the variation untouched entirely.
+            return baseItem(v, m, proposed, "skip", "discounted — sale price preserved");
         }
         if (m.currentPrice === proposed) {
             return baseItem(v, m, proposed, "noop");

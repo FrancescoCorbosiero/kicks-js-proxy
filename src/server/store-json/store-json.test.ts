@@ -85,6 +85,7 @@ describe("resolveFromModel", () => {
       storeProductId: 334121,
       storeVariationId: 334133,
       currentPrice: 566.03,
+      saleActive: false,
     });
     expect(map.get("v-42")?.storeVariationId).toBe(334132);
   });
@@ -92,6 +93,14 @@ describe("resolveFromModel", () => {
   it("returns empty when the parent SKU is not in the snapshot", () => {
     const other = { ...source(), sku: "ZZ0000-000" };
     expect(resolveFromModel(model, other).size).toBe(0);
+  });
+
+  it("flags variations with an active sale_price as saleActive", () => {
+    const m: StoreModel = structuredClone(model);
+    m.products[0].variations[0].sale_price = "499.99"; // the EU 42.5 variation
+    const map = resolveFromModel(m, source());
+    expect(map.get("v-425")?.saleActive).toBe(true);
+    expect(map.get("v-42")?.saleActive).toBe(false); // no sale
   });
 });
 
