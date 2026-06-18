@@ -145,14 +145,27 @@ export async function previewFromStore(marketOverride?: string): Promise<Preview
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
 
+  // Structure (EU sizes, variant ids, metadata) is cached long-term — it rarely
+  // changes — while prices are refreshed every run via the fast bulk endpoint.
+  const STRUCTURE_TTL = 30 * 24 * 3600;
+
   try {
-    const result = await resolveSkusViaCatalog(
-      source,
-      dbCatalogStore,
-      skus,
-      market,
-      config.source.cacheTtlSeconds,
-    );
+    const result = await resolveSkusViaCatalog(source, dbCatalogStore, skus, market, STRUCTURE_TTL);
+
+    // Refresh prices via POST /stockx/prices (50 SKUs/call) and merge by variant id.
+    try {
+      const priceMap = await source.getBulkPriceMap(skus, market);
+      for (const product of result.products) {
+        for (const v of product.variants) {
+          const offers = priceMap.get(v.stockxVariantId);
+          if (offers) v.offers = offers;
+        }
+      }
+    } catch (e) {
+      // Best-effort: fall back to catalog prices if the bulk endpoint fails.
+      console.warn("[preview] bulk price refresh failed, using catalog prices:", errMessage(e));
+    }
+
     const plans = await assemblePlans(result.products, config, snapshot, market, null);
     return {
       ok: true,

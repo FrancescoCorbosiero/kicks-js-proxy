@@ -2,6 +2,7 @@ import "server-only";
 import {
   mapKicksPrices,
   mapKicksProduct,
+  type PriceOffer,
   type SourcePort,
   type SourceProduct,
 } from "@core/core-spine";
@@ -91,6 +92,18 @@ export class KicksDbSource implements SourcePort {
       "display[prices]": String(d.prices),
       "display[sizes]": "true",
     };
+  }
+
+  /**
+   * Fast price refresh via the batch endpoint: offers keyed by StockX variant id
+   * (chunked at 50 SKUs/call). Merge onto cached product structure for speed.
+   */
+  async getBulkPriceMap(skus: string[], market: string): Promise<Map<string, PriceOffer[]>> {
+    const map = new Map<string, PriceOffer[]>();
+    for (const p of await this.getPricesBatch(skus, market)) {
+      for (const v of p.variants) map.set(v.stockxVariantId, v.offers);
+    }
+    return map;
   }
 
   /** Raw, unparsed products response — for diagnostics only. */

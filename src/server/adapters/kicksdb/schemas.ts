@@ -66,15 +66,23 @@ export const KicksProductsResponseSchema = z.object({
 });
 
 // --- POST /stockx/prices -----------------------------------------------------
-// Flatter: priced variants grouped by product, product metadata may be absent.
+// Flat: each variant carries id/size/size_type and price/asks/type directly
+// (one row per delivery type). No nested prices[]; product id is `product_id`.
+
+const BulkVariantSchema = z.object({
+  id: z.string(),
+  size: z.string(),
+  size_type: z.string(),
+  sizes: z.array(SizeSchema).nullish().transform(undef), // present only with show_sizes
+  price: z.number().nullish().transform(undef),
+  asks: z.number().nullish().transform(undef),
+  type: DeliveryTypeSchema.nullish().transform(undef),
+});
 
 export const KicksPricesProductSchema = z.object({
-  id: z.string(),
+  product_id: z.string(),
   sku: z.string().nullish().transform(undef),
-  title: z.string().nullish().transform(undef),
-  brand: z.string().nullish().transform(undef),
-  image: z.string().nullish().transform(undef),
-  variants: z.array(KicksVariantSchema).nullish().transform(undef),
+  variants: z.array(BulkVariantSchema).nullish().transform(undef),
 });
 
 export const KicksPricesResponseSchema = z.object({

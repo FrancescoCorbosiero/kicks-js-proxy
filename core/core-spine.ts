@@ -83,7 +83,7 @@ interface KicksVariantRaw {
     market?: string;
 }
 
-const normalizeSizes = (v: KicksVariantRaw): SourceSize[] =>
+const normalizeSizes = (v: { sizes?: KicksSizeRaw[] | null }): SourceSize[] =>
     (v.sizes ?? [])
         .map((s) => ({
             system: String(s.size_type ?? s.type ?? s.system ?? "").toLowerCase().trim(),
@@ -144,35 +144,53 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
 // at the variant level, no nested product fields). The sibling mapKicksPrices()
 // below produces the same SourceVariant[]; everything downstream is identical.
 
-/** Raw shape of the batch-prices endpoint: priced variants grouped by product,
- *  but product metadata (title/brand/image/sku) may be absent. Validate w/ Zod. */
-interface KicksPricesProductRaw {
+/** Raw shape of the batch-prices endpoint: product_id + flat variant rows, each
+ *  carrying price/asks/type directly (one row per delivery type, no prices[]). */
+interface KicksBulkVariantRaw {
     id: string;
+    size: string;
+    size_type: string;
+    sizes?: KicksSizeRaw[] | null;
+    price?: number | null;
+    asks?: number | null;
+    type?: DeliveryType | null;
+}
+interface KicksPricesProductRaw {
+    product_id: string;
     sku?: string;
-    title?: string;
-    brand?: string;
-    image?: string;
-    variants?: KicksVariantRaw[];
+    variants?: KicksBulkVariantRaw[];
 }
 
 export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): SourceProduct {
-    const variants = (raw.variants ?? []).map<SourceVariant>((v) => ({
-        stockxVariantId: v.id,
-        sizeLabel: v.size,
-        sizeType: v.size_type,
-        sizes: normalizeSizes(v),
-        upc: pickUpc(v),
-        offers: normalizeOffers(v),
-    }));
-    const currency = raw.variants?.[0]?.currency ?? "EUR";
+    // The flat rows may repeat a variant id once per delivery type -> group them.
+    const byId = new Map<string, KicksBulkVariantRaw[]>();
+    for (const v of raw.variants ?? []) {
+        const list = byId.get(v.id) ?? [];
+        list.push(v);
+        byId.set(v.id, list);
+    }
+
+    const variants = [...byId.values()].map<SourceVariant>((rows) => {
+        const first = rows[0];
+        return {
+            stockxVariantId: first.id,
+            sizeLabel: first.size,
+            sizeType: first.size_type,
+            sizes: normalizeSizes(first),
+            offers: rows
+                .filter((r) => r.price != null && r.type != null)
+                .map((r) => ({ deliveryType: r.type!, lowestAsk: r.price!, asks: r.asks ?? 0 })),
+        };
+    });
+
     return {
-        stockxId: raw.id,
+        stockxId: raw.product_id,
         sku: raw.sku ?? "",
-        title: raw.title ?? "",
-        brand: raw.brand ?? "",
-        image: raw.image ?? "",
+        title: "",
+        brand: "",
+        image: "",
         market,
-        currency,
+        currency: "EUR",
         variants,
     };
 }
