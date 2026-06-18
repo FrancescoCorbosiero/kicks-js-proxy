@@ -73,3 +73,24 @@ export async function debugMatch(): Promise<DebugResult> {
     return { ok: false, error: cause?.message ?? (e instanceof Error ? e.message : String(e)) };
   }
 }
+
+/**
+ * Dump the RAW batch-prices response for the first few snapshot SKUs, so we can
+ * wire POST /stockx/prices correctly (the fast path for large files).
+ */
+export async function debugBulkPrices(): Promise<DebugResult> {
+  const config = await getActiveConfig();
+  const snapshot = await getActiveSnapshot();
+  if (!snapshot || snapshot.products.length === 0) {
+    return { ok: false, error: "No store snapshot loaded." };
+  }
+  const skus = snapshot.products.slice(0, 5).map((p) => p.sku).filter(Boolean);
+  const source = getSource(config);
+  try {
+    const raw = await source.fetchPricesRaw(skus, config.source.market);
+    return { ok: true, json: JSON.stringify({ requestedSkus: skus, market: config.source.market, raw }, null, 2) };
+  } catch (e) {
+    const cause = (e as { cause?: { message?: string } })?.cause;
+    return { ok: false, error: cause?.message ?? (e instanceof Error ? e.message : String(e)) };
+  }
+}

@@ -102,6 +102,19 @@ export class KicksDbSource implements SourcePort {
     );
   }
 
+  /** Raw, unparsed batch-prices response — for diagnostics only. */
+  async fetchPricesRaw(skus: string[], market: string): Promise<unknown> {
+    return requestJson(
+      this.url("stockx/prices"),
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ market, skus: skus.slice(0, 5), show_sizes: true }),
+      },
+      this.retry,
+    );
+  }
+
   /**
    * GET /stockx/products. Follows pagination (meta.current_page/per_page/total)
    * up to `maxPages` so a query can return more than one page of products.

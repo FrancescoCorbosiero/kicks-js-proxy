@@ -10,7 +10,7 @@ import {
   type FetchStats,
 } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
-import { debugMatch } from "@/server/actions/debug";
+import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
 import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
 import type { PricingSummary, RoundingMode } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
@@ -110,6 +110,14 @@ export function PreviewWorkspace({
     setDiag(null);
     startDiag(async () => {
       const res = await debugMatch();
+      setDiag(res.ok ? (res.json ?? "") : `Error: ${res.error}`);
+    });
+  }
+
+  function onBulkSample() {
+    setDiag(null);
+    startDiag(async () => {
+      const res = await debugBulkPrices();
       setDiag(res.ok ? (res.json ?? "") : `Error: ${res.error}`);
     });
   }
@@ -324,6 +332,16 @@ export function PreviewWorkspace({
             className="text-neutral-300 hover:bg-white/10 hover:text-white"
           >
             {diagPending ? "…" : "Diagnose matching"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onBulkSample}
+            disabled={diagPending}
+            className="text-neutral-300 hover:bg-white/10 hover:text-white"
+          >
+            {diagPending ? "…" : "Test bulk prices"}
           </Button>
         </div>
       )}
