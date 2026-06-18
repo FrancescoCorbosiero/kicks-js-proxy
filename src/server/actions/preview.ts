@@ -12,6 +12,7 @@ import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
 import { isExactMatch } from "@/lib/match";
+import { skuKey } from "@/lib/skus";
 import type { PreviewPlan } from "@/lib/plan";
 
 const InputSchema = z
@@ -145,37 +146,25 @@ export async function previewFromStore(marketOverride?: string): Promise<Preview
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
 
-  // Structure (EU sizes, variant ids, metadata) is cached long-term — it rarely
-  // changes — while prices are refreshed every run via the fast bulk endpoint.
-  const STRUCTURE_TTL = 30 * 24 * 3600;
-
   try {
-    const result = await resolveSkusViaCatalog(source, dbCatalogStore, skus, market, STRUCTURE_TTL);
-
-    // Refresh prices via POST /stockx/prices (50 SKUs/call) and merge by variant id.
-    try {
-      const priceMap = await source.getBulkPriceMap(skus, market);
-      for (const product of result.products) {
-        for (const v of product.variants) {
-          const offers = priceMap.get(v.stockxVariantId);
-          if (offers) v.offers = offers;
-        }
-      }
-    } catch (e) {
-      // Best-effort: fall back to catalog prices if the bulk endpoint fails.
-      console.warn("[preview] bulk price refresh failed, using catalog prices:", errMessage(e));
+    // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
+    // 50 SKUs -> a 1000-SKU file is ~20 calls, cold or warm. Product names come
+    // from the snapshot (the bulk response carries no title/brand).
+    const products = await source.getPricesBatch(skus, market);
+    const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
+    for (const p of products) {
+      const name = nameBySku.get(skuKey(p.sku));
+      if (name) p.title = name;
     }
 
-    const plans = await assemblePlans(result.products, config, snapshot, market, null);
+    const returned = new Set(products.map((p) => skuKey(p.sku)));
+    const notFound = skus.filter((s) => !returned.has(skuKey(s)));
+
+    const plans = await assemblePlans(products, config, snapshot, market, null);
     return {
       ok: true,
       plans,
-      stats: {
-        products: result.products.length,
-        fromCache: result.fromCache,
-        fetched: result.fetched,
-        notFound: result.notFound,
-      },
+      stats: { products: products.length, fromCache: 0, fetched: products.length, notFound },
     };
   } catch (e) {
     return { ok: false, error: errMessage(e), plans: [] };

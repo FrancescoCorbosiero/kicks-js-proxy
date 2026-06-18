@@ -78,20 +78,46 @@ describe("mapKicksProduct size normalization", () => {
     });
   });
 
-  it("groups repeated variant ids (one row per delivery type) into one variant", () => {
+  it("groups repeated variant ids and drops 0-price (no-ask) tiers", () => {
     const sp = mapKicksPrices(
       {
         product_id: "p",
         sku: "X",
         variants: [
-          { id: "v1", size: "9", size_type: "us m", price: 200, asks: 3, type: "standard" },
-          { id: "v1", size: "9", size_type: "us m", price: 240, asks: 1, type: "express_standard" },
+          // express tiers with no ask (price 0) + a real standard ask
+          { id: "v1", size: "4", size_type: "us m", price: 0, asks: 0, type: "express_expedited" },
+          { id: "v1", size: "4", size_type: "us m", price: 0, asks: 0, type: "express_standard" },
+          { id: "v1", size: "4", size_type: "us m", price: 253, asks: 5, type: "standard" },
         ],
       },
       "IT",
     );
     expect(sp.variants).toHaveLength(1);
-    expect(sp.variants[0].offers).toHaveLength(2);
+    expect(sp.variants[0].offers).toEqual([
+      { deliveryType: "standard", lowestAsk: 253, asks: 5 },
+    ]);
+  });
+
+  it("keeps the EU conversion from bulk sizes[] for matching", () => {
+    const sp = mapKicksPrices(
+      {
+        product_id: "p",
+        sku: "X",
+        variants: [
+          {
+            id: "v1",
+            size: "4",
+            size_type: "us m",
+            sizes: [{ size: "EU 36", type: "eu" }],
+            price: 253,
+            asks: 5,
+            type: "standard",
+          },
+        ],
+      },
+      "IT",
+    );
+    expect(sp.variants[0].sizes).toContainEqual({ system: "eu", size: "EU 36" });
   });
 
   it("yields an empty sizes array when none are provided", () => {

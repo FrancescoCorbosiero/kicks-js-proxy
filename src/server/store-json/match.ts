@@ -4,12 +4,19 @@ import { skuKey } from "@/lib/skus";
 import type { StoreModel, StoreVariation } from "./model";
 
 /**
- * Canonical numeric size key, tolerant of prefixes and dash-decimals:
- *   "EU 38.5" -> "38.5", "US M 6" -> "6", "40-5" -> "40.5", "42.5" -> "42.5".
+ * Canonical numeric size key, tolerant of prefixes, dash-decimals and mixed
+ * fractions: "EU 38.5" -> "38.5", "US M 6" -> "6", "40-5" -> "40.5",
+ * "EU 36 2/3" -> "36.67".
  */
 export function normSize(s: string | null | undefined): string | null {
   if (s == null) return null;
-  const m = String(s).match(/\d+(?:[.,-]\d+)?/);
+  const str = String(s);
+  const frac = str.match(/(\d+)\s+(\d+)\/(\d+)/); // mixed fraction "36 2/3"
+  if (frac) {
+    const v = Number(frac[1]) + Number(frac[2]) / Number(frac[3]);
+    return String(Math.round(v * 100) / 100);
+  }
+  const m = str.match(/\d+(?:[.,-]\d+)?/);
   if (!m) return null;
   const n = Number.parseFloat(m[0].replace(",", ".").replace("-", "."));
   return Number.isNaN(n) ? null : String(n);

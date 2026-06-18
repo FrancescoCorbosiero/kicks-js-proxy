@@ -69,6 +69,7 @@ describe("normSize / variationEuSize", () => {
     expect(normSize("44")).toBe("44");
     expect(normSize("EU 42.5")).toBe("42.5"); // KicksDB prefix
     expect(normSize("US M 9")).toBe("9");
+    expect(normSize("EU 36 2/3")).toBe("36.67"); // mixed fraction
   });
   it("derives EU size from the sku suffix, falling back to pa_taglia", () => {
     expect(variationEuSize("IQ7604-100", { id: 1, sku: "IQ7604-100-42.5" })).toBe("42.5");

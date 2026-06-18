@@ -177,8 +177,9 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
             sizeLabel: first.size,
             sizeType: first.size_type,
             sizes: normalizeSizes(first),
+            // price 0 == no ask at that delivery tier (e.g. express rows) -> drop.
             offers: rows
-                .filter((r) => r.price != null && r.type != null)
+                .filter((r) => r.type != null && r.price != null && r.price > 0)
                 .map((r) => ({ deliveryType: r.type!, lowestAsk: r.price!, asks: r.asks ?? 0 })),
         };
     });
