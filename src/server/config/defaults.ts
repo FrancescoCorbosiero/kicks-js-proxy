@@ -28,7 +28,9 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         minAsks: 1,
         rounding: { mode: "charm", increment: 0.99 },
         tax: { priceIncludesVat: true, vatRatePercent: 22 },
-        maxDeltaPercent: 40,
+        // No maxDeltaPercent by default: the KicksDB price always wins, regardless
+        // of how far it is from the current store price. Add one per rule if you
+        // want a guardrail against big jumps.
       },
     ],
     matching: {
