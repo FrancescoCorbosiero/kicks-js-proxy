@@ -2,7 +2,13 @@
 
 import * as React from "react";
 import type { PlanItem } from "@core/core-spine";
-import { fetchAndPreview, type PreviewInput, type FetchStats } from "@/server/actions/preview";
+import {
+  fetchAndPreview,
+  previewFromStore,
+  type PreviewInput,
+  type PreviewResult,
+  type FetchStats,
+} from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
@@ -42,10 +48,36 @@ export function PreviewWorkspace({
 
   const [ping, setPing] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [pinging, startPing] = React.useTransition();
+  const [hasSnapshot, setHasSnapshot] = React.useState(!!snapshotInfo);
+  const [storeCount, setStoreCount] = React.useState(snapshotInfo?.productCount ?? 0);
 
   function onPing() {
     setPing(null);
     startPing(async () => setPing(await pingKicksDb()));
+  }
+
+  /** Apply a preview result to state. selectAll = pre-select all actionable rows. */
+  function applyResult(res: PreviewResult, selectAll: boolean) {
+    if (!res.ok) {
+      setError(res.error ?? "Unknown error");
+      setPlans([]);
+      setStats(null);
+      setSelected(new Set());
+      return;
+    }
+    const next = new Set<string>();
+    if (selectAll) {
+      for (const p of res.plans) {
+        for (const item of p.plan.items) {
+          if (isActionable(item.action)) next.add(selKey(p.planId, item.stockxVariantId));
+        }
+      }
+    }
+    setError(null);
+    setStats(res.stats ?? null);
+    setPlans(res.plans);
+    setSelected(next);
+    setAllOpen(res.plans.length <= 3); // auto-expand only for small result sets
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -56,31 +88,15 @@ export function PreviewWorkspace({
         ? { mode, skus: parseSkus(skusText), market }
         : { mode, query: query.trim(), market };
 
-    startTransition(async () => {
-      const res = await fetchAndPreview(input);
-      if (!res.ok) {
-        setError(res.error ?? "Unknown error");
-        setPlans([]);
-        setStats(null);
-        setSelected(new Set());
-        return;
-      }
-      // SKU mode is an explicit list the operator typed -> default to all
-      // actionable selected. Query mode is exploratory -> select nothing; the
-      // operator picks granularly (or uses a quick-select preset).
-      const next = new Set<string>();
-      if (input.mode === "skus") {
-        for (const p of res.plans) {
-          for (const item of p.plan.items) {
-            if (isActionable(item.action)) next.add(selKey(p.planId, item.stockxVariantId));
-          }
-        }
-      }
-      setStats(res.stats ?? null);
-      setPlans(res.plans);
-      setSelected(next);
-      setAllOpen(res.plans.length <= 3); // auto-expand only for small result sets
-    });
+    // SKU mode is an explicit list -> select all actionable. Query mode is
+    // exploratory -> select nothing (operator picks granularly).
+    startTransition(async () => applyResult(await fetchAndPreview(input), input.mode === "skus"));
+  }
+
+  /** Primary workflow: fetch StockX for every SKU in the uploaded store file. */
+  function loadFromStore() {
+    setError(null);
+    startTransition(async () => applyResult(await previewFromStore(market), true));
   }
 
   /** Rebuild the selection from a predicate over (plan, item). Quick-select. */
@@ -142,8 +158,40 @@ export function PreviewWorkspace({
 
   return (
     <div className="space-y-6">
-      <StoreSnapshotPanel initialInfo={snapshotInfo} />
-      <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
+      <StoreSnapshotPanel
+        initialInfo={snapshotInfo}
+        onLoaded={(info) => {
+          setHasSnapshot(true);
+          setStoreCount(info.productCount);
+          loadFromStore(); // auto-fetch StockX for the whole file on upload
+        }}
+      />
+
+      {hasSnapshot && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-neutral-900 bg-neutral-900 p-4 text-white shadow-sm">
+          <div className="text-sm">
+            <span className="font-semibold">Work on your store file</span>
+            <span className="ml-2 text-neutral-300">
+              {storeCount} products — fetch StockX prices and preview the repricing.
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={loadFromStore}
+            disabled={pending}
+            className="ml-auto border-white/30 bg-transparent text-white hover:bg-white/10"
+          >
+            {pending ? "Fetching…" : plans.length > 0 ? "Refresh from file" : "Fetch & preview"}
+          </Button>
+        </div>
+      )}
+
+      <details className="group rounded-xl border border-neutral-200 bg-white shadow-sm">
+        <summary className="cursor-pointer list-none px-5 py-3 text-sm font-medium text-neutral-600 hover:text-neutral-900">
+          Or search manually (by SKU / query)
+        </summary>
+        <form onSubmit={onSubmit} className="space-y-4 border-t border-neutral-200 p-5">
         <div className="inline-flex rounded-lg border border-neutral-200 p-0.5 text-sm">
           {(["skus", "query"] as const).map((m) => (
             <button
@@ -199,11 +247,17 @@ export function PreviewWorkspace({
           </Button>
         </div>
 
-        {ping && (
-          <p className={ping.ok ? "text-sm text-emerald-600" : "text-sm text-rose-600"}>{ping.message}</p>
-        )}
-        {error && <p className="text-sm text-rose-600">{error}</p>}
-      </form>
+          {ping && (
+            <p className={ping.ok ? "text-sm text-emerald-600" : "text-sm text-rose-600"}>{ping.message}</p>
+          )}
+        </form>
+      </details>
+
+      {error && (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </p>
+      )}
 
       {stats?.notFound && stats.notFound.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">

@@ -5,7 +5,13 @@ import { uploadStoreSnapshot } from "@/server/actions/store";
 import type { SnapshotInfo } from "@/server/store-json/repo";
 import { Button } from "@/components/ui/button";
 
-export function StoreSnapshotPanel({ initialInfo }: { initialInfo: SnapshotInfo | null }) {
+export function StoreSnapshotPanel({
+  initialInfo,
+  onLoaded,
+}: {
+  initialInfo: SnapshotInfo | null;
+  onLoaded?: (info: SnapshotInfo) => void;
+}) {
   const [info, setInfo] = React.useState<SnapshotInfo | null>(initialInfo);
   const [open, setOpen] = React.useState(!initialInfo);
   const [error, setError] = React.useState<string | null>(null);
@@ -29,6 +35,7 @@ export function StoreSnapshotPanel({ initialInfo }: { initialInfo: SnapshotInfo 
       setOpen(false);
       setPasteOpen(false);
       setText("");
+      if (res.info) onLoaded?.(res.info);
     });
   }
 

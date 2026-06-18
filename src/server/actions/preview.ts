@@ -44,9 +44,50 @@ export interface PreviewResult {
 }
 
 /**
- * M1 preview: fetch from KicksDB, resolve known mappings from the DB, run
- * buildPlan() per product, persist each plan, and return them for the diff table.
- * No writes to the store.
+ * Build + persist a PreviewPlan per fetched product: match against the store
+ * snapshot, run buildPlan, attach EU sizes and the exact-match flag.
+ */
+async function assemblePlans(
+  products: import("@core/core-spine").SourceProduct[],
+  config: import("@core/config").AppConfig,
+  snapshot: Awaited<ReturnType<typeof getActiveSnapshot>>,
+  market: string,
+  term: string | null,
+): Promise<PreviewPlan[]> {
+  const out: PreviewPlan[] = [];
+  for (const product of products) {
+    const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();
+    const plan = buildPlan(product, config, mappings);
+    const { id, summary } = await savePlan(plan, market);
+
+    const euSizes: Record<string, string> = {};
+    for (const v of product.variants) {
+      const eu = euSize(v.sizes);
+      if (eu) euSizes[v.stockxVariantId] = eu;
+    }
+
+    out.push({
+      planId: id,
+      market,
+      title: product.title,
+      brand: product.brand,
+      plan,
+      summary,
+      euSizes,
+      exactMatch: term ? isExactMatch(term, product.sku, product.title) : false,
+    });
+  }
+  return out;
+}
+
+function errMessage(e: unknown): string {
+  const cause = (e as { cause?: { message?: string } })?.cause;
+  return cause?.message ?? (e instanceof Error ? e.message : String(e));
+}
+
+/**
+ * Manual preview: fetch from KicksDB by SKU list or query, match against the
+ * store snapshot, run buildPlan() per product, persist, return for the table.
  */
 export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResult> {
   const parsed = InputSchema.safeParse(input);
@@ -70,33 +111,10 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
         : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
-
-    const out: PreviewPlan[] = [];
-    for (const product of result.products) {
-      const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();
-      const plan = buildPlan(product, config, mappings);
-      const { id, summary } = await savePlan(plan, market);
-
-      const euSizes: Record<string, string> = {};
-      for (const v of product.variants) {
-        const eu = euSize(v.sizes);
-        if (eu) euSizes[v.stockxVariantId] = eu;
-      }
-
-      out.push({
-        planId: id,
-        market,
-        title: product.title,
-        brand: product.brand,
-        plan,
-        summary,
-        euSizes,
-        exactMatch: term ? isExactMatch(term, product.sku, product.title) : false,
-      });
-    }
+    const plans = await assemblePlans(result.products, config, snapshot, market, term);
     return {
       ok: true,
-      plans: out,
+      plans,
       stats: {
         products: result.products.length,
         fromCache: result.fromCache,
@@ -105,8 +123,49 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
       },
     };
   } catch (e) {
-    const cause = (e as { cause?: { message?: string } })?.cause;
-    const msg = cause?.message ?? (e instanceof Error ? e.message : String(e));
-    return { ok: false, error: msg, plans: [] };
+    return { ok: false, error: errMessage(e), plans: [] };
+  }
+}
+
+/**
+ * File-driven preview: take the SKUs straight from the uploaded store snapshot,
+ * fetch their StockX prices from KicksDB, and preview the whole file at once.
+ * This is the primary workflow — upload a file, work on it immediately.
+ */
+export async function previewFromStore(marketOverride?: string): Promise<PreviewResult> {
+  const config = await getActiveConfig();
+  const snapshot = await getActiveSnapshot();
+  if (!snapshot) {
+    return { ok: false, error: "Upload a store snapshot first.", plans: [] };
+  }
+  const skus = snapshot.products.map((p) => p.sku).filter((s): s is string => !!s);
+  if (skus.length === 0) {
+    return { ok: false, error: "The store snapshot has no products.", plans: [] };
+  }
+
+  const market = marketOverride ?? config.source.market;
+  const source = getSource(config);
+
+  try {
+    const result = await resolveSkusViaCatalog(
+      source,
+      dbCatalogStore,
+      skus,
+      market,
+      config.source.cacheTtlSeconds,
+    );
+    const plans = await assemblePlans(result.products, config, snapshot, market, null);
+    return {
+      ok: true,
+      plans,
+      stats: {
+        products: result.products.length,
+        fromCache: result.fromCache,
+        fetched: result.fetched,
+        notFound: result.notFound,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: errMessage(e), plans: [] };
   }
 }
