@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { Plan, PlanItem } from "@core/core-spine";
 import { isActionable, summarize } from "@/lib/plan";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -14,14 +15,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-function deltaPercent(item: PlanItem): string {
-  if (item.currentPrice == null || item.proposedPrice == null || item.currentPrice === 0) return "—";
+function deltaInfo(item: PlanItem): { text: string; dir: "up" | "down" | "flat" } | null {
+  if (item.currentPrice == null || item.proposedPrice == null || item.currentPrice === 0) return null;
   const d = ((item.proposedPrice - item.currentPrice) / item.currentPrice) * 100;
-  return `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
+  const dir = Math.abs(d) < 0.05 ? "flat" : d > 0 ? "up" : "down";
+  return { text: `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`, dir };
 }
 
 function money(v: number | null, currency: string): string {
   return v == null ? "—" : `${v.toFixed(2)} ${currency}`;
+}
+
+function Delta({ item }: { item: PlanItem }) {
+  const info = deltaInfo(item);
+  if (!info) return <span className="text-faint">—</span>;
+  if (info.dir === "flat") return <span className="tnum text-faint">{info.text}</span>;
+  const up = info.dir === "up";
+  return (
+    <span className={cn("inline-flex items-center justify-end gap-0.5 tnum font-semibold", up ? "text-up" : "text-down")}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="h-3 w-3">
+        {up ? <path d="M12 19V5M6 11l6-6 6 6" /> : <path d="M12 5v14M6 13l6 6 6-6" />}
+      </svg>
+      {info.text}
+    </span>
+  );
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -31,11 +48,18 @@ function Chevron({ open }: { open: boolean }) {
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
-      className={`h-4 w-4 shrink-0 text-neutral-400 transition-transform ${open ? "rotate-90" : ""}`}
+      className={cn("h-4 w-4 shrink-0 text-faint transition-transform duration-200", open && "rotate-90")}
     >
       <path d="m9 18 6-6-6-6" />
     </svg>
   );
+}
+
+function avatarLabel(brand?: string, sku?: string): string {
+  const src = (brand || sku || "?").trim();
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
 }
 
 interface Props {
@@ -74,25 +98,29 @@ export function ProductGroup({
 
   return (
     <div
-      className={`overflow-hidden rounded-lg border bg-white ${
-        highlighted ? "border-neutral-900 ring-1 ring-neutral-900" : "border-neutral-200"
-      }`}
+      className={cn(
+        "overflow-hidden rounded-xl border bg-surface shadow-xs transition-shadow hover:shadow-sm",
+        highlighted ? "border-accent/40 ring-1 ring-accent/30" : "border-line",
+      )}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
           aria-expanded={open}
         >
           <Chevron open={open} />
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface-2 text-[11px] font-extrabold tracking-tight text-muted">
+            {avatarLabel(brand, plan.sku)}
+          </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2 truncate text-sm font-semibold">
               {title || plan.sku || "(no SKU)"}
-              {highlighted && <Badge variant="create">match</Badge>}
+              {highlighted && <Badge variant="accent">exact match</Badge>}
             </div>
-            <div className="truncate text-xs text-neutral-500">
-              {plan.sku}
+            <div className="truncate text-xs text-faint">
+              <span className="font-mono">{plan.sku}</span>
               {brand ? ` · ${brand}` : ""} · {plan.items.length} variants · {plan.currency}
             </div>
           </div>
@@ -103,7 +131,7 @@ export function ProductGroup({
           {s.skip > 0 && <Badge variant="skip">{s.skip} skip</Badge>}
           {s.noop > 0 && <Badge variant="noop">{s.noop} noop</Badge>}
           {actionable.length > 0 && (
-            <span className="ml-1 text-xs text-neutral-500">
+            <span className="ml-1 hidden text-xs font-medium text-muted tnum sm:inline">
               {selectedCount}/{actionable.length} sel
             </span>
           )}
@@ -111,11 +139,11 @@ export function ProductGroup({
       </div>
 
       {open && (
-        <div className="border-t border-neutral-200">
+        <div className="border-t border-line">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-8">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-8 pl-3">
                   <Checkbox
                     aria-label="Select all in product"
                     checked={headState}
@@ -135,42 +163,47 @@ export function ProductGroup({
             <TableBody>
               {plan.items.map((item) => {
                 const can = isActionable(item.action);
+                const isSel = can && selected.has(item.stockxVariantId);
                 return (
-                  <TableRow key={item.stockxVariantId} className={can ? "" : "opacity-60"}>
-                    <TableCell>
+                  <TableRow
+                    key={item.stockxVariantId}
+                    className={cn(
+                      !can && "opacity-55",
+                      isSel && "bg-accent/[0.06] hover:bg-accent/[0.09]",
+                    )}
+                  >
+                    <TableCell className="pl-3">
                       <Checkbox
                         aria-label={`Include ${item.sizeLabel}`}
                         disabled={!can}
-                        checked={can && selected.has(item.stockxVariantId)}
+                        checked={isSel}
                         onCheckedChange={(c) => onToggle(item.stockxVariantId, c === true)}
                       />
                     </TableCell>
                     <TableCell>
                       {euSizes?.[item.stockxVariantId] ? (
                         <span className="flex items-baseline gap-1.5">
-                          <span className="font-medium">EU {euSizes[item.stockxVariantId]}</span>
-                          <span className="text-xs text-neutral-400">({item.sizeLabel})</span>
+                          <span className="font-semibold">EU {euSizes[item.stockxVariantId]}</span>
+                          <span className="text-xs text-faint">({item.sizeLabel})</span>
                         </span>
                       ) : (
-                        <span className="font-medium">{item.sizeLabel}</span>
+                        <span className="font-semibold">{item.sizeLabel}</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-neutral-500">
-                      {item.upc ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className="font-mono text-xs text-faint">{item.upc ?? "—"}</TableCell>
+                    <TableCell className="text-right tnum text-muted">
                       {money(item.currentPrice, plan.currency)}
                     </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
+                    <TableCell className="text-right font-semibold tnum">
                       {money(item.proposedPrice, plan.currency)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-neutral-500">
-                      {deltaPercent(item)}
+                    <TableCell className="text-right">
+                      <Delta item={item} />
                     </TableCell>
                     <TableCell>
                       <Badge variant={item.action}>{item.action}</Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-neutral-500">{item.reason ?? ""}</TableCell>
+                    <TableCell className="text-xs text-faint">{item.reason ?? ""}</TableCell>
                   </TableRow>
                 );
               })}

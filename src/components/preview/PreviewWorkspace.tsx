@@ -16,6 +16,7 @@ import type { PricingSummary, RoundingMode } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -227,39 +228,52 @@ export function PreviewWorkspace({
     }))
     .filter((s) => s.variantIds.length > 0);
 
+  const priceChips: string[] = [
+    price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup",
+    ...(price.vatRatePercent ? [`${price.vatRatePercent}% VAT`] : []),
+    ...(price.roundingMode
+      ? [`round ${price.roundingMode}${price.increment != null ? ` ${price.increment}` : ""}`]
+      : []),
+    ...(price.minAsks != null ? [`minAsks ${price.minAsks}`] : []),
+    price.hasGuardrail ? "delta guardrail on" : "no delta cap",
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold">Pricing</span>
-          <span className="text-neutral-500">
-            {price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup"}
-            {price.vatRatePercent ? ` · ${price.vatRatePercent}% VAT` : ""}
-            {price.roundingMode
-              ? ` · round ${price.roundingMode}${price.increment != null ? ` ${price.increment}` : ""}`
-              : ""}
-            {price.minAsks != null ? ` · minAsks ${price.minAsks}` : ""}
-            {` · ${price.hasGuardrail ? "delta guardrail on" : "no delta cap"}`}
+    <div className="space-y-5">
+      {/* Pricing rule bar */}
+      <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/15 text-accent-text">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[17px] w-[17px]">
+              <path d="M3 6h13M3 12h8M3 18h11" />
+              <circle cx="19" cy="6" r="2" />
+              <circle cx="15" cy="12" r="2" />
+              <circle cx="18" cy="18" r="2" />
+            </svg>
           </span>
+          <span className="text-sm font-semibold">Pricing</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {priceChips.map((c) => (
+              <span
+                key={c}
+                className="rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-muted"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
           <div className="ml-auto flex gap-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
               {editing ? "Cancel" : "Edit"}
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onResetPricing}
-              disabled={resetting}
-              className="text-neutral-600"
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={onResetPricing} disabled={resetting}>
               {resetting ? "Resetting…" : "Reset"}
             </Button>
           </div>
         </div>
 
         {editing && (
-          <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-neutral-200 pt-3">
+          <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3 animate-fade-up">
             <div className="space-y-1">
               <Label htmlFor="p-markup">Markup %</Label>
               <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
@@ -274,7 +288,7 @@ export function PreviewWorkspace({
                 id="p-round"
                 value={dRounding}
                 onChange={(e) => setDRounding(e.target.value as RoundingMode)}
-                className="h-9 rounded-md border border-neutral-300 bg-white px-2 text-sm"
+                className="h-9 rounded-md border border-line bg-surface-2 px-2 text-sm text-ink focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15"
               >
                 <option value="none">none</option>
                 <option value="integer">integer</option>
@@ -307,212 +321,194 @@ export function PreviewWorkspace({
       />
 
       {hasSnapshot && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-neutral-900 bg-neutral-900 p-4 text-white shadow-sm">
+        <div className="relative flex flex-wrap items-center gap-3 overflow-hidden rounded-xl border border-line bg-surface p-4 shadow-xs">
+          <span className="absolute inset-y-0 left-0 w-1 bg-accent" />
           <div className="text-sm">
             <span className="font-semibold">Work on your store file</span>
-            <span className="ml-2 text-neutral-300">
-              {storeCount} products — fetch StockX prices and preview the repricing.
+            <span className="ml-2 text-muted">
+              <span className="tnum">{storeCount}</span> products — fetch StockX prices and preview the repricing.
             </span>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={loadFromStore}
-            disabled={pending}
-            className="ml-auto border-white/30 bg-transparent text-white hover:bg-white/10"
-          >
-            {pending ? "Fetching…" : plans.length > 0 ? "Refresh from file" : "Fetch & preview"}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onDiagnose}
-            disabled={diagPending}
-            className="text-neutral-300 hover:bg-white/10 hover:text-white"
-          >
-            {diagPending ? "…" : "Diagnose matching"}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onBulkSample}
-            disabled={diagPending}
-            className="text-neutral-300 hover:bg-white/10 hover:text-white"
-          >
-            {diagPending ? "…" : "Test bulk prices"}
-          </Button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button type="button" variant="accent" onClick={loadFromStore} disabled={pending}>
+              {pending ? (
+                <>
+                  <span className="spin h-4 w-4 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
+                  Fetching…
+                </>
+              ) : plans.length > 0 ? (
+                "Refresh from file"
+              ) : (
+                "Fetch & preview"
+              )}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onDiagnose} disabled={diagPending}>
+              {diagPending ? "…" : "Diagnose matching"}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onBulkSample} disabled={diagPending}>
+              {diagPending ? "…" : "Test bulk prices"}
+            </Button>
+          </div>
         </div>
       )}
 
       {diag && (
-        <pre className="max-h-96 overflow-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
+        <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-surface-2 p-3 font-mono text-xs text-muted">
           {diag}
         </pre>
       )}
 
-      <details className="group rounded-xl border border-neutral-200 bg-white shadow-sm">
-        <summary className="cursor-pointer list-none px-5 py-3 text-sm font-medium text-neutral-600 hover:text-neutral-900">
-          Or search manually (by SKU / query)
+      <details className="group rounded-xl border border-line bg-surface shadow-xs">
+        <summary className="cursor-pointer list-none px-5 py-3 text-sm font-medium text-muted transition-colors hover:text-ink">
+          <span className="inline-flex items-center gap-2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 text-faint transition-transform group-open:rotate-90">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+            Or search manually (by SKU / query)
+          </span>
         </summary>
-        <form onSubmit={onSubmit} className="space-y-4 border-t border-neutral-200 p-5">
-        <div className="inline-flex rounded-lg border border-neutral-200 p-0.5 text-sm">
-          {(["skus", "query"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
-                mode === m ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"
-              }`}
-            >
-              {m === "skus" ? "By SKUs" : "By query"}
-            </button>
-          ))}
-        </div>
+        <form onSubmit={onSubmit} className="space-y-4 border-t border-line p-5">
+          <div className="inline-flex rounded-lg border border-line bg-surface-2 p-0.5 text-sm">
+            {(["skus", "query"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium transition-colors",
+                  mode === m ? "bg-surface text-ink shadow-xs" : "text-muted hover:text-ink",
+                )}
+              >
+                {m === "skus" ? "By SKUs" : "By query"}
+              </button>
+            ))}
+          </div>
 
-        {mode === "skus" ? (
-          <div className="space-y-1.5">
-            <Label htmlFor="skus">StockX style codes (comma / space / newline separated)</Label>
-            <Textarea
-              id="skus"
-              placeholder="CT8012-047, DZ5485-612"
-              value={skusText}
-              onChange={(e) => setSkusText(e.target.value)}
-            />
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            <Label htmlFor="query">Search query</Label>
-            <Input
-              id="query"
-              placeholder="Jordan 1 Bred Toe"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-        )}
+          {mode === "skus" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="skus">StockX style codes (comma / space / newline separated)</Label>
+              <Textarea
+                id="skus"
+                placeholder="CT8012-047, DZ5485-612"
+                value={skusText}
+                onChange={(e) => setSkusText(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="query">Search query</Label>
+              <Input
+                id="query"
+                placeholder="Jordan 1 Bred Toe"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          )}
 
-        <div className="flex items-end gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="market">Market</Label>
-            <Input
-              id="market"
-              className="w-24"
-              value={market}
-              onChange={(e) => setMarket(e.target.value.toUpperCase())}
-            />
+          <div className="flex items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="market">Market</Label>
+              <Input
+                id="market"
+                className="w-24"
+                value={market}
+                onChange={(e) => setMarket(e.target.value.toUpperCase())}
+              />
+            </div>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Fetching…" : "Fetch & preview"}
+            </Button>
+            <Button type="button" variant="outline" onClick={onPing} disabled={pinging}>
+              {pinging ? "Checking…" : "Test KicksDB"}
+            </Button>
           </div>
-          <Button type="submit" disabled={pending}>
-            {pending ? "Fetching…" : "Fetch & preview"}
-          </Button>
-          <Button type="button" variant="outline" onClick={onPing} disabled={pinging}>
-            {pinging ? "Checking…" : "Test KicksDB"}
-          </Button>
-        </div>
 
           {ping && (
-            <p className={ping.ok ? "text-sm text-emerald-600" : "text-sm text-rose-600"}>{ping.message}</p>
+            <p className={cn("text-sm", ping.ok ? "text-down" : "text-skip")}>{ping.message}</p>
           )}
         </form>
       </details>
 
       {error && (
-        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <p className="rounded-lg border border-skip/25 bg-skip/10 px-4 py-3 text-sm text-skip animate-fade-up">
           {error}
         </p>
       )}
 
       {stats?.notFound && stats.notFound.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span className="font-medium">Not found on StockX:</span> {stats.notFound.join(", ")}
+        <div className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm text-warn animate-fade-up">
+          <span className="font-semibold">Not found on StockX:</span> {stats.notFound.join(", ")}
         </div>
       )}
 
       {plans.length > 0 && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm shadow-sm">
-            <span className="font-semibold">{plans.length} products</span>
-            <span className="text-neutral-300">·</span>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-xs">
+            <span className="font-semibold tnum">{plans.length} products</span>
+            <span className="text-line-strong">·</span>
             <Badge variant="update">{totals.update} update</Badge>
             <Badge variant="create">{totals.create} create</Badge>
             <Badge variant="skip">{totals.skip} skip</Badge>
             <Badge variant="noop">{totals.noop} noop</Badge>
-            <span className="ml-1 text-neutral-500">{selectedCount} selected for apply</span>
+            <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-accent/12 px-2.5 py-0.5 text-xs font-semibold text-accent-text">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+              <span className="tnum">{selectedCount}</span> selected
+            </span>
             {stats && (
-              <span className="ml-auto text-xs text-neutral-400">
+              <span className="ml-auto text-xs text-faint tnum">
                 {stats.fromCache} cached · {stats.fetched} fetched live
               </span>
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setAllOpen((o) => !o)}
-              className="text-neutral-600"
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAllOpen((o) => !o)} className={stats ? "" : "ml-auto"}>
               {allOpen ? "Collapse all" : "Expand all"}
             </Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 px-1 text-sm">
-            <span className="mr-1 text-xs font-medium text-neutral-500">Quick select:</span>
+            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-faint">Quick select</span>
             <Button type="button" variant="outline" size="sm" onClick={() => selectWhere(() => true)}>
               All ({totals.update + totals.create})
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => setSelected(new Set())}>
               None
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => selectWhere((_, i) => i.action === "update")}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((_, i) => i.action === "update")}>
               Updates ({totals.update})
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => selectWhere((_, i) => i.action === "create")}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((_, i) => i.action === "create")}>
               New ({totals.create})
             </Button>
             {plans.some((p) => p.exactMatch) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => selectWhere((p) => p.exactMatch)}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((p) => p.exactMatch)}>
                 Exact match
               </Button>
             )}
           </div>
 
-          {plans.map((p) => (
-            <ProductGroup
-              // Re-mount on allOpen change so expand/collapse-all propagates.
-              key={`${p.planId}-${allOpen}`}
-              plan={p.plan}
-              title={p.title}
-              brand={p.brand}
-              euSizes={p.euSizes}
-              highlighted={p.exactMatch}
-              defaultOpen={allOpen}
-              selected={
-                new Set(
-                  p.plan.items
-                    .filter((i) => selected.has(selKey(p.planId, i.stockxVariantId)))
-                    .map((i) => i.stockxVariantId),
-                )
-              }
-              onToggle={(variantId, checked) => toggle(p.planId, variantId, checked)}
-              onToggleAll={(checked) => toggleAll(p, checked)}
-            />
-          ))}
+          <div className="space-y-3 stagger">
+            {plans.map((p) => (
+              <ProductGroup
+                // Re-mount on allOpen change so expand/collapse-all propagates.
+                key={`${p.planId}-${allOpen}`}
+                plan={p.plan}
+                title={p.title}
+                brand={p.brand}
+                euSizes={p.euSizes}
+                highlighted={p.exactMatch}
+                defaultOpen={allOpen}
+                selected={
+                  new Set(
+                    p.plan.items
+                      .filter((i) => selected.has(selKey(p.planId, i.stockxVariantId)))
+                      .map((i) => i.stockxVariantId),
+                  )
+                }
+                onToggle={(variantId, checked) => toggle(p.planId, variantId, checked)}
+                onToggleAll={(checked) => toggleAll(p, checked)}
+              />
+            ))}
+          </div>
 
           <ExportBar selections={applySelections} />
         </div>
