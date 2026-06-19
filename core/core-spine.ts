@@ -12,6 +12,9 @@
  * TODOs to your HTTP client and DB.
  */
 
+import type { AppConfig, EffectivePricingRule, MatchingConfig } from "./config";
+import { resolveEffectiveRule } from "./config";
+
 /* ========================================================================== *
  * 1. DOMAIN MODEL  (the shared language; sources and stores map to/from this)
  * ========================================================================== */
@@ -25,11 +28,18 @@ export interface PriceOffer {
     asks: number;      // depth, useful for "don't reprice on thin liquidity" rules
 }
 
+/** One size in a particular sizing system (e.g. { system: "eu", size: "42.5" }). */
+export interface SourceSize {
+    system: string;           // normalized lowercase: "us m", "eu", "uk", "cm", ...
+    size: string;             // e.g. "42.5"
+}
+
 /** One size variant of a product, as seen on the source (StockX via KicksDB). */
 export interface SourceVariant {
     stockxVariantId: string;
-    sizeLabel: string;        // e.g. "3.5"
+    sizeLabel: string;        // e.g. "3.5" (the variant's primary/default system)
     sizeType: string;         // e.g. "us m"
+    sizes?: SourceSize[];     // all known conversions (EU/UK/CM/...), when provided
     upc?: string;             // join key against Woo's global_unique_id
     offers: PriceOffer[];     // empty if the variant has no asks
 }
@@ -50,16 +60,53 @@ export interface SourceProduct {
  * 2. KICKSDB MAPPING  (raw API JSON -> domain). Validate with Zod upstream.
  * ========================================================================== */
 
+/** Loose shape of a size-conversion entry; KicksDB key names vary, so be tolerant. */
+interface KicksSizeRaw {
+    size?: string | number;
+    value?: string | number;
+    size_type?: string;
+    type?: string;
+    system?: string;
+}
+
 /** Minimal shape of the KicksDB product-endpoint variant we depend on. */
 interface KicksVariantRaw {
     id: string;
     size: string;
     size_type: string;
+    sizes?: KicksSizeRaw[] | null;
     identifiers?: { identifier: string; identifier_type: string }[] | null;
     prices?: { price: number; asks: number; type: DeliveryType }[] | null;
+    lowest_ask?: number | null;   // variant-level ask on the products/search endpoint
+    total_asks?: number | null;
     currency?: string;
     market?: string;
 }
+
+const normalizeSizes = (v: { sizes?: KicksSizeRaw[] | null }): SourceSize[] =>
+    (v.sizes ?? [])
+        .map((s) => ({
+            system: String(s.size_type ?? s.type ?? s.system ?? "").toLowerCase().trim(),
+            size: String(s.size ?? s.value ?? "").trim(),
+        }))
+        .filter((s) => s.size.length > 0);
+
+/**
+ * Build offers from the per-delivery-type prices[] when present; otherwise fall
+ * back to the variant-level lowest_ask/total_asks (the products/search endpoint
+ * carries the ask there, with prices[] often empty).
+ */
+const normalizeOffers = (v: KicksVariantRaw): PriceOffer[] => {
+    const offers = (v.prices ?? []).map((p) => ({
+        deliveryType: p.type,
+        lowestAsk: p.price,
+        asks: p.asks,
+    }));
+    if (offers.length === 0 && v.lowest_ask != null && v.lowest_ask > 0) {
+        return [{ deliveryType: "standard", lowestAsk: v.lowest_ask, asks: v.total_asks ?? 0 }];
+    }
+    return offers;
+};
 interface KicksProductRaw {
     id: string;
     sku: string;
@@ -77,12 +124,9 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         stockxVariantId: v.id,
         sizeLabel: v.size,
         sizeType: v.size_type,
+        sizes: normalizeSizes(v),
         upc: pickUpc(v),
-        offers: (v.prices ?? []).map((p) => ({
-            deliveryType: p.type,
-            lowestAsk: p.price,
-            asks: p.asks,
-        })),
+        offers: normalizeOffers(v),
     }));
     const currency = raw.variants?.[0]?.currency ?? "EUR";
     return {
@@ -97,14 +141,71 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
     };
 }
 // NOTE: the batch-prices endpoint returns a flatter variant shape (price/asks/type
-// at the variant level, no nested product fields). Add a sibling mapKicksPrices()
-// that produces the same SourceVariant[]; everything downstream is identical.
+// at the variant level, no nested product fields). The sibling mapKicksPrices()
+// below produces the same SourceVariant[]; everything downstream is identical.
+
+/** Raw shape of the batch-prices endpoint: product_id + flat variant rows, each
+ *  carrying price/asks/type directly (one row per delivery type, no prices[]). */
+interface KicksBulkVariantRaw {
+    id: string;
+    size: string;
+    size_type: string;
+    sizes?: KicksSizeRaw[] | null;
+    price?: number | null;
+    asks?: number | null;
+    type?: DeliveryType | null;
+}
+interface KicksPricesProductRaw {
+    product_id: string;
+    sku?: string;
+    variants?: KicksBulkVariantRaw[];
+}
+
+export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): SourceProduct {
+    // The flat rows may repeat a variant id once per delivery type -> group them.
+    const byId = new Map<string, KicksBulkVariantRaw[]>();
+    for (const v of raw.variants ?? []) {
+        const list = byId.get(v.id) ?? [];
+        list.push(v);
+        byId.set(v.id, list);
+    }
+
+    const variants = [...byId.values()].map<SourceVariant>((rows) => {
+        const first = rows[0];
+        return {
+            stockxVariantId: first.id,
+            sizeLabel: first.size,
+            sizeType: first.size_type,
+            sizes: normalizeSizes(first),
+            // price 0 == no ask at that delivery tier (e.g. express rows) -> drop.
+            offers: rows
+                .filter((r) => r.type != null && r.price != null && r.price > 0)
+                .map((r) => ({ deliveryType: r.type!, lowestAsk: r.price!, asks: r.asks ?? 0 })),
+        };
+    });
+
+    return {
+        stockxId: raw.product_id,
+        sku: raw.sku ?? "",
+        title: "",
+        brand: "",
+        image: "",
+        market,
+        currency: "EUR",
+        variants,
+    };
+}
 
 /* ========================================================================== *
  * 3. PRICING-RULE ENGINE  (ask -> your retail price). This is mandatory:
  *    the API gives raw asks, never your shelf price.
  * ========================================================================== */
 
+/**
+ * Legacy flat rule shape. Retained for back-compat / readability; the canonical
+ * input to computePrice() is `EffectivePricingRule` (config.ts), produced per
+ * variant by resolveEffectiveRule().
+ */
 export interface PricingRule {
     sourceDeliveryType: DeliveryType; // which offer to read from
     markupPercent: number;            // e.g. 12 => +12%
@@ -113,20 +214,45 @@ export interface PricingRule {
     rounding: "none" | "integer" | "charm"; // charm => .99
 }
 
-/** Returns the proposed retail price, or null if the rule says "don't price". */
-export function computePrice(variant: SourceVariant, rule: PricingRule): number | null {
+/** Apply a RoundingConfig (mode + increment) to a price. */
+export function roundPrice(price: number, rounding: EffectivePricingRule["rounding"]): number {
+    switch (rounding.mode) {
+        case "integer":
+            return Math.round(price);
+        case "charm": {
+            // increment is the charm tail, e.g. .99 => floor + .99, .95 => floor + .95
+            const tail = rounding.increment ?? 0.99;
+            return Math.floor(price) + tail;
+        }
+        case "nearest": {
+            // increment is the step, e.g. 5 => nearest multiple of 5
+            const step = rounding.increment ?? 1;
+            return step > 0 ? Math.round(price / step) * step : price;
+        }
+        case "none":
+        default:
+            return Math.round(price * 100) / 100;
+    }
+}
+
+/**
+ * Returns the proposed retail price for a variant under an effective rule, or
+ * null if the rule says "don't price" (no offer for the chosen delivery type,
+ * or liquidity below minAsks). Applies, in order: delivery-type selection,
+ * minAsks skip, markup, floor, VAT, rounding. The maxDeltaPercent guardrail is
+ * NOT applied here — it is a plan-time compare against the current price.
+ */
+export function computePrice(variant: SourceVariant, rule: EffectivePricingRule): number | null {
     const offer = variant.offers.find((o) => o.deliveryType === rule.sourceDeliveryType);
     if (!offer) return null;
     if (rule.minAsks != null && offer.asks < rule.minAsks) return null;
 
     let price = offer.lowestAsk * (1 + rule.markupPercent / 100);
     if (rule.floor != null) price = Math.max(price, rule.floor);
-
-    switch (rule.rounding) {
-        case "integer": return Math.round(price);
-        case "charm": return Math.floor(price) + 0.99;
-        default: return Math.round(price * 100) / 100;
+    if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
+        price = price * (1 + rule.tax.vatRatePercent / 100);
     }
+    return roundPrice(price, rule.rounding);
 }
 
 /* ========================================================================== *
@@ -161,17 +287,23 @@ export interface VariantMapping {
     storeProductId: number;
     storeVariationId: number;
     currentPrice: number | null;
+    saleActive?: boolean; // store variation has a manual discount (sale_price) -> preserve it
 }
 
 export function buildPlan(
     product: SourceProduct,
-    rule: PricingRule,
+    config: AppConfig,
     mappings: Map<string, VariantMapping>, // keyed by stockxVariantId (or by upc)
 ): Plan {
     const items = product.variants.map<PlanItem>((v) => {
-        const proposed = computePrice(v, rule);
+        const rule = resolveEffectiveRule(product, v, config);
         const m = mappings.get(v.stockxVariantId);
 
+        if (!rule) {
+            return baseItem(v, m, null, "skip", "no pricing rule matches");
+        }
+
+        const proposed = computePrice(v, rule);
         if (proposed == null) {
             return baseItem(v, m, null, "skip", "no priceable offer");
         }
@@ -179,8 +311,28 @@ export function buildPlan(
             // Not on the store yet -> upsert path would create it.
             return baseItem(v, undefined, proposed, "create");
         }
-        const action = m.currentPrice === proposed ? "noop" : "update";
-        return baseItem(v, m, proposed, action);
+        if (m.saleActive) {
+            // Owner-set discount wins: leave the variation untouched entirely.
+            return baseItem(v, m, proposed, "skip", "discounted — sale price preserved");
+        }
+        if (m.currentPrice === proposed) {
+            return baseItem(v, m, proposed, "noop");
+        }
+        // Plan-time guardrail: reject a change larger than maxDeltaPercent.
+        if (
+            rule.maxDeltaPercent != null &&
+            m.currentPrice != null &&
+            exceedsDelta(m.currentPrice, proposed, rule.maxDeltaPercent)
+        ) {
+            return baseItem(
+                v,
+                m,
+                proposed,
+                "skip",
+                `change exceeds maxDeltaPercent (${rule.maxDeltaPercent}%)`,
+            );
+        }
+        return baseItem(v, m, proposed, "update");
     });
 
     return {
@@ -189,6 +341,12 @@ export function buildPlan(
         generatedAt: new Date().toISOString(),
         items,
     };
+}
+
+/** True if |proposed - current| / |current| (as a percent) exceeds maxPercent. */
+function exceedsDelta(current: number, proposed: number, maxPercent: number): boolean {
+    if (current === 0) return proposed !== 0; // any change off a zero base is "infinite"
+    return (Math.abs(proposed - current) / Math.abs(current)) * 100 > maxPercent;
 }
 
 function baseItem(
@@ -248,16 +406,100 @@ interface WooClient {
     get<T>(path: string, query?: Record<string, string>): Promise<T>;
 }
 
+/** Minimal Woo shapes we read. */
+interface WooProduct {
+    id: number;
+    sku?: string;
+}
+interface WooVariation {
+    id: number;
+    sku?: string;
+    global_unique_id?: string;
+    regular_price?: string;
+}
+
+const parsePrice = (s?: string): number | null => {
+    if (s == null || s === "") return null;
+    const n = Number.parseFloat(s);
+    return Number.isNaN(n) ? null : n;
+};
+
+const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
+
+/**
+ * Render a Woo variation SKU from the configured template. Tokens:
+ * {sku} {size} {sizeType} {brand}. e.g. "{sku}-{sizeType}-{size}".
+ */
+export function renderSkuTemplate(
+    template: string,
+    product: Pick<SourceProduct, "sku" | "brand">,
+    variant: Pick<SourceVariant, "sizeLabel" | "sizeType">,
+): string {
+    return template
+        .replaceAll("{sku}", product.sku)
+        .replaceAll("{brand}", product.brand)
+        .replaceAll("{size}", variant.sizeLabel)
+        .replaceAll("{sizeType}", variant.sizeType)
+        .replaceAll(" ", "-");
+}
+
+const DEFAULT_MATCHING: MatchingConfig = {
+    strategyOrder: ["upc", "skuPattern", "manual"],
+    skuTemplate: "{sku}-{size}",
+};
+
 export class WooStoreAdapter implements StorePort {
-    constructor(private readonly woo: WooClient) { }
+    private readonly matching: MatchingConfig;
+
+    constructor(private readonly woo: WooClient, matching: MatchingConfig = DEFAULT_MATCHING) {
+        this.matching = matching;
+    }
+
+    /** Find the parent Woo product whose SKU equals the StockX style code. */
+    private async findParent(product: SourceProduct): Promise<WooProduct | undefined> {
+        const found = await this.woo.get<WooProduct[]>("products", { sku: product.sku });
+        return Array.isArray(found) ? found[0] : undefined;
+    }
+
+    private async listVariations(productId: number): Promise<WooVariation[]> {
+        const v = await this.woo.get<WooVariation[]>(`products/${productId}/variations`, {
+            per_page: "100",
+        });
+        return Array.isArray(v) ? v : [];
+    }
 
     async resolveMappings(product: SourceProduct): Promise<Map<string, VariantMapping>> {
-        // TODO: look up the parent Woo product (by your own SKU/meta), then fetch its
-        // variations and match each StockX variant by UPC (global_unique_id) first,
-        // falling back to an SKU convention. Persist confirmed matches to your DB so
-        // this is cheap on subsequent runs.
-        void product;
-        return new Map();
+        const map = new Map<string, VariantMapping>();
+        const parent = await this.findParent(product);
+        if (!parent) return map; // not on the store yet -> everything is a "create"
+
+        const variations = await this.listVariations(parent.id);
+        const byUpc = new Map<string, WooVariation>();
+        const bySku = new Map<string, WooVariation>();
+        for (const v of variations) {
+            if (v.global_unique_id) byUpc.set(v.global_unique_id, v);
+            if (v.sku) bySku.set(v.sku, v);
+        }
+
+        for (const variant of product.variants) {
+            let match: WooVariation | undefined;
+            for (const strat of this.matching.strategyOrder) {
+                if (match) break;
+                if (strat === "upc" && variant.upc) match = byUpc.get(variant.upc);
+                else if (strat === "skuPattern")
+                    match = bySku.get(renderSkuTemplate(this.matching.skuTemplate, product, variant));
+                // "manual" has no automatic resolution
+            }
+            if (match) {
+                map.set(variant.stockxVariantId, {
+                    stockxVariantId: variant.stockxVariantId,
+                    storeProductId: parent.id,
+                    storeVariationId: match.id,
+                    currentPrice: parsePrice(match.regular_price),
+                });
+            }
+        }
+        return map;
     }
 
     async applyPrices(plan: Plan): Promise<ApplyResult> {
@@ -298,10 +540,51 @@ export class WooStoreAdapter implements StorePort {
     }
 
     async upsertProduct(product: SourceProduct): Promise<{ storeProductId: number }> {
-        // TODO: find existing variable product by SKU; if absent POST /products
-        // (type: "variable") then POST /products/{id}/variations/batch with the size
-        // variants, writing UPC into global_unique_id so future matching is exact.
-        void product;
-        return { storeProductId: 0 };
+        // 1. Find or create the parent variable product (keyed by StockX style code).
+        let parent = await this.findParent(product);
+        if (!parent) {
+            const created = await this.woo.post<WooProduct>("products", {
+                name: product.title,
+                type: "variable",
+                sku: product.sku,
+                images: product.image ? [{ src: product.image }] : [],
+                attributes: [
+                    {
+                        name: "Size",
+                        variation: true,
+                        visible: true,
+                        options: uniq(product.variants.map((v) => v.sizeLabel)),
+                    },
+                ],
+            });
+            parent = { id: created.id, sku: product.sku };
+        }
+
+        // 2. Create any missing variations, writing UPC into global_unique_id so
+        //    future matching is exact. Existing ones (by sku/upc) are left alone.
+        const existing = await this.listVariations(parent.id);
+        const existingSkus = new Set(existing.map((v) => v.sku).filter(Boolean));
+        const existingUpcs = new Set(existing.map((v) => v.global_unique_id).filter(Boolean));
+
+        const create = product.variants
+            .map((v) => ({
+                variant: v,
+                sku: renderSkuTemplate(this.matching.skuTemplate, product, v),
+            }))
+            .filter(({ variant, sku }) => {
+                if (existingSkus.has(sku)) return false;
+                if (variant.upc && existingUpcs.has(variant.upc)) return false;
+                return true;
+            })
+            .map(({ variant, sku }) => ({
+                sku,
+                global_unique_id: variant.upc,
+                attributes: [{ name: "Size", option: variant.sizeLabel }],
+            }));
+
+        if (create.length > 0) {
+            await this.woo.post(`products/${parent.id}/variations/batch`, { create });
+        }
+        return { storeProductId: parent.id };
     }
 }

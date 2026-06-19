@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Guard — no @tanstack/* dependency
+        run: npm run guard:tanstack
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time env so server modules that read env don't fail to compile.
+          KICKS_SECRET: ci-placeholder
+          WOO_BASE_URL: https://example.com
+          WOO_CONSUMER_KEY: ck_ci
+          WOO_CONSUMER_SECRET: cs_ci
+          DATABASE_URL: postgres://kicks:kicks@localhost:5432/kicks
+          REDIS_URL: redis://localhost:6379

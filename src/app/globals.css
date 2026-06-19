@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+/* Manual dark mode via a `.dark` class on <html> (set before paint in layout). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ----------------------------------------------------------------------------
+   Design tokens. `@theme inline` makes the generated utilities resolve to the
+   live CSS variables below, so flipping the vars under `.dark` re-themes every
+   utility (bg-surface, text-ink, border-line, bg-accent/15, …) at runtime.
+   --------------------------------------------------------------------------- */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-elevated: var(--elevated);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+
+  /* status hues — use with opacity modifiers, e.g. bg-create/12 border-create/25 */
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-update: var(--update);
+  --color-create: var(--create);
+  --color-skip: var(--skip);
+  --color-noop: var(--noop);
+  --color-warn: var(--warn);
+  --color-info: var(--info);
+
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+
+  --shadow-xs: 0 1px 2px rgba(16, 22, 18, 0.05);
+  --shadow-sm: 0 1px 3px rgba(16, 22, 18, 0.07), 0 1px 2px -1px rgba(16, 22, 18, 0.06);
+  --shadow-md: 0 10px 28px -14px rgba(16, 22, 18, 0.22);
+  --shadow-pop: 0 24px 60px -20px rgba(16, 22, 18, 0.28);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ----- Light theme (default) ---------------------------------------------- */
+:root {
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f3f0;
+  --elevated: #ffffff;
+  --line: rgba(17, 24, 19, 0.09);
+  --line-strong: rgba(17, 24, 19, 0.16);
+  --ink: #141a16;
+  --muted: #5a655d;
+  --faint: #8b958c;
+
+  --accent: #c4f000;        /* volt — used as fills, rings, highlights */
+  --accent-strong: #a9d600;
+  --accent-fg: #1a2200;     /* text on an accent fill */
+  --accent-text: #5f8a00;   /* accent used as text on light surfaces */
+
+  --up: #d8453f;            /* price increased */
+  --down: #1f9d63;          /* price decreased */
+  --update: #b06a00;
+  --create: #128a5a;
+  --skip: #c2452f;
+  --noop: #7c867e;
+  --warn: #b5790a;
+  --info: #2f6fe0;
+
+  --grid: rgba(17, 24, 19, 0.04);
+  color-scheme: light;
+}
+
+/* ----- Dark theme --------------------------------------------------------- */
+.dark {
+  --bg: #0a0c0b;
+  --surface: #121514;
+  --surface-2: #181c1a;
+  --elevated: #1a1f1c;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --ink: #e9efe9;
+  --muted: #a4aea6;
+  --faint: #6d766f;
+
+  --accent: #c4f000;
+  --accent-strong: #d4ff2e;
+  --accent-fg: #15200a;
+  --accent-text: #b9ec4a;
+
+  --up: #ff6f64;
+  --down: #4cd699;
+  --update: #e6a23c;
+  --create: #45c98c;
+  --skip: #ff7a66;
+  --noop: #8a948c;
+  --warn: #e9c15a;
+  --info: #6aa6ff;
+
+  --grid: rgba(255, 255, 255, 0.035);
+  color-scheme: dark;
+}
+
+/* ----- Base --------------------------------------------------------------- */
+* {
+  border-color: var(--line);
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+  color: var(--ink);
+}
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Ambient backdrop: faint grid + a single accent bloom, masked to the top. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(115% 80% at 80% -10%, #000 0%, transparent 60%);
+  mask-image: radial-gradient(115% 80% at 80% -10%, #000 0%, transparent 60%);
+  pointer-events: none;
+}
+body::after {
+  content: "";
+  position: fixed;
+  top: -22%;
+  right: -10%;
+  width: 48vw;
+  height: 48vw;
+  z-index: -2;
+  background: radial-gradient(circle, color-mix(in oklab, var(--accent) 26%, transparent) 0%, transparent 64%);
+  opacity: 0.5;
+  filter: blur(30px);
+  pointer-events: none;
+}
+
+/* ----- Scrollbar ---------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+}
+
+/* ----- Utilities ---------------------------------------------------------- */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ----- Motion ------------------------------------------------------------- */
+@keyframes kx-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes kx-pop {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes kx-shimmer {
+  100% { transform: translateX(100%); }
+}
+@keyframes kx-spin {
+  to { transform: rotate(360deg); }
+}
+.animate-fade-up { animation: kx-fade-up 0.42s var(--ease-spring) both; }
+.animate-pop { animation: kx-pop 0.28s var(--ease-spring) both; }
+
+.stagger > * { animation: kx-fade-up 0.42s var(--ease-spring) both; }
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 45ms; }
+.stagger > *:nth-child(3) { animation-delay: 90ms; }
+.stagger > *:nth-child(4) { animation-delay: 135ms; }
+.stagger > *:nth-child(5) { animation-delay: 180ms; }
+.stagger > *:nth-child(6) { animation-delay: 225ms; }
+
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--ink) 7%, transparent), transparent);
+  animation: kx-shimmer 1.3s infinite;
+}
+.spin { animation: kx-spin 0.7s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
