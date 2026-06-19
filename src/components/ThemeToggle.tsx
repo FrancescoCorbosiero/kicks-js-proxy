@@ -1,9 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { useI18n } from "@/i18n/provider";
 
 /** Sun/moon toggle that flips the `.dark` class on <html> and persists it. */
 export function ThemeToggle() {
+  const { t } = useI18n();
   const [dark, setDark] = React.useState(false);
 
   React.useEffect(() => {
@@ -23,8 +25,8 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      aria-label="Toggle theme"
-      title="Toggle theme"
+      aria-label={t.header.toggleTheme}
+      title={t.header.toggleTheme}
       className="grid h-9 w-9 place-items-center rounded-md border border-line bg-surface text-muted transition-colors hover:bg-surface-2 hover:text-ink"
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-[18px] w-[18px]">

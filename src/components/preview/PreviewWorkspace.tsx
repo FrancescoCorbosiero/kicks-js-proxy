@@ -17,6 +17,7 @@ import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +41,7 @@ export function PreviewWorkspace({
   snapshotInfo: SnapshotInfo | null;
   pricing: PricingSummary;
 }) {
+  const { t } = useI18n();
   const [mode, setMode] = React.useState<Mode>("skus");
   const [skusText, setSkusText] = React.useState("");
   const [query, setQuery] = React.useState("");
@@ -89,7 +91,7 @@ export function PreviewWorkspace({
         minAsks: Number(dMinAsks),
       });
       if (!res.ok || !res.summary) {
-        setError(res.error ?? "Could not save pricing");
+        setError(res.error ?? t.pricing.saveFailed);
         return;
       }
       setPrice(res.summary);
@@ -229,13 +231,13 @@ export function PreviewWorkspace({
     .filter((s) => s.variantIds.length > 0);
 
   const priceChips: string[] = [
-    price.markupPercent != null ? `+${price.markupPercent}% markup` : "no markup",
-    ...(price.vatRatePercent ? [`${price.vatRatePercent}% VAT`] : []),
+    price.markupPercent != null ? t.pricing.markup(price.markupPercent) : t.pricing.noMarkup,
+    ...(price.vatRatePercent ? [t.pricing.vat(price.vatRatePercent)] : []),
     ...(price.roundingMode
-      ? [`round ${price.roundingMode}${price.increment != null ? ` ${price.increment}` : ""}`]
+      ? [t.pricing.rounding(t.pricing.roundingOptions[price.roundingMode], price.increment ?? null)]
       : []),
-    ...(price.minAsks != null ? [`minAsks ${price.minAsks}`] : []),
-    price.hasGuardrail ? "delta guardrail on" : "no delta cap",
+    ...(price.minAsks != null ? [t.pricing.minAsks(price.minAsks)] : []),
+    price.hasGuardrail ? t.pricing.guardrailOn : t.pricing.guardrailOff,
   ];
 
   return (
@@ -251,7 +253,7 @@ export function PreviewWorkspace({
               <circle cx="18" cy="18" r="2" />
             </svg>
           </span>
-          <span className="text-sm font-semibold">Pricing</span>
+          <span className="text-sm font-semibold">{t.pricing.title}</span>
           <div className="flex flex-wrap items-center gap-1.5">
             {priceChips.map((c) => (
               <span
@@ -264,10 +266,10 @@ export function PreviewWorkspace({
           </div>
           <div className="ml-auto flex gap-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
-              {editing ? "Cancel" : "Edit"}
+              {editing ? t.pricing.cancel : t.pricing.edit}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onResetPricing} disabled={resetting}>
-              {resetting ? "Resetting…" : "Reset"}
+              {resetting ? t.pricing.resetting : t.pricing.reset}
             </Button>
           </div>
         </div>
@@ -275,37 +277,37 @@ export function PreviewWorkspace({
         {editing && (
           <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3 animate-fade-up">
             <div className="space-y-1">
-              <Label htmlFor="p-markup">Markup %</Label>
+              <Label htmlFor="p-markup">{t.pricing.labelMarkup}</Label>
               <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="p-vat">VAT %</Label>
+              <Label htmlFor="p-vat">{t.pricing.labelVat}</Label>
               <Input id="p-vat" className="w-24" value={dVat} onChange={(e) => setDVat(e.target.value)} inputMode="decimal" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="p-round">Rounding</Label>
+              <Label htmlFor="p-round">{t.pricing.labelRounding}</Label>
               <select
                 id="p-round"
                 value={dRounding}
                 onChange={(e) => setDRounding(e.target.value as RoundingMode)}
                 className="h-9 rounded-md border border-line bg-surface-2 px-2 text-sm text-ink focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15"
               >
-                <option value="none">none</option>
-                <option value="integer">integer</option>
-                <option value="charm">charm (.99)</option>
-                <option value="nearest">nearest</option>
+                <option value="none">{t.pricing.roundingOptions.none}</option>
+                <option value="integer">{t.pricing.roundingOptions.integer}</option>
+                <option value="charm">{t.pricing.roundingOptions.charm}</option>
+                <option value="nearest">{t.pricing.roundingOptions.nearest}</option>
               </select>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="p-inc">Increment</Label>
+              <Label htmlFor="p-inc">{t.pricing.labelIncrement}</Label>
               <Input id="p-inc" className="w-24" placeholder="0.99 / 5" value={dIncrement} onChange={(e) => setDIncrement(e.target.value)} inputMode="decimal" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="p-min">Min asks</Label>
+              <Label htmlFor="p-min">{t.pricing.labelMinAsks}</Label>
               <Input id="p-min" className="w-20" value={dMinAsks} onChange={(e) => setDMinAsks(e.target.value)} inputMode="numeric" />
             </div>
             <Button type="button" onClick={savePricing} disabled={saving}>
-              {saving ? "Saving…" : "Save & recompute"}
+              {saving ? t.pricing.saving : t.pricing.save}
             </Button>
           </div>
         )}
@@ -324,29 +326,27 @@ export function PreviewWorkspace({
         <div className="relative flex flex-wrap items-center gap-3 overflow-hidden rounded-xl border border-line bg-surface p-4 shadow-xs">
           <span className="absolute inset-y-0 left-0 w-1 bg-accent" />
           <div className="text-sm">
-            <span className="font-semibold">Work on your store file</span>
-            <span className="ml-2 text-muted">
-              <span className="tnum">{storeCount}</span> products — fetch StockX prices and preview the repricing.
-            </span>
+            <span className="font-semibold">{t.storeBar.title}</span>
+            <span className="ml-2 text-muted">{t.storeBar.desc(storeCount)}</span>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button type="button" variant="accent" onClick={loadFromStore} disabled={pending}>
               {pending ? (
                 <>
                   <span className="spin h-4 w-4 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
-                  Fetching…
+                  {t.storeBar.fetching}
                 </>
               ) : plans.length > 0 ? (
-                "Refresh from file"
+                t.storeBar.refresh
               ) : (
-                "Fetch & preview"
+                t.storeBar.fetch
               )}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onDiagnose} disabled={diagPending}>
-              {diagPending ? "…" : "Diagnose matching"}
+              {diagPending ? "…" : t.storeBar.diagnose}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onBulkSample} disabled={diagPending}>
-              {diagPending ? "…" : "Test bulk prices"}
+              {diagPending ? "…" : t.storeBar.testBulk}
             </Button>
           </div>
         </div>
@@ -364,7 +364,7 @@ export function PreviewWorkspace({
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 text-faint transition-transform group-open:rotate-90">
               <path d="m9 18 6-6-6-6" />
             </svg>
-            Or search manually (by SKU / query)
+            {t.search.summary}
           </span>
         </summary>
         <form onSubmit={onSubmit} className="space-y-4 border-t border-line p-5">
@@ -379,14 +379,14 @@ export function PreviewWorkspace({
                   mode === m ? "bg-surface text-ink shadow-xs" : "text-muted hover:text-ink",
                 )}
               >
-                {m === "skus" ? "By SKUs" : "By query"}
+                {m === "skus" ? t.search.bySkus : t.search.byQuery}
               </button>
             ))}
           </div>
 
           {mode === "skus" ? (
             <div className="space-y-1.5">
-              <Label htmlFor="skus">StockX style codes (comma / space / newline separated)</Label>
+              <Label htmlFor="skus">{t.search.skusLabel}</Label>
               <Textarea
                 id="skus"
                 placeholder="CT8012-047, DZ5485-612"
@@ -396,7 +396,7 @@ export function PreviewWorkspace({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label htmlFor="query">Search query</Label>
+              <Label htmlFor="query">{t.search.queryLabel}</Label>
               <Input
                 id="query"
                 placeholder="Jordan 1 Bred Toe"
@@ -408,7 +408,7 @@ export function PreviewWorkspace({
 
           <div className="flex items-end gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="market">Market</Label>
+              <Label htmlFor="market">{t.search.market}</Label>
               <Input
                 id="market"
                 className="w-24"
@@ -417,10 +417,10 @@ export function PreviewWorkspace({
               />
             </div>
             <Button type="submit" disabled={pending}>
-              {pending ? "Fetching…" : "Fetch & preview"}
+              {pending ? t.search.fetching : t.search.fetch}
             </Button>
             <Button type="button" variant="outline" onClick={onPing} disabled={pinging}>
-              {pinging ? "Checking…" : "Test KicksDB"}
+              {pinging ? t.search.checking : t.search.testKicks}
             </Button>
           </div>
 
@@ -438,50 +438,50 @@ export function PreviewWorkspace({
 
       {stats?.notFound && stats.notFound.length > 0 && (
         <div className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm text-warn animate-fade-up">
-          <span className="font-semibold">Not found on StockX:</span> {stats.notFound.join(", ")}
+          <span className="font-semibold">{t.results.notFound}</span> {stats.notFound.join(", ")}
         </div>
       )}
 
       {plans.length > 0 && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-xs">
-            <span className="font-semibold tnum">{plans.length} products</span>
+            <span className="font-semibold tnum">{t.results.products(plans.length)}</span>
             <span className="text-line-strong">·</span>
-            <Badge variant="update">{totals.update} update</Badge>
-            <Badge variant="create">{totals.create} create</Badge>
-            <Badge variant="skip">{totals.skip} skip</Badge>
-            <Badge variant="noop">{totals.noop} noop</Badge>
-            <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-accent/12 px-2.5 py-0.5 text-xs font-semibold text-accent-text">
+            <Badge variant="update">{t.results.update(totals.update)}</Badge>
+            <Badge variant="create">{t.results.create(totals.create)}</Badge>
+            <Badge variant="skip">{t.results.skip(totals.skip)}</Badge>
+            <Badge variant="noop">{t.results.noop(totals.noop)}</Badge>
+            <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-accent/12 px-2.5 py-0.5 text-xs font-semibold text-accent-text tnum">
               <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              <span className="tnum">{selectedCount}</span> selected
+              {t.results.selected(selectedCount)}
             </span>
             {stats && (
               <span className="ml-auto text-xs text-faint tnum">
-                {stats.fromCache} cached · {stats.fetched} fetched live
+                {t.results.cacheStats(stats.fromCache, stats.fetched)}
               </span>
             )}
             <Button type="button" variant="ghost" size="sm" onClick={() => setAllOpen((o) => !o)} className={stats ? "" : "ml-auto"}>
-              {allOpen ? "Collapse all" : "Expand all"}
+              {allOpen ? t.results.collapseAll : t.results.expandAll}
             </Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 px-1 text-sm">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-faint">Quick select</span>
+            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-faint">{t.results.quickSelect}</span>
             <Button type="button" variant="outline" size="sm" onClick={() => selectWhere(() => true)}>
-              All ({totals.update + totals.create})
+              {t.results.all(totals.update + totals.create)}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => setSelected(new Set())}>
-              None
+              {t.results.none}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((_, i) => i.action === "update")}>
-              Updates ({totals.update})
+              {t.results.updates(totals.update)}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((_, i) => i.action === "create")}>
-              New ({totals.create})
+              {t.results.new(totals.create)}
             </Button>
             {plans.some((p) => p.exactMatch) && (
               <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((p) => p.exactMatch)}>
-                Exact match
+                {t.results.exactMatch}
               </Button>
             )}
           </div>

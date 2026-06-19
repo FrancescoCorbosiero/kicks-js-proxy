@@ -4,6 +4,7 @@ import * as React from "react";
 import type { Plan, PlanItem } from "@core/core-spine";
 import { isActionable, summarize } from "@/lib/plan";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/provider";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -85,6 +86,7 @@ export function ProductGroup({
   onToggleAll,
   defaultOpen = false,
 }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = React.useState(defaultOpen);
   const s = summarize(plan.items);
   const actionable = plan.items.filter((i) => isActionable(i.action));
@@ -116,23 +118,23 @@ export function ProductGroup({
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2 truncate text-sm font-semibold">
-              {title || plan.sku || "(no SKU)"}
-              {highlighted && <Badge variant="accent">exact match</Badge>}
+              {title || plan.sku || t.product.noSku}
+              {highlighted && <Badge variant="accent">{t.product.exactMatch}</Badge>}
             </div>
             <div className="truncate text-xs text-faint">
               <span className="font-mono">{plan.sku}</span>
-              {brand ? ` · ${brand}` : ""} · {plan.items.length} variants · {plan.currency}
+              {brand ? ` · ${brand}` : ""} · {t.product.variants(plan.items.length)} · {plan.currency}
             </div>
           </div>
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
-          {s.update > 0 && <Badge variant="update">{s.update} upd</Badge>}
-          {s.create > 0 && <Badge variant="create">{s.create} new</Badge>}
-          {s.skip > 0 && <Badge variant="skip">{s.skip} skip</Badge>}
-          {s.noop > 0 && <Badge variant="noop">{s.noop} noop</Badge>}
+          {s.update > 0 && <Badge variant="update">{t.product.shortUpd(s.update)}</Badge>}
+          {s.create > 0 && <Badge variant="create">{t.product.shortNew(s.create)}</Badge>}
+          {s.skip > 0 && <Badge variant="skip">{t.product.shortSkip(s.skip)}</Badge>}
+          {s.noop > 0 && <Badge variant="noop">{t.product.shortNoop(s.noop)}</Badge>}
           {actionable.length > 0 && (
             <span className="ml-1 hidden text-xs font-medium text-muted tnum sm:inline">
-              {selectedCount}/{actionable.length} sel
+              {t.product.sel(selectedCount, actionable.length)}
             </span>
           )}
         </div>
@@ -151,13 +153,13 @@ export function ProductGroup({
                     onCheckedChange={(c) => onToggleAll(c === true)}
                   />
                 </TableHead>
-                <TableHead>Size (EU)</TableHead>
-                <TableHead>UPC</TableHead>
-                <TableHead className="text-right">Current</TableHead>
-                <TableHead className="text-right">Proposed</TableHead>
-                <TableHead className="text-right">Δ</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Reason</TableHead>
+                <TableHead>{t.product.headerSize}</TableHead>
+                <TableHead>{t.product.headerUpc}</TableHead>
+                <TableHead className="text-right">{t.product.headerCurrent}</TableHead>
+                <TableHead className="text-right">{t.product.headerProposed}</TableHead>
+                <TableHead className="text-right">{t.product.headerDelta}</TableHead>
+                <TableHead>{t.product.headerAction}</TableHead>
+                <TableHead>{t.product.headerReason}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -183,7 +185,7 @@ export function ProductGroup({
                     <TableCell>
                       {euSizes?.[item.stockxVariantId] ? (
                         <span className="flex items-baseline gap-1.5">
-                          <span className="font-semibold">EU {euSizes[item.stockxVariantId]}</span>
+                          <span className="font-semibold">{t.product.eu(euSizes[item.stockxVariantId])}</span>
                           <span className="text-xs text-faint">({item.sizeLabel})</span>
                         </span>
                       ) : (
@@ -201,7 +203,7 @@ export function ProductGroup({
                       <Delta item={item} />
                     </TableCell>
                     <TableCell>
-                      <Badge variant={item.action}>{item.action}</Badge>
+                      <Badge variant={item.action}>{t.actions[item.action]}</Badge>
                     </TableCell>
                     <TableCell className="text-xs text-faint">{item.reason ?? ""}</TableCell>
                   </TableRow>

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { exportRepricedJson } from "@/server/actions/export";
+import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -19,6 +20,7 @@ function downloadJson(filename: string, json: string) {
 }
 
 export function ExportBar({ selections }: Props) {
+  const { t } = useI18n();
   const [pending, start] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [summary, setSummary] = React.useState<
@@ -33,7 +35,7 @@ export function ExportBar({ selections }: Props) {
     start(async () => {
       const res = await exportRepricedJson({ selections });
       if (!res.ok || !res.json) {
-        setError(res.error ?? "Export failed");
+        setError(res.error ?? t.exportBar.failed);
         return;
       }
       downloadJson(res.filename ?? "repriced.json", res.json);
@@ -51,12 +53,8 @@ export function ExportBar({ selections }: Props) {
           </svg>
         </span>
         <div className="flex flex-col">
-          <span className="text-sm font-semibold">
-            <span className="tnum">{totalSelected}</span> variant{totalSelected === 1 ? "" : "s"} ready to export
-          </span>
-          <span className="text-xs text-faint">
-            Across {selections.length} product{selections.length === 1 ? "" : "s"} · prices only, everything else preserved.
-          </span>
+          <span className="text-sm font-semibold tnum">{t.exportBar.ready(totalSelected)}</span>
+          <span className="text-xs text-faint">{t.exportBar.across(selections.length)}</span>
         </div>
         <Button
           variant="accent"
@@ -67,24 +65,20 @@ export function ExportBar({ selections }: Props) {
           {pending ? (
             <>
               <span className="spin h-4 w-4 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
-              Building…
+              {t.exportBar.building}
             </>
           ) : (
-            `Export repriced JSON`
+            t.exportBar.button
           )}
         </Button>
       </div>
 
       {summary && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-sm animate-fade-up">
-          <span className="font-semibold">{summary.variationsChanged} variations repriced</span>
-          <span className="text-muted">{summary.productsChanged} products in file</span>
-          {summary.gtinsWritten > 0 && (
-            <span className="text-down">{summary.gtinsWritten} GTINs written</span>
-          )}
-          {summary.unmatched > 0 && (
-            <span className="text-warn">{summary.unmatched} not on store (create)</span>
-          )}
+          <span className="font-semibold">{t.exportBar.variationsChanged(summary.variationsChanged)}</span>
+          <span className="text-muted">{t.exportBar.productsChanged(summary.productsChanged)}</span>
+          {summary.gtinsWritten > 0 && <span className="text-down">{t.exportBar.gtins(summary.gtinsWritten)}</span>}
+          {summary.unmatched > 0 && <span className="text-warn">{t.exportBar.unmatched(summary.unmatched)}</span>}
         </div>
       )}
       {error && <p className="mt-2 text-sm text-skip">{error}</p>}

@@ -4,6 +4,7 @@ import * as React from "react";
 import { uploadStoreSnapshot } from "@/server/actions/store";
 import type { SnapshotInfo } from "@/server/store-json/repo";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 
 export function StoreSnapshotPanel({
@@ -13,6 +14,7 @@ export function StoreSnapshotPanel({
   initialInfo: SnapshotInfo | null;
   onLoaded?: (info: SnapshotInfo) => void;
 }) {
+  const { t } = useI18n();
   const [info, setInfo] = React.useState<SnapshotInfo | null>(initialInfo);
   const [open, setOpen] = React.useState(!initialInfo);
   const [error, setError] = React.useState<string | null>(null);
@@ -28,7 +30,7 @@ export function StoreSnapshotPanel({
     start(async () => {
       const res = await uploadStoreSnapshot(content);
       if (!res.ok) {
-        setError(res.error ?? "Upload failed");
+        setError(res.error ?? t.snapshot.uploadFailed);
         return;
       }
       setInfo(res.info ?? null);
@@ -44,8 +46,8 @@ export function StoreSnapshotPanel({
     if (!file) return;
     file
       .text()
-      .then((t) => loadText(t, file.name))
-      .catch(() => setError("Could not read the file."));
+      .then((content) => loadText(content, file.name))
+      .catch(() => setError(t.snapshot.readError));
   }
 
   function onDrop(e: React.DragEvent) {
@@ -69,19 +71,23 @@ export function StoreSnapshotPanel({
             </svg>
           </span>
           <div>
-            <div className="font-semibold">Store snapshot</div>
+            <div className="font-semibold">{t.snapshot.title}</div>
             {info ? (
               <div className="text-xs text-faint">
-                {info.productCount} products · {info.siteUrl ?? "—"}
-                {fileName ? ` · ${fileName}` : ""} · loaded {new Date(info.uploadedAt).toLocaleString()}
+                {t.snapshot.info(
+                  info.productCount,
+                  info.siteUrl ?? "—",
+                  fileName,
+                  new Date(info.uploadedAt).toLocaleString(),
+                )}
               </div>
             ) : (
-              <div className="text-xs text-warn">none loaded — preview can&apos;t match the store yet</div>
+              <div className="text-xs text-warn">{t.snapshot.none}</div>
             )}
           </div>
         </div>
         <Button type="button" variant="ghost" size="sm" onClick={() => setOpen((o) => !o)}>
-          {open ? "Hide" : info ? "Replace" : "Load"}
+          {open ? t.snapshot.hide : info ? t.snapshot.replace : t.snapshot.load}
         </Button>
       </div>
 
@@ -119,10 +125,8 @@ export function StoreSnapshotPanel({
                 <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
               </svg>
             </span>
-            <div className="text-sm font-medium">
-              {pending ? "Loading…" : "Drag your store JSON here, or click to browse"}
-            </div>
-            <div className="text-xs text-faint">WooCommerce round-trip file (.json)</div>
+            <div className="text-sm font-medium">{pending ? t.snapshot.loading : t.snapshot.drop}</div>
+            <div className="text-xs text-faint">{t.snapshot.dropHint}</div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -131,7 +135,7 @@ export function StoreSnapshotPanel({
               onClick={() => setPasteOpen((p) => !p)}
               className="text-xs text-muted underline-offset-2 transition-colors hover:text-ink hover:underline"
             >
-              {pasteOpen ? "Hide paste box" : "or paste JSON instead"}
+              {pasteOpen ? t.snapshot.pasteHide : t.snapshot.pasteShow}
             </button>
             {error && <span className="text-sm text-skip">{error}</span>}
           </div>
@@ -141,7 +145,7 @@ export function StoreSnapshotPanel({
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder='Paste the WooCommerce round-trip JSON (format "rp_cm_roundtrip")…'
+                placeholder={t.snapshot.pastePlaceholder}
                 className="h-32 w-full rounded-md border border-line bg-surface-2 p-2 font-mono text-xs text-ink transition-[border-color,box-shadow] placeholder:text-faint focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15"
               />
               <Button
@@ -149,7 +153,7 @@ export function StoreSnapshotPanel({
                 onClick={() => loadText(text, "pasted")}
                 disabled={pending || text.trim().length === 0}
               >
-                {pending ? "Loading…" : "Load pasted JSON"}
+                {pending ? t.snapshot.loading : t.snapshot.loadPasted}
               </Button>
             </div>
           )}
