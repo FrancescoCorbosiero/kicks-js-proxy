@@ -9,7 +9,7 @@ import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
 import { savePlan } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
-import { resolveSkusViaCatalog } from "@/server/catalog/service";
+import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
 import { isExactMatch } from "@/lib/match";
 import { skuKey } from "@/lib/skus";
@@ -29,11 +29,18 @@ const InputSchema = z
 
 export type PreviewInput = z.infer<typeof InputSchema>;
 
+export interface CatalogStats {
+  total: number; // total unique SKUs known in the catalog (this market)
+  added: number; // brand-new GET-verified SKUs added on this run
+  rejected: number; // new SKUs that weren't fetchable on KicksDB (no GET 200)
+}
+
 export interface FetchStats {
   products: number;
   fromCache: number;
   fetched: number;
   notFound: string[];
+  catalog?: CatalogStats;
 }
 
 export interface PreviewResult {
@@ -112,6 +119,22 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
     const plans = await assemblePlans(result.products, config, snapshot, market, term);
+
+    // In SKU mode the catalog resolver already GET-verifies + upserts every hit,
+    // so report the live catalog size and what this run added/rejected.
+    let catalog: CatalogStats | undefined;
+    if (parsed.data.mode === "skus") {
+      try {
+        catalog = {
+          total: await dbCatalogStore.count(market),
+          added: result.fetched,
+          rejected: result.notFound.length,
+        };
+      } catch (e) {
+        console.warn("[catalog] count skipped:", errMessage(e));
+      }
+    }
+
     return {
       ok: true,
       plans,
@@ -120,6 +143,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
         fromCache: result.fromCache,
         fetched: result.fetched,
         notFound: result.notFound,
+        catalog,
       },
     };
   } catch (e) {
@@ -160,11 +184,27 @@ export async function previewFromStore(marketOverride?: string): Promise<Preview
     const returned = new Set(products.map((p) => skuKey(p.sku)));
     const notFound = skus.filter((s) => !returned.has(skuKey(s)));
 
+    // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
+    // call returned and add only those fetchable on KicksDB. Best-effort — a
+    // catalog failure must never break the preview.
+    let catalog: CatalogStats | undefined;
+    try {
+      const growth = await growCatalogFromSkus(
+        source,
+        dbCatalogStore,
+        products.map((p) => p.sku),
+        market,
+      );
+      catalog = { total: growth.total, added: growth.added, rejected: growth.rejected.length };
+    } catch (e) {
+      console.warn("[catalog] growth skipped:", errMessage(e));
+    }
+
     const plans = await assemblePlans(products, config, snapshot, market, null);
     return {
       ok: true,
       plans,
-      stats: { products: products.length, fromCache: 0, fetched: products.length, notFound },
+      stats: { products: products.length, fromCache: 0, fetched: products.length, notFound, catalog },
     };
   } catch (e) {
     return { ok: false, error: errMessage(e), plans: [] };

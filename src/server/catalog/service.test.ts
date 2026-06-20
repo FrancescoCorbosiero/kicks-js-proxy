@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import { skuKey } from "@/lib/skus";
 import type { SourceLike } from "@/server/kicks/service";
-import { resolveSkusViaCatalog, type CatalogStore } from "./service";
+import { resolveSkusViaCatalog, growCatalogFromSkus, type CatalogStore } from "./service";
 
 function product(sku: string): SourceProduct {
   return {
@@ -30,8 +30,21 @@ function fakeStore() {
       }
       return m;
     },
+    async getAny(market, skus) {
+      const m = new Map<string, SourceProduct>();
+      for (const s of skus) {
+        const e = data.get(`${market}:${skuKey(s)}`);
+        if (e) m.set(skuKey(s), e.product);
+      }
+      return m;
+    },
     async upsert(market, products) {
       for (const p of products) data.set(`${market}:${skuKey(p.sku)}`, { product: p, fetchedAt: now });
+    },
+    async count(market) {
+      let n = 0;
+      for (const key of data.keys()) if (key.startsWith(`${market}:`)) n += 1;
+      return n;
     },
   };
   return { store, setNow: (n: number) => (now = n) };
@@ -94,5 +107,51 @@ describe("resolveSkusViaCatalog", () => {
     const res = await resolveSkusViaCatalog(source, store, ["abc", "ABC", " abc "], "IT", 60);
     expect(res.products).toHaveLength(1);
     expect(getProduct).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("growCatalogFromSkus", () => {
+  it("adds only GET-verified new SKUs and grows the unique catalog", async () => {
+    const { store } = fakeStore();
+    // "GHOST" returns 200 but no exact match -> rejected; others verify.
+    const getProduct = vi.fn(async (q: string) =>
+      skuKey(q) === "GHOST" ? [product("OTHER")] : [product(q)],
+    );
+    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+
+    const res = await growCatalogFromSkus(source, store, ["A", "B", "GHOST"], "IT");
+    expect(res.added).toBe(2);
+    expect(res.rejected).toEqual(["GHOST"]);
+    expect(res.total).toBe(2);
+    expect(getProduct).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips SKUs already in the catalog (permanent, verified once)", async () => {
+    const { store } = fakeStore();
+    const getProduct = vi.fn(async (q: string) => [product(q)]);
+    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+
+    const first = await growCatalogFromSkus(source, store, ["A", "B"], "IT");
+    expect(first.added).toBe(2);
+
+    // Re-uploading A/B plus a new C only verifies C.
+    const second = await growCatalogFromSkus(source, store, ["a", "B", "C"], "IT");
+    expect(second.added).toBe(1);
+    expect(second.total).toBe(3);
+    expect(getProduct).toHaveBeenCalledTimes(3); // 2 first run + 1 for C
+  });
+
+  it("rejects (never adds) SKUs whose GET errors out", async () => {
+    const { store } = fakeStore();
+    const getProduct = vi.fn(async (q: string) => {
+      if (skuKey(q) === "BOOM") throw new Error("HTTP 404");
+      return [product(q)];
+    });
+    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+
+    const res = await growCatalogFromSkus(source, store, ["A", "BOOM"], "IT");
+    expect(res.added).toBe(1);
+    expect(res.rejected).toEqual(["BOOM"]);
+    expect(res.total).toBe(1);
   });
 });

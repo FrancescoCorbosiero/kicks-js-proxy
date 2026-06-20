@@ -61,6 +61,20 @@ export async function getAnyBySkus(
   return out;
 }
 
+/** Total number of unique SKUs known in the catalog for a market (the catalog size). */
+export async function countCatalog(market: string): Promise<number> {
+  try {
+    const rows = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market));
+    return rows[0]?.n ?? 0;
+  } catch (e) {
+    console.warn("[catalog] count skipped (cache unavailable):", describeDbError(e));
+    return 0;
+  }
+}
+
 /** Upsert (insert-or-refresh) the products that were just fetched from KicksDB. */
 export async function upsertCatalog(market: string, products: SourceProduct[]): Promise<void> {
   if (products.length === 0) return;

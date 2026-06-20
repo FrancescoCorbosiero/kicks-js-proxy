@@ -35,6 +35,27 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 3. **Export** — download the re-import JSON: `regular_price` patched on the selected,
    matched variations; only changed products included; everything else preserved.
 
+## Caching
+
+Two independent layers, both best-effort (an outage degrades to a live fetch,
+never a hard failure):
+
+- **Redis TTL cache** (`src/server/cache/`) — short-lived price/query results,
+  keyed by market; controlled by `source.cacheTtlSeconds`.
+- **Persistent catalog** (`catalog_products`, `src/server/catalog/`) — the
+  **ever-increasing, independent** layer. It is unique by `(market, sku)` and
+  entries are permanent: the SKU set only grows, never shrinks. Every preview
+  (manual SKU mode *and* the file-upload flow) feeds it. A SKU is added **only
+  after a `GET /stockx/products` lookup returns a matching product (HTTP 200)**,
+  so every catalog SKU is guaranteed fetchable on KicksDB. Verification is paid
+  once per brand-new SKU — re-uploading known SKUs is free. Stale entries are
+  refetched for fresh prices (TTL), but the SKU never leaves the catalog. The
+  preview header shows the live catalog size and how many SKUs the run added.
+
+Large uploads/exports: Server Actions cap the request body (1 MB by default);
+`next.config.ts` raises `serverActions.bodySizeLimit` so multi-MB store JSON
+round-trips through upload and re-import.
+
 ## Core
 
 - `core/core-spine.ts`, `core/config.ts` — domain model, pricing engine
