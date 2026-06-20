@@ -89,6 +89,8 @@ export const it = {
     noop: (n: number) => `${n} invariati`,
     selected: (n: number) => `${n} selezionati`,
     cacheStats: (cached: number, fetched: number) => `${cached} da cache · ${fetched} recuperati live`,
+    catalogStats: (total: number, added: number) =>
+      `Catalogo: ${total} SKU${added > 0 ? ` (+${added} nuovi)` : ""}`,
     expandAll: "Espandi tutto",
     collapseAll: "Comprimi tutto",
     quickSelect: "Selezione rapida",

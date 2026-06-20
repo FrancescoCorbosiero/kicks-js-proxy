@@ -456,8 +456,13 @@ export function PreviewWorkspace({
               {t.results.selected(selectedCount)}
             </span>
             {stats && (
-              <span className="ml-auto text-xs text-faint tnum">
-                {t.results.cacheStats(stats.fromCache, stats.fetched)}
+              <span className="ml-auto flex flex-wrap items-center gap-x-2 text-xs text-faint tnum">
+                <span>{t.results.cacheStats(stats.fromCache, stats.fetched)}</span>
+                {stats.catalog && (
+                  <span className="text-accent-text">
+                    {t.results.catalogStats(stats.catalog.total, stats.catalog.added)}
+                  </span>
+                )}
               </span>
             )}
             <Button type="button" variant="ghost" size="sm" onClick={() => setAllOpen((o) => !o)} className={stats ? "" : "ml-auto"}>

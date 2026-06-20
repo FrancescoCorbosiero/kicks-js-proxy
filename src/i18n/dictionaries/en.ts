@@ -82,6 +82,8 @@ export const en: Dictionary = {
     noop: (n) => `${n} noop`,
     selected: (n) => `${n} selected`,
     cacheStats: (cached, fetched) => `${cached} cached · ${fetched} fetched live`,
+    catalogStats: (total, added) =>
+      `Catalog: ${total} SKUs${added > 0 ? ` (+${added} new)` : ""}`,
     expandAll: "Expand all",
     collapseAll: "Collapse all",
     quickSelect: "Quick select",
