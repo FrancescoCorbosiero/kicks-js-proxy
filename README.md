@@ -35,6 +35,35 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 3. **Export** — download the re-import JSON: `regular_price` patched on the selected,
    matched variations; only changed products included; everything else preserved.
 
+## Round-trip REST API
+
+For automation, the same round-trip flow is exposed as REST routes that mirror
+the WooCommerce `gh/v1` plugin shape. Optional Basic auth (`ROUNDTRIP_BASIC_USER`
+/ `ROUNDTRIP_BASIC_PASS`) gates them; unset = open.
+
+```bash
+# 1. export the active snapshot as a round-trip file (?scope=searchable strips it
+#    down to only the SKUs KicksDB can price — ~half the catalog never resolves)
+curl -s "http://localhost:3000/api/gh/v1/roundtrip/export?scope=searchable" -o roundtrip.json
+
+# 2. dry-run: reprice the file's searchable SKUs and report what would change
+curl -s -H "Content-Type: application/json" \
+  "http://localhost:3000/api/gh/v1/roundtrip/preview?mode=update_only" \
+  --data-binary @roundtrip.json
+
+# 3. commit: merge changes into the snapshot, get the lean re-import file back
+curl -s -H "Content-Type: application/json" \
+  "http://localhost:3000/api/gh/v1/roundtrip/apply?mode=update_only" \
+  --data-binary @roundtrip.json
+```
+
+`mode` is one of `update_only` (reprice matched variations — safest, default),
+`create_only` (add StockX sizes/products the store lacks), `upsert` (both), or
+`replace` (upsert **and** drop store sizes StockX no longer lists). Non-searchable
+SKUs are always left untouched and reported in `stats.strippedSkus`. `apply`
+returns the changed-products-only re-import file in `output`; `preview` adds it
+only with `&include=output`.
+
 ## Core
 
 - `core/core-spine.ts`, `core/config.ts` — domain model, pricing engine
