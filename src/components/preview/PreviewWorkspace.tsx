@@ -13,6 +13,7 @@ import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
 import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
 import type { PricingSummary, RoundingMode } from "@/server/config/summary";
+import { DEFAULT_MARKUP_TIERS } from "@/server/config/defaults";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -71,6 +72,16 @@ export function PreviewWorkspace({
   const [dRounding, setDRounding] = React.useState<RoundingMode>("charm");
   const [dIncrement, setDIncrement] = React.useState("");
   const [dMinAsks, setDMinAsks] = React.useState("");
+  // Dynamic markup draft: a list of bands; the LAST band is the open-ended
+  // "and above" tier (its upTo is ignored / rendered as null).
+  const [dDynamic, setDDynamic] = React.useState(false);
+  const [dTiers, setDTiers] = React.useState<{ upTo: string; markupPercent: string }[]>([]);
+
+  const tiersToDraft = (tiers: { upTo: number | null; markupPercent: number }[]) =>
+    tiers.map((t) => ({
+      upTo: t.upTo == null ? "" : String(t.upTo),
+      markupPercent: String(t.markupPercent),
+    }));
 
   function openEditor() {
     setDMarkup(String(price.markupPercent ?? 0));
@@ -78,13 +89,38 @@ export function PreviewWorkspace({
     setDRounding(price.roundingMode ?? "charm");
     setDIncrement(price.increment != null ? String(price.increment) : "");
     setDMinAsks(String(price.minAsks ?? 0));
+    setDDynamic(!!price.markupTiers);
+    setDTiers(tiersToDraft(price.markupTiers ?? DEFAULT_MARKUP_TIERS));
     setEditing(true);
   }
 
+  function setTier(i: number, key: "upTo" | "markupPercent", value: string) {
+    setDTiers((prev) => prev.map((t, idx) => (idx === i ? { ...t, [key]: value } : t)));
+  }
+  function addTier() {
+    // Insert a new band just before the open-ended top band.
+    setDTiers((prev) => {
+      const next = [...prev];
+      next.splice(Math.max(0, next.length - 1), 0, { upTo: "", markupPercent: "" });
+      return next;
+    });
+  }
+  function removeTier(i: number) {
+    setDTiers((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
   function savePricing() {
+    // Last band is always open-ended (upTo: null); the rest carry their bound.
+    const markupTiers = dDynamic
+      ? dTiers.map((t, i) => ({
+          upTo: i === dTiers.length - 1 ? null : Number(t.upTo),
+          markupPercent: Number(t.markupPercent),
+        }))
+      : undefined;
     startSave(async () => {
       const res = await updatePricing({
         markupPercent: Number(dMarkup),
+        markupTiers,
         vatRatePercent: Number(dVat),
         roundingMode: dRounding,
         increment: dIncrement.trim() === "" ? undefined : Number(dIncrement),
@@ -231,7 +267,11 @@ export function PreviewWorkspace({
     .filter((s) => s.variantIds.length > 0);
 
   const priceChips: string[] = [
-    price.markupPercent != null ? t.pricing.markup(price.markupPercent) : t.pricing.noMarkup,
+    price.markupTiers
+      ? t.pricing.dynamic(price.markupTiers.length)
+      : price.markupPercent != null
+        ? t.pricing.markup(price.markupPercent)
+        : t.pricing.noMarkup,
     ...(price.vatRatePercent ? [t.pricing.vat(price.vatRatePercent)] : []),
     ...(price.roundingMode
       ? [t.pricing.rounding(t.pricing.roundingOptions[price.roundingMode], price.increment ?? null)]
@@ -276,10 +316,67 @@ export function PreviewWorkspace({
 
         {editing && (
           <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3 animate-fade-up">
-            <div className="space-y-1">
-              <Label htmlFor="p-markup">{t.pricing.labelMarkup}</Label>
-              <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
-            </div>
+            {dDynamic ? (
+              <div className="w-full space-y-2">
+                <div className="space-y-2">
+                  {dTiers.map((tier, i) => {
+                    const isTop = i === dTiers.length - 1;
+                    return (
+                      <div key={i} className="flex items-end gap-2">
+                        <div className="space-y-1">
+                          <Label htmlFor={`tier-up-${i}`}>{t.pricing.tierUpTo}</Label>
+                          {isTop ? (
+                            <div className="flex h-9 w-24 items-center px-1 text-sm text-muted">
+                              {t.pricing.tierTop}
+                            </div>
+                          ) : (
+                            <Input
+                              id={`tier-up-${i}`}
+                              className="w-24"
+                              value={tier.upTo}
+                              onChange={(e) => setTier(i, "upTo", e.target.value)}
+                              inputMode="decimal"
+                            />
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`tier-mk-${i}`}>{t.pricing.tierMarkup}</Label>
+                          <Input
+                            id={`tier-mk-${i}`}
+                            className="w-20"
+                            value={tier.markupPercent}
+                            onChange={(e) => setTier(i, "markupPercent", e.target.value)}
+                            inputMode="decimal"
+                          />
+                        </div>
+                        {!isTop && (
+                          <Button type="button" variant="ghost" size="sm" onClick={() => removeTier(i)}>
+                            {t.pricing.tierRemove}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addTier}>
+                  {t.pricing.tierAdd}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label htmlFor="p-markup">{t.pricing.labelMarkup}</Label>
+                <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm text-muted" title={t.pricing.dynamicHint}>
+              <input
+                type="checkbox"
+                checked={dDynamic}
+                onChange={(e) => setDDynamic(e.target.checked)}
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+              {t.pricing.dynamicToggle}
+            </label>
             <div className="space-y-1">
               <Label htmlFor="p-vat">{t.pricing.labelVat}</Label>
               <Input id="p-vat" className="w-24" value={dVat} onChange={(e) => setDVat(e.target.value)} inputMode="decimal" />

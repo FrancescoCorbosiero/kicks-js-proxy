@@ -236,18 +236,38 @@ export function roundPrice(price: number, rounding: EffectivePricingRule["roundi
 }
 
 /**
+ * The markup % a rule applies to a given source ask. With a dynamic tier
+ * schedule (markupTiers), the band is chosen by the ask (our cost): the tier
+ * with the lowest `upTo` strictly greater than the ask wins, and the open-ended
+ * (`upTo: null`) band catches everything above. Falls back to the flat
+ * markupPercent when no tiers are configured. Order-independent — tiers are
+ * sorted here so config need not be pre-sorted.
+ */
+export function effectiveMarkupPercent(rule: EffectivePricingRule, ask: number): number {
+    const tiers = rule.markupTiers;
+    if (!tiers || tiers.length === 0) return rule.markupPercent;
+    const sorted = [...tiers].sort((a, b) => (a.upTo ?? Infinity) - (b.upTo ?? Infinity));
+    for (const t of sorted) {
+        if (t.upTo == null || ask < t.upTo) return t.markupPercent;
+    }
+    return sorted[sorted.length - 1].markupPercent; // ask >= every bound -> top band
+}
+
+/**
  * Returns the proposed retail price for a variant under an effective rule, or
  * null if the rule says "don't price" (no offer for the chosen delivery type,
  * or liquidity below minAsks). Applies, in order: delivery-type selection,
- * minAsks skip, markup, floor, VAT, rounding. The maxDeltaPercent guardrail is
- * NOT applied here — it is a plan-time compare against the current price.
+ * minAsks skip, markup (flat or dynamic-by-ask), floor, VAT, rounding. The
+ * maxDeltaPercent guardrail is NOT applied here — it is a plan-time compare
+ * against the current price.
  */
 export function computePrice(variant: SourceVariant, rule: EffectivePricingRule): number | null {
     const offer = variant.offers.find((o) => o.deliveryType === rule.sourceDeliveryType);
     if (!offer) return null;
     if (rule.minAsks != null && offer.asks < rule.minAsks) return null;
 
-    let price = offer.lowestAsk * (1 + rule.markupPercent / 100);
+    const markupPercent = effectiveMarkupPercent(rule, offer.lowestAsk);
+    let price = offer.lowestAsk * (1 + markupPercent / 100);
     if (rule.floor != null) price = Math.max(price, rule.floor);
     if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
         price = price * (1 + rule.tax.vatRatePercent / 100);

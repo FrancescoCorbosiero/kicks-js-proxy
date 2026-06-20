@@ -1,4 +1,18 @@
-import type { AppConfig, ConnectionConfig } from "@core/config";
+import type { AppConfig, ConnectionConfig, MarkupTier } from "@core/config";
+
+/**
+ * Recommended dynamic-markup schedule (opt-in). Bands are matched on the StockX
+ * ask (our cost, in market currency): cheaper pairs earn a higher markup % while
+ * expensive ones stay competitive. Used to pre-fill the editor when an operator
+ * turns dynamic markup on; flat 17% remains the out-of-the-box default.
+ */
+export const DEFAULT_MARKUP_TIERS: MarkupTier[] = [
+  { upTo: 100, markupPercent: 35 },
+  { upTo: 200, markupPercent: 25 },
+  { upTo: 350, markupPercent: 18 },
+  { upTo: 600, markupPercent: 12 },
+  { upTo: null, markupPercent: 8 },
+];
 
 /**
  * A sensible starting AppConfig: one general pricing rule (12% markup, VAT 22%,

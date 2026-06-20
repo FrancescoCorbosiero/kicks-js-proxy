@@ -50,13 +50,26 @@ export interface TaxConfig {
     vatRatePercent: number;               // e.g. 22 for IT
 }
 
+/**
+ * One band of a dynamic (tiered) markup schedule. Bands are matched against the
+ * SOURCE ASK (lowestAsk, in market currency) — i.e. our cost — so cheaper pairs
+ * get a higher markup % without piling huge absolute markups onto expensive ones.
+ * `upTo` is the exclusive upper bound of the band; `null` marks the open-ended
+ * top band. Picked tier = the lowest `upTo` strictly greater than the ask.
+ */
+export interface MarkupTier {
+    upTo: number | null;                  // exclusive upper bound on the ask; null = no cap (top band)
+    markupPercent: number;
+}
+
 export interface ScopedPricingRule {
     id: string;
     scope: RuleScope;
     enabled: boolean;
     // pricing knobs (any may be omitted; the resolver fills from less-specific rules)
     sourceDeliveryType?: DeliveryType;
-    markupPercent?: number;
+    markupPercent?: number;               // flat markup; ignored when markupTiers is set
+    markupTiers?: MarkupTier[];           // dynamic markup by ask; overrides markupPercent when present
     floor?: number;
     minAsks?: number;                     // skip if liquidity below this
     rounding?: RoundingConfig;
@@ -106,7 +119,8 @@ export interface AppConfig {
 /* ------------------------------------------------------------------ */
 export interface EffectivePricingRule {
     sourceDeliveryType: DeliveryType;
-    markupPercent: number;
+    markupPercent: number;                // flat fallback; used when markupTiers is absent
+    markupTiers?: MarkupTier[];           // dynamic markup by ask; takes precedence when present
     floor?: number;
     minAsks?: number;
     rounding: RoundingConfig;
@@ -156,6 +170,9 @@ export function resolveEffectiveRule(
     for (const r of matched) {
         if (r.sourceDeliveryType != null) merged.sourceDeliveryType = r.sourceDeliveryType;
         if (r.markupPercent != null) merged.markupPercent = r.markupPercent;
+        // A non-empty tier schedule overrides; an explicit empty array clears it
+        // (a more specific rule can switch a variant back to flat markup).
+        if (r.markupTiers != null) merged.markupTiers = r.markupTiers.length ? r.markupTiers : undefined;
         if (r.floor != null) merged.floor = r.floor;
         if (r.minAsks != null) merged.minAsks = r.minAsks;
         if (r.rounding != null) merged.rounding = r.rounding;
@@ -163,10 +180,12 @@ export function resolveEffectiveRule(
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
     }
 
-    if (merged.markupPercent == null) return null; // no rule actually set a markup
+    // Valid only if SOME markup was set — a flat percent or a tier schedule.
+    if (merged.markupPercent == null && !merged.markupTiers?.length) return null;
     return {
         sourceDeliveryType: merged.sourceDeliveryType!,
-        markupPercent: merged.markupPercent,
+        markupPercent: merged.markupPercent ?? 0,
+        markupTiers: merged.markupTiers,
         floor: merged.floor,
         minAsks: merged.minAsks,
         rounding: merged.rounding ?? { mode: "none" },

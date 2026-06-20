@@ -68,6 +68,15 @@ Defaults in `src/server/config/defaults.ts` (general rule: 17% markup, 22% VAT, 
 `.99`, no delta cap). Edit markup / VAT / rounding / minAsks live from the **Pricing**
 bar on `/preview` (saved to Postgres), or **Reset** it back to the defaults — no SQL.
 
+**Dynamic markup** (opt-in): instead of a flat percent, the markup can follow a
+tiered schedule keyed on the **StockX ask (our cost)** — cheaper pairs earn a
+higher markup % without piling huge absolute markups onto expensive ones. Toggle
+it on in the Pricing bar; the recommended bands (`DEFAULT_MARKUP_TIERS`) are
+`<100→35% · 100–200→25% · 200–350→18% · 350–600→12% · ≥600→8%`, fully editable
+(add/remove bands). Bands are exclusive on the upper bound and the top band is
+open-ended. `computePrice` picks the band per variant via `effectiveMarkupPercent`;
+flat markup stays the default.
+
 ## Scripts
 
 ```bash
