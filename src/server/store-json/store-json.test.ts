@@ -127,6 +127,19 @@ describe("applyModelPatch", () => {
     applyModelPatch(model, new Map([[334133, { price: 1 }]]));
     expect(model.products[0].variations[0].regular_price).toBe("566.03");
   });
+
+  it("sets out-of-stock variations (size not on KicksDB) without changing price", () => {
+    const { output, sizesRemoved, variationsChanged } = applyModelPatch(
+      model,
+      new Map([[334132, { outOfStock: true }]]),
+    );
+    expect(sizesRemoved).toBe(1);
+    expect(variationsChanged).toBe(1);
+    const v = output.products[0].variations.find((x) => x.id === 334132)!;
+    expect(v.stock_status).toBe("outofstock");
+    expect(v.stock_quantity).toBe(0);
+    expect(v.regular_price).toBe("566.03"); // price untouched
+  });
 });
 
 describe("resolveFromModel — GTIN-first matching", () => {

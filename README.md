@@ -34,6 +34,9 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
    collapsible diff (update / create / noop / skip) with per-row + quick-select.
 3. **Export** — download the re-import JSON: `regular_price` patched on the selected,
    matched variations; only changed products included; everything else preserved.
+   Optional toggle: **set sizes not on KicksDB out of stock** — for the exported
+   products, any real store size with no KicksDB match is marked `outofstock`
+   (reversible; price untouched).
 
 ## Caching
 

@@ -23,8 +23,15 @@ export function ExportBar({ selections }: Props) {
   const { t } = useI18n();
   const [pending, start] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [removeUnmatched, setRemoveUnmatched] = React.useState(false);
   const [summary, setSummary] = React.useState<
-    { productsChanged: number; variationsChanged: number; gtinsWritten: number; unmatched: number } | null
+    {
+      productsChanged: number;
+      variationsChanged: number;
+      gtinsWritten: number;
+      sizesRemoved: number;
+      unmatched: number;
+    } | null
   >(null);
 
   const totalSelected = selections.reduce((n, s) => n + s.variantIds.length, 0);
@@ -33,7 +40,7 @@ export function ExportBar({ selections }: Props) {
     setError(null);
     setSummary(null);
     start(async () => {
-      const res = await exportRepricedJson({ selections });
+      const res = await exportRepricedJson({ selections, removeUnmatchedSizes: removeUnmatched });
       if (!res.ok || !res.json) {
         setError(res.error ?? t.exportBar.failed);
         return;
@@ -56,11 +63,22 @@ export function ExportBar({ selections }: Props) {
           <span className="text-sm font-semibold tnum">{t.exportBar.ready(totalSelected)}</span>
           <span className="text-xs text-faint">{t.exportBar.across(selections.length)}</span>
         </div>
+        <label
+          className="ml-auto flex items-center gap-2 text-xs text-muted"
+          title={t.exportBar.removeHint}
+        >
+          <input
+            type="checkbox"
+            checked={removeUnmatched}
+            onChange={(e) => setRemoveUnmatched(e.target.checked)}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          {t.exportBar.removeToggle}
+        </label>
         <Button
           variant="accent"
           onClick={run}
           disabled={totalSelected === 0 || pending}
-          className="ml-auto"
         >
           {pending ? (
             <>
@@ -78,6 +96,7 @@ export function ExportBar({ selections }: Props) {
           <span className="font-semibold">{t.exportBar.variationsChanged(summary.variationsChanged)}</span>
           <span className="text-muted">{t.exportBar.productsChanged(summary.productsChanged)}</span>
           {summary.gtinsWritten > 0 && <span className="text-down">{t.exportBar.gtins(summary.gtinsWritten)}</span>}
+          {summary.sizesRemoved > 0 && <span className="text-skip">{t.exportBar.sizesRemoved(summary.sizesRemoved)}</span>}
           {summary.unmatched > 0 && <span className="text-warn">{t.exportBar.unmatched(summary.unmatched)}</span>}
         </div>
       )}
