@@ -22,6 +22,12 @@ const EnvSchema = z.object({
 
   // App
   DEFAULT_MARKET: z.string().default("IT"),
+
+  // Round-trip REST API (Basic auth, mirroring the WP plugin's -u user:pass).
+  // Optional: when BOTH are set the gh/v1/roundtrip routes require Basic auth;
+  // when unset the routes are open (single-operator / trusted-network default).
+  ROUNDTRIP_BASIC_USER: z.string().optional(),
+  ROUNDTRIP_BASIC_PASS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
