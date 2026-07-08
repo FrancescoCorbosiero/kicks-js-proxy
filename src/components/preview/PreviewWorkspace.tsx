@@ -12,6 +12,7 @@ import {
 import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
 import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
+import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
 import type { PricingSummary, RoundingMode } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
@@ -27,8 +28,13 @@ import type { SnapshotInfo } from "@/server/store-json/repo";
 import { ProductGroup } from "./ProductGroup";
 import { ExportBar } from "./ExportBar";
 import { StoreSnapshotPanel } from "./StoreSnapshotPanel";
+import { SanitizePanel } from "./SanitizePanel";
+import { NotFoundCard } from "./NotFoundCard";
 
 type Mode = "skus" | "query";
+
+/** How the current view was produced — so an override change replays it exactly. */
+type LastRun = { kind: "store" } | { kind: "manual"; input: PreviewInput };
 
 const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 
@@ -53,6 +59,7 @@ export function PreviewWorkspace({
   const [stats, setStats] = React.useState<FetchStats | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [allOpen, setAllOpen] = React.useState(false);
+  const [lastRun, setLastRun] = React.useState<LastRun>({ kind: "store" });
 
   const [ping, setPing] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [pinging, startPing] = React.useTransition();
@@ -164,13 +171,51 @@ export function PreviewWorkspace({
 
     // SKU mode is an explicit list -> select all actionable. Query mode is
     // exploratory -> select nothing (operator picks granularly).
+    setLastRun({ kind: "manual", input });
     startTransition(async () => applyResult(await fetchAndPreview(input), input.mode === "skus"));
   }
 
   /** Primary workflow: fetch StockX for every SKU in the uploaded store file. */
   function loadFromStore() {
     setError(null);
+    setLastRun({ kind: "store" });
     startTransition(async () => applyResult(await previewFromStore(market), true));
+  }
+
+  /** Re-run whatever produced the current view (after an override change). */
+  function rerun() {
+    setError(null);
+    startTransition(async () => {
+      const res =
+        lastRun.kind === "store"
+          ? await previewFromStore(market)
+          : await fetchAndPreview(lastRun.input);
+      applyResult(res, lastRun.kind === "store" || lastRun.input.mode === "skus");
+    });
+  }
+
+  /** Persist a product's sale-rule choice, then recompute so the diff reflects it. */
+  function onSetSaleRule(sku: string, follow: boolean) {
+    startTransition(async () => {
+      const res = await setProductSaleRule({ sku, followSaleRule: follow });
+      if (!res.ok) {
+        setError(res.error ?? "Could not save override");
+        return;
+      }
+      rerun();
+    });
+  }
+
+  /** Persist (or clear) a variation's manual locked price, then recompute. */
+  function onSetManualPrice(sku: string, euSize: string, price: number | null) {
+    startTransition(async () => {
+      const res = await setVariationManualPrice({ parentSku: sku, euSize, price });
+      if (!res.ok) {
+        setError(res.error ?? "Could not save override");
+        return;
+      }
+      rerun();
+    });
   }
 
   /** Rebuild the selection from a predicate over (plan, item). Quick-select. */
@@ -352,6 +397,8 @@ export function PreviewWorkspace({
         </div>
       )}
 
+      {hasSnapshot && <SanitizePanel />}
+
       {diag && (
         <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-surface-2 p-3 font-mono text-xs text-muted">
           {diag}
@@ -437,9 +484,7 @@ export function PreviewWorkspace({
       )}
 
       {stats?.notFound && stats.notFound.length > 0 && (
-        <div className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm text-warn animate-fade-up">
-          <span className="font-semibold">{t.results.notFound}</span> {stats.notFound.join(", ")}
-        </div>
+        <NotFoundCard foundSkus={plans.map((p) => p.sku)} notFound={stats.notFound} />
       )}
 
       {plans.length > 0 && (
@@ -511,6 +556,15 @@ export function PreviewWorkspace({
                 }
                 onToggle={(variantId, checked) => toggle(p.planId, variantId, checked)}
                 onToggleAll={(checked) => toggleAll(p, checked)}
+                followSaleRule={p.followSaleRule}
+                manualPrices={p.manualPrices}
+                busy={pending}
+                onSetSaleRule={hasSnapshot ? (follow) => onSetSaleRule(p.sku, follow) : undefined}
+                onSetManualPrice={
+                  hasSnapshot
+                    ? (_variantId, euSize, price) => onSetManualPrice(p.sku, euSize, price)
+                    : undefined
+                }
               />
             ))}
           </div>

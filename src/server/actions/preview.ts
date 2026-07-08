@@ -11,6 +11,8 @@ import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
+import { getOverrides } from "@/server/overrides/repo";
+import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
 import { skuKey } from "@/lib/skus";
 import type { PreviewPlan } from "@/lib/plan";
@@ -60,28 +62,49 @@ async function assemblePlans(
   snapshot: Awaited<ReturnType<typeof getActiveSnapshot>>,
   market: string,
   term: string | null,
+  overrides: StoreOverrides,
 ): Promise<PreviewPlan[]> {
   const out: PreviewPlan[] = [];
   for (const product of products) {
     const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();
-    const plan = buildPlan(product, config, mappings);
-    const { id, summary } = await savePlan(plan, market);
 
+    // EU size per variant — needed both for the table and to key manual-price
+    // overrides (which are stored by parent SKU + EU size).
     const euSizes: Record<string, string> = {};
     for (const v of product.variants) {
       const eu = sourceEuSize(v); // normalized number, e.g. "42.5"
       if (eu) euSizes[v.stockxVariantId] = eu;
     }
 
+    // Overlay operator overrides: lock manual prices onto the matched mappings.
+    const manualPrices: Record<string, number> = {};
+    for (const v of product.variants) {
+      const eu = euSizes[v.stockxVariantId];
+      const m = mappings.get(v.stockxVariantId);
+      if (!eu || !m) continue;
+      const manual = manualPriceFor(overrides, product.sku, eu);
+      if (manual != null) {
+        m.manualPrice = manual;
+        manualPrices[v.stockxVariantId] = manual;
+      }
+    }
+
+    const followSaleRule = followSaleRuleFor(overrides, product.sku);
+    const plan = buildPlan(product, config, mappings, { followSaleRule });
+    const { id, summary } = await savePlan(plan, market);
+
     out.push({
       planId: id,
       market,
+      sku: product.sku,
       title: product.title,
       brand: product.brand,
       plan,
       summary,
       euSizes,
       exactMatch: term ? isExactMatch(term, product.sku, product.title) : false,
+      followSaleRule,
+      manualPrices,
     });
   }
   return out;
@@ -106,6 +129,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
   const snapshot = await getActiveSnapshot();
+  const overrides = await getOverrides();
   const cache = getCache();
   const ttl = config.source.cacheTtlSeconds;
 
@@ -118,7 +142,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
         : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
-    const plans = await assemblePlans(result.products, config, snapshot, market, term);
+    const plans = await assemblePlans(result.products, config, snapshot, market, term, overrides);
 
     // In SKU mode the catalog resolver already GET-verifies + upserts every hit,
     // so report the live catalog size and what this run added/rejected.
@@ -169,6 +193,7 @@ export async function previewFromStore(marketOverride?: string): Promise<Preview
 
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
+  const overrides = await getOverrides();
 
   try {
     // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
@@ -200,7 +225,7 @@ export async function previewFromStore(marketOverride?: string): Promise<Preview
       console.warn("[catalog] growth skipped:", errMessage(e));
     }
 
-    const plans = await assemblePlans(products, config, snapshot, market, null);
+    const plans = await assemblePlans(products, config, snapshot, market, null, overrides);
     return {
       ok: true,
       plans,

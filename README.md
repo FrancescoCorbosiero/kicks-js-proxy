@@ -68,6 +68,26 @@ Defaults in `src/server/config/defaults.ts` (general rule: 17% markup, 22% VAT, 
 `.99`, no delta cap). Edit markup / VAT / rounding / minAsks live from the **Pricing**
 bar on `/preview` (saved to Postgres), or **Reset** it back to the defaults — no SQL.
 
+## Operator overrides & sanitize
+
+Overrides live in `store_overrides` (a single jsonb blob, `src/server/overrides/`),
+keyed by stable SKU/size identities so a choice survives re-fetches and re-uploads.
+They are applied in `buildPlan` with a fixed precedence — **manual price > sale rule >
+computed price**:
+
+- **Manual price lock** (variant level) — set a price directly on a matched variation
+  from the preview table. It wins over the StockX-computed price and never drifts on
+  re-runs (like the sale-price safe-lock), and is what the export writes.
+- **Sale rule** (product level) — the historical "leave a discounted variation
+  untouched" behaviour is now a per-product toggle (**Preserve sales**), default on.
+  Turn it off to reprice discounted variations of that product too.
+
+**Sanitize** (`src/server/store-json/sanitize.ts`) produces a separate cleaned
+re-import JSON: it drops ghost variations (`stock_quantity === 0`) and realigns
+`pa_taglia` — both the per-variation value and the parent option list — to the real
+sizes, which fixes variations WooCommerce silently hides. Non-destructive: only changed
+products are emitted, everything else is preserved.
+
 ## Scripts
 
 ```bash
