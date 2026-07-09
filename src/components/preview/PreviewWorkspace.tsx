@@ -30,6 +30,7 @@ import { ExportBar } from "./ExportBar";
 import { StoreSnapshotPanel } from "./StoreSnapshotPanel";
 import { SanitizePanel } from "./SanitizePanel";
 import { NotFoundCard } from "./NotFoundCard";
+import { CatalogPanel } from "./CatalogPanel";
 
 type Mode = "skus" | "query";
 
@@ -476,6 +477,8 @@ export function PreviewWorkspace({
           )}
         </form>
       </details>
+
+      <CatalogPanel defaultMarket={defaultMarket} />
 
       {error && (
         <p className="rounded-lg border border-skip/25 bg-skip/10 px-4 py-3 text-sm text-skip animate-fade-up">

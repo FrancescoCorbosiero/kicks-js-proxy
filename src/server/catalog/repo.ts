@@ -75,6 +75,30 @@ export async function countCatalog(market: string): Promise<number> {
   }
 }
 
+/**
+ * List every known-fetchable SKU for a market (the whole catalog), lightest
+ * columns only, ordered brand then SKU. Best-effort: a DB error degrades to an
+ * empty list rather than failing the page.
+ */
+export async function listCatalogEntries(
+  market: string,
+): Promise<{ sku: string; title: string; brand: string }[]> {
+  try {
+    return await db
+      .select({
+        sku: catalogProducts.sku,
+        title: catalogProducts.title,
+        brand: catalogProducts.brand,
+      })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market))
+      .orderBy(catalogProducts.brand, catalogProducts.sku);
+  } catch (e) {
+    console.warn("[catalog] list skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
 /** Upsert (insert-or-refresh) the products that were just fetched from KicksDB. */
 export async function upsertCatalog(market: string, products: SourceProduct[]): Promise<void> {
   if (products.length === 0) return;

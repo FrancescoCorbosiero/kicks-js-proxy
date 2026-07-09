@@ -52,6 +52,10 @@ never a hard failure):
   refetched for fresh prices (TTL), but the SKU never leaves the catalog. The
   preview header shows the live catalog size and how many SKUs the run added.
 
+  The **KicksDB catalog** panel on `/preview` discovers this set on demand: load a
+  market's whole known-fetchable SKU list (`listCatalog` → `listCatalogEntries`),
+  filter by SKU/model/brand, and copy the SKUs out.
+
 Large uploads/exports: Server Actions cap the request body (1 MB by default);
 `next.config.ts` raises `serverActions.bodySizeLimit` so multi-MB store JSON
 round-trips through upload and re-import.
