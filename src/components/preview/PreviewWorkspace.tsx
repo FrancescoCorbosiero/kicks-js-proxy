@@ -12,7 +12,7 @@ import {
 import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
 import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
-import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
+import { setGlobalSaleRule, setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
 import type { PricingSummary, RoundingMode } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
@@ -25,10 +25,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import type { SnapshotInfo } from "@/server/store-json/repo";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ProductGroup } from "./ProductGroup";
 import { ExportBar } from "./ExportBar";
 import { StoreSnapshotPanel } from "./StoreSnapshotPanel";
-import { SanitizePanel } from "./SanitizePanel";
 import { NotFoundCard } from "./NotFoundCard";
 import { CatalogPanel } from "./CatalogPanel";
 
@@ -43,10 +43,12 @@ export function PreviewWorkspace({
   defaultMarket,
   snapshotInfo,
   pricing,
+  initialFollowSaleRule,
 }: {
   defaultMarket: string;
   snapshotInfo: SnapshotInfo | null;
   pricing: PricingSummary;
+  initialFollowSaleRule: boolean;
 }) {
   const { t } = useI18n();
   const [mode, setMode] = React.useState<Mode>("skus");
@@ -69,6 +71,7 @@ export function PreviewWorkspace({
   const [diag, setDiag] = React.useState<string | null>(null);
   const [diagPending, startDiag] = React.useTransition();
   const [price, setPrice] = React.useState<PricingSummary>(pricing);
+  const [followSaleRule, setFollowSaleRule] = React.useState(initialFollowSaleRule);
   const [resetting, startReset] = React.useTransition();
   const [editing, setEditing] = React.useState(false);
   const [saving, startSave] = React.useTransition();
@@ -219,6 +222,19 @@ export function PreviewWorkspace({
     });
   }
 
+  /** Bulk switch: preserve (default) vs reprice discounted items across all products. */
+  function onToggleGlobalSaleRule(follow: boolean) {
+    setFollowSaleRule(follow);
+    startTransition(async () => {
+      const res = await setGlobalSaleRule({ followSaleRule: follow });
+      if (!res.ok) {
+        setError(res.error ?? "Could not save override");
+        return;
+      }
+      if (hasSnapshot && plans.length > 0) rerun();
+    });
+  }
+
   /** Rebuild the selection from a predicate over (plan, item). Quick-select. */
   function selectWhere(predicate: (p: PreviewPlan, item: PlanItem) => boolean) {
     const next = new Set<string>();
@@ -310,6 +326,23 @@ export function PreviewWorkspace({
               </span>
             ))}
           </div>
+          <label
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+              followSaleRule
+                ? "border-line bg-surface-2 text-muted hover:text-ink"
+                : "border-accent/50 bg-accent/10 text-accent-text",
+            )}
+            title={t.pricing.discountRuleHint}
+          >
+            <Checkbox
+              checked={!followSaleRule}
+              disabled={pending}
+              onCheckedChange={(c) => onToggleGlobalSaleRule(c !== true)}
+              aria-label={t.pricing.discountRule}
+            />
+            {t.pricing.discountRule}
+          </label>
           <div className="ml-auto flex gap-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
               {editing ? t.pricing.cancel : t.pricing.edit}
@@ -397,8 +430,6 @@ export function PreviewWorkspace({
           </div>
         </div>
       )}
-
-      {hasSnapshot && <SanitizePanel />}
 
       {diag && (
         <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-surface-2 p-3 font-mono text-xs text-muted">

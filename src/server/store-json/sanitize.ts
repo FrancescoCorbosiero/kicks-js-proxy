@@ -123,6 +123,54 @@ function sortSizes(sizes: string[]): string[] {
   });
 }
 
+/** The counts a single-product sanitize produced. */
+export interface ProductSanitizeResult {
+  ghostsRemoved: number;
+  taglieRealigned: number;
+  parentRealigned: boolean;
+  changed: boolean;
+}
+
+/**
+ * Sanitize ONE product in place (mutates it): drop ghosts, realign each
+ * variation's pa_taglia, realign the parent option list. Returns the counts and
+ * whether anything changed. Shared by the standalone sanitize and the unified
+ * reprice+sanitize export so both behave identically.
+ */
+export function sanitizeProduct(product: StoreProductModel): ProductSanitizeResult {
+  // 1. Drop ghost (zero-stock) variations.
+  const kept: StoreVariation[] = [];
+  let ghostsRemoved = 0;
+  for (const vrt of product.variations) {
+    if (isGhost(vrt)) ghostsRemoved += 1;
+    else kept.push(vrt);
+  }
+  if (ghostsRemoved > 0) product.variations = kept;
+
+  // 2. Realign each surviving variation's pa_taglia to its true size.
+  const sizes: string[] = [];
+  let taglieRealigned = 0;
+  for (const vrt of product.variations) {
+    const desired = variationEuSize(product.sku, vrt); // SKU suffix first, then pa_taglia
+    if (desired) sizes.push(desired);
+    if (desired && currentTaglia(vrt) !== desired) {
+      vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
+      taglieRealigned += 1;
+    }
+  }
+
+  // 3. Realign the parent product's pa_taglia option list to the surviving sizes.
+  const unique = sortSizes([...new Set(sizes)]);
+  const parentRealigned = unique.length > 0 && realignParentTaglia(product, unique);
+
+  return {
+    ghostsRemoved,
+    taglieRealigned,
+    parentRealigned,
+    changed: ghostsRemoved > 0 || taglieRealigned > 0 || parentRealigned,
+  };
+}
+
 export function sanitizeModel(model: StoreModel): SanitizeOutcome {
   const clone: StoreModel = structuredClone(model);
   const report: SanitizeReport = {
@@ -137,38 +185,11 @@ export function sanitizeModel(model: StoreModel): SanitizeOutcome {
 
   for (const product of clone.products) {
     report.variationsScanned += product.variations.length;
-
-    // 1. Drop ghost (zero-stock) variations.
-    const kept: StoreVariation[] = [];
-    let removedHere = 0;
-    for (const vrt of product.variations) {
-      if (isGhost(vrt)) removedHere += 1;
-      else kept.push(vrt);
-    }
-    if (removedHere > 0) {
-      product.variations = kept;
-      report.ghostsRemoved += removedHere;
-      changed.add(product.id);
-    }
-
-    // 2. Realign each surviving variation's pa_taglia to its true size.
-    const sizes: string[] = [];
-    for (const vrt of product.variations) {
-      const desired = variationEuSize(product.sku, vrt); // SKU suffix first, then pa_taglia
-      if (desired) sizes.push(desired);
-      if (desired && currentTaglia(vrt) !== desired) {
-        vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
-        report.taglieRealigned += 1;
-        changed.add(product.id);
-      }
-    }
-
-    // 3. Realign the parent product's pa_taglia option list to the surviving sizes.
-    const unique = sortSizes([...new Set(sizes)]);
-    if (unique.length > 0 && realignParentTaglia(product, unique)) {
-      report.parentAttributesRealigned += 1;
-      changed.add(product.id);
-    }
+    const r = sanitizeProduct(product);
+    report.ghostsRemoved += r.ghostsRemoved;
+    report.taglieRealigned += r.taglieRealigned;
+    if (r.parentRealigned) report.parentAttributesRealigned += 1;
+    if (r.changed) changed.add(product.id);
   }
 
   clone.products = clone.products.filter((p) => changed.has(p.id));

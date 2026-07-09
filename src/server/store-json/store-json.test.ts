@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import { parseStoreModel, type StoreModel } from "./model";
 import { resolveFromModel, normSize, variationEuSize } from "./match";
-import { applyModelPatch } from "./patch";
+import { applyModelPatch, buildReimport } from "./patch";
 
 const model: StoreModel = {
   format: "rp_cm_roundtrip",
@@ -141,6 +141,66 @@ describe("resolveFromModel — GTIN-first matching", () => {
 
     const map = resolveFromModel(m, src);
     expect(map.get("v-42")?.storeVariationId).toBe(334132); // matched by GTIN, not size
+  });
+});
+
+describe("buildReimport — reprice + sanitize in one file", () => {
+  const mixed = (): StoreModel => ({
+    format: "rp_cm_roundtrip",
+    product_count: 2,
+    products: [
+      {
+        id: 1,
+        sku: "AA-1",
+        name: "P1",
+        variations: [
+          { id: 11, sku: "AA-1-42", regular_price: "100.00", stock_quantity: 3, attributes: { attribute_pa_taglia: "42" } },
+          { id: 12, sku: "AA-1-43", regular_price: "100.00", stock_quantity: 0, attributes: { attribute_pa_taglia: "43" } }, // ghost
+        ],
+      },
+      {
+        id: 2,
+        sku: "BB-2",
+        name: "P2",
+        variations: [
+          { id: 21, sku: "BB-2-40", regular_price: "50.00", stock_quantity: 0, attributes: { attribute_pa_taglia: "40" } }, // ghost only
+        ],
+      },
+    ],
+  });
+
+  it("reprices selected variations AND cleans the whole store", () => {
+    const out = buildReimport(mixed(), new Map([[11, { price: 120 }]]), { sanitize: true });
+    expect(out.variationsChanged).toBe(1);
+    expect(out.ghostsRemoved).toBe(2); // variation 12 and product 2's only variation
+    expect(out.productsChanged).toBe(2); // P1 repriced+cleaned, P2 cleaned-only
+
+    const p1 = out.output.products.find((p) => p.id === 1)!;
+    expect(p1.variations.map((v) => v.id)).toEqual([11]); // ghost 12 gone
+    expect(p1.variations[0].regular_price).toBe("120.00"); // repriced survivor
+    expect(out.output.product_count).toBe(2);
+  });
+
+  it("sanitize:false is a pure reprice — ghosts are left in place", () => {
+    const out = buildReimport(mixed(), new Map([[11, { price: 120 }]]), { sanitize: false });
+    expect(out.ghostsRemoved).toBe(0);
+    expect(out.productsChanged).toBe(1); // only the repriced product
+    const p1 = out.output.products.find((p) => p.id === 1)!;
+    expect(p1.variations.map((v) => v.id)).toEqual([11, 12]); // ghost still present
+  });
+
+  it("no selections + sanitize is a clean-only export", () => {
+    const out = buildReimport(mixed(), new Map(), { sanitize: true });
+    expect(out.variationsChanged).toBe(0);
+    expect(out.ghostsRemoved).toBe(2);
+    expect(out.productsChanged).toBe(2);
+  });
+
+  it("does not mutate the input", () => {
+    const input = mixed();
+    buildReimport(input, new Map([[11, { price: 999 }]]), { sanitize: true });
+    expect(input.products[0].variations).toHaveLength(2);
+    expect(input.products[0].variations[0].regular_price).toBe("100.00");
   });
 });
 

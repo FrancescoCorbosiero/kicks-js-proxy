@@ -1,9 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { exportRepricedJson } from "@/server/actions/export";
+import { exportRepricedJson, type ExportSummary } from "@/server/actions/export";
 import { useI18n } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Props {
   selections: { planId: string; variantIds: string[] }[];
@@ -23,17 +25,17 @@ export function ExportBar({ selections }: Props) {
   const { t } = useI18n();
   const [pending, start] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [summary, setSummary] = React.useState<
-    { productsChanged: number; variationsChanged: number; gtinsWritten: number; unmatched: number } | null
-  >(null);
+  const [sanitize, setSanitize] = React.useState(true);
+  const [summary, setSummary] = React.useState<ExportSummary | null>(null);
 
   const totalSelected = selections.reduce((n, s) => n + s.variantIds.length, 0);
+  const canExport = totalSelected > 0 || sanitize; // reprice, sanitize, or both
 
   function run() {
     setError(null);
     setSummary(null);
     start(async () => {
-      const res = await exportRepricedJson({ selections });
+      const res = await exportRepricedJson({ selections, sanitize });
       if (!res.ok || !res.json) {
         setError(res.error ?? t.exportBar.failed);
         return;
@@ -53,15 +55,30 @@ export function ExportBar({ selections }: Props) {
           </svg>
         </span>
         <div className="flex flex-col">
-          <span className="text-sm font-semibold tnum">{t.exportBar.ready(totalSelected)}</span>
+          <span className="text-sm font-semibold tnum">
+            {totalSelected > 0 ? t.exportBar.ready(totalSelected) : t.exportBar.readySanitizeOnly}
+          </span>
           <span className="text-xs text-faint">{t.exportBar.across(selections.length)}</span>
         </div>
-        <Button
-          variant="accent"
-          onClick={run}
-          disabled={totalSelected === 0 || pending}
-          className="ml-auto"
+
+        <label
+          className={cn(
+            "ml-auto flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+            sanitize
+              ? "border-accent/50 bg-accent/10 text-accent-text"
+              : "border-line bg-surface-2 text-muted hover:text-ink",
+          )}
+          title={t.exportBar.sanitizeToggleHint}
         >
+          <Checkbox
+            checked={sanitize}
+            onCheckedChange={(c) => setSanitize(c === true)}
+            aria-label={t.exportBar.sanitizeToggle}
+          />
+          {t.exportBar.sanitizeToggle}
+        </label>
+
+        <Button variant="accent" onClick={run} disabled={!canExport || pending}>
           {pending ? (
             <>
               <span className="spin h-4 w-4 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
@@ -76,6 +93,15 @@ export function ExportBar({ selections }: Props) {
       {summary && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-sm animate-fade-up">
           <span className="font-semibold">{t.exportBar.variationsChanged(summary.variationsChanged)}</span>
+          {summary.sanitized && (
+            <>
+              <span className="text-down">{t.sanitize.ghostsRemoved(summary.ghostsRemoved)}</span>
+              <span className="text-muted">{t.sanitize.taglieRealigned(summary.taglieRealigned)}</span>
+              {summary.parentAttributesRealigned > 0 && (
+                <span className="text-muted">{t.sanitize.parentsRealigned(summary.parentAttributesRealigned)}</span>
+              )}
+            </>
+          )}
           <span className="text-muted">{t.exportBar.productsChanged(summary.productsChanged)}</span>
           {summary.gtinsWritten > 0 && <span className="text-down">{t.exportBar.gtins(summary.gtinsWritten)}</span>}
           {summary.unmatched > 0 && <span className="text-warn">{t.exportBar.unmatched(summary.unmatched)}</span>}

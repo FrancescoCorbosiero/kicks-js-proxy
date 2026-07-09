@@ -20,19 +20,26 @@ export interface VariationOverride {
   manualPrice?: number;
 }
 
+/** Store-wide defaults that apply to every product unless a product overrides them. */
+export interface GlobalOverride {
+  followSaleRule?: boolean; // false = reprice discounted items (bulk "ignore discounts")
+}
+
 export interface StoreOverrides {
+  global: GlobalOverride;
   products: Record<string, ProductOverride>;
   variations: Record<string, VariationOverride>;
 }
 
 export function emptyOverrides(): StoreOverrides {
-  return { products: {}, variations: {} };
+  return { global: {}, products: {}, variations: {} };
 }
 
 /** Tolerate a missing / partially-shaped blob from the DB. */
 export function normalizeOverrides(raw: unknown): StoreOverrides {
   const o = (raw ?? {}) as Partial<StoreOverrides>;
   return {
+    global: o.global && typeof o.global === "object" ? o.global : {},
     products: o.products && typeof o.products === "object" ? o.products : {},
     variations: o.variations && typeof o.variations === "object" ? o.variations : {},
   };
@@ -49,9 +56,21 @@ export function variationKey(parentSku: string, euSize: string): string {
 }
 
 /**
+ * Set the store-wide sale-rule default (the bulk "ignore discounts" switch).
+ * Passing null clears it back to the built-in default (follow the sale rule).
+ * Returns a new blob — never mutates the input.
+ */
+export function withGlobalSaleRule(overrides: StoreOverrides, follow: boolean | null): StoreOverrides {
+  const global: GlobalOverride = { ...overrides.global };
+  if (follow == null) delete global.followSaleRule;
+  else global.followSaleRule = follow;
+  return { ...overrides, global };
+}
+
+/**
  * Set (or, when `follow` is null, clear) a product's sale-rule choice. Returns a
- * new blob — never mutates the input. Clearing removes the key so the default
- * (follow the sale rule) applies again.
+ * new blob — never mutates the input. Clearing removes the key so the store-wide
+ * default applies again.
  */
 export function withProductSaleRule(
   overrides: StoreOverrides,
@@ -82,9 +101,17 @@ export function withVariationPrice(
   return { ...overrides, variations };
 }
 
-/** The sale-rule choice for a product (default true — preserve sale prices). */
+/** The store-wide sale-rule default (true — preserve sale prices — unless set). */
+export function globalFollowSaleRule(overrides: StoreOverrides): boolean {
+  return overrides.global.followSaleRule ?? true;
+}
+
+/**
+ * The effective sale-rule choice for a product: a per-product override wins,
+ * else the store-wide default, else true (preserve sale prices).
+ */
 export function followSaleRuleFor(overrides: StoreOverrides, sku: string): boolean {
-  return overrides.products[productKey(sku)]?.followSaleRule ?? true;
+  return overrides.products[productKey(sku)]?.followSaleRule ?? globalFollowSaleRule(overrides);
 }
 
 /** The manual locked price for a variation, or null when none is set. */
