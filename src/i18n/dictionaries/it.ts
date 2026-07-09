@@ -41,6 +41,9 @@ export const it = {
     minAsks: (n: number) => `minAsks ${n}`,
     guardrailOn: "guardrail delta attivo",
     guardrailOff: "nessun limite delta",
+    discountRule: "Rivaluta scontati",
+    discountRuleHint:
+      "Se attivo, rivaluta anche le varianti in saldo (ignora il blocco sconti) per tutti i prodotti. Puoi comunque forzare un singolo prodotto dalla sua intestazione.",
     edit: "Modifica",
     cancel: "Annulla",
     reset: "Ripristina",
@@ -144,10 +147,14 @@ export const it = {
   },
   exportBar: {
     ready: (n: number) => `${n} ${n === 1 ? "variante pronta" : "varianti pronte"} all'esportazione`,
+    readySanitizeOnly: "Solo pulizia — nessuna variante selezionata",
     across: (n: number) =>
-      `In ${n} ${n === 1 ? "prodotto" : "prodotti"} · solo prezzi, tutto il resto invariato.`,
-    button: "Esporta JSON rivalutato",
+      `In ${n} ${n === 1 ? "prodotto" : "prodotti"} · prezzi + pulizia, tutto il resto invariato.`,
+    button: "Esporta JSON",
     building: "Generazione…",
+    sanitizeToggle: "Sanifica il file",
+    sanitizeToggleHint:
+      "Nello stesso file: rimuove le varianti fantasma (stock 0) e riallinea pa_taglia alle taglie reali.",
     variationsChanged: (n: number) => `${n} varianti rivalutate`,
     productsChanged: (n: number) => `${n} prodotti nel file`,
     gtins: (n: number) => `${n} GTIN scritti`,
@@ -172,18 +179,11 @@ export const it = {
     readError: "Impossibile leggere il file.",
     uploadFailed: "Caricamento fallito",
   },
+  // Sanitize counts shown in the export summary (sanitize is folded into export).
   sanitize: {
-    title: "Sanifica il file dello store",
-    desc: "Rimuove le varianti fantasma (stock 0) e riallinea pa_taglia alle taglie reali, per correggere le varianti che WooCommerce non mostra.",
-    button: "Sanifica ed esporta",
-    building: "Sanificazione…",
-    failed: "Sanificazione fallita",
     ghostsRemoved: (n: number) => `${n} varianti fantasma rimosse`,
     taglieRealigned: (n: number) => `${n} pa_taglia riallineati`,
     parentsRealigned: (n: number) => `${n} attributi prodotto riallineati`,
-    productsChanged: (n: number) => `${n} prodotti nel file`,
-    scanned: (p: number, v: number) => `${p} prodotti · ${v} varianti analizzate`,
-    clean: "Nessun problema trovato — niente da sanificare.",
   },
   catalog: {
     title: "Catalogo KicksDB",

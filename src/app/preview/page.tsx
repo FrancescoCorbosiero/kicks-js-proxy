@@ -2,6 +2,8 @@ import { PreviewWorkspace } from "@/components/preview/PreviewWorkspace";
 import { getActiveConfig } from "@/server/config/repo";
 import { pricingSummary } from "@/server/config/summary";
 import { getSnapshotInfo } from "@/server/store-json/repo";
+import { getOverrides } from "@/server/overrides/repo";
+import { globalFollowSaleRule } from "@/server/overrides/model";
 import { getServerDictionary } from "@/i18n/server";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,8 @@ export default async function PreviewPage() {
   const config = await getActiveConfig();
   const pricing = pricingSummary(config);
   const snapshotInfo = await getSnapshotInfo().catch(() => null);
+  const overrides = await getOverrides().catch(() => null);
+  const followSaleRule = overrides ? globalFollowSaleRule(overrides) : true;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -27,6 +31,7 @@ export default async function PreviewPage() {
         defaultMarket={config.source.market}
         snapshotInfo={snapshotInfo}
         pricing={pricing}
+        initialFollowSaleRule={followSaleRule}
       />
     </main>
   );

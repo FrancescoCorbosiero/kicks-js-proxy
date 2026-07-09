@@ -34,6 +34,9 @@ export const en: Dictionary = {
     minAsks: (n) => `minAsks ${n}`,
     guardrailOn: "delta guardrail on",
     guardrailOff: "no delta cap",
+    discountRule: "Reprice discounted",
+    discountRuleHint:
+      "When on, reprice discounted variations too (ignore the sale lock) for every product. You can still force a single product from its header.",
     edit: "Edit",
     cancel: "Cancel",
     reset: "Reset",
@@ -137,9 +140,13 @@ export const en: Dictionary = {
   },
   exportBar: {
     ready: (n) => `${n} variant${n === 1 ? "" : "s"} ready to export`,
-    across: (n) => `Across ${n} product${n === 1 ? "" : "s"} · prices only, everything else preserved.`,
-    button: "Export repriced JSON",
+    readySanitizeOnly: "Clean-up only — no variations selected",
+    across: (n) => `Across ${n} product${n === 1 ? "" : "s"} · prices + clean-up, everything else preserved.`,
+    button: "Export JSON",
     building: "Building…",
+    sanitizeToggle: "Sanitize file",
+    sanitizeToggleHint:
+      "In the same file: remove ghost variations (0 stock) and realign pa_taglia to the real sizes.",
     variationsChanged: (n) => `${n} variations repriced`,
     productsChanged: (n) => `${n} products in file`,
     gtins: (n) => `${n} GTINs written`,
@@ -164,18 +171,11 @@ export const en: Dictionary = {
     readError: "Could not read the file.",
     uploadFailed: "Upload failed",
   },
+  // Sanitize counts shown in the export summary (sanitize is folded into export).
   sanitize: {
-    title: "Sanitize your store file",
-    desc: "Removes ghost variations (0 stock) and realigns pa_taglia to the real sizes, fixing variations WooCommerce silently hides.",
-    button: "Sanitize & export",
-    building: "Sanitizing…",
-    failed: "Sanitize failed",
     ghostsRemoved: (n) => `${n} ghost variations removed`,
     taglieRealigned: (n) => `${n} pa_taglia realigned`,
     parentsRealigned: (n) => `${n} product attributes realigned`,
-    productsChanged: (n) => `${n} products in file`,
-    scanned: (p, v) => `${p} products · ${v} variations scanned`,
-    clean: "No issues found — nothing to sanitize.",
   },
   catalog: {
     title: "KicksDB catalog",

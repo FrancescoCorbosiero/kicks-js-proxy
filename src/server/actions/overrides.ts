@@ -2,11 +2,28 @@
 
 import { z } from "zod";
 import { getOverrides, saveOverrides } from "@/server/overrides/repo";
-import { withProductSaleRule, withVariationPrice } from "@/server/overrides/model";
+import { withGlobalSaleRule, withProductSaleRule, withVariationPrice } from "@/server/overrides/model";
 
 export interface OverrideResult {
   ok: boolean;
   error?: string;
+}
+
+const GlobalSaleRuleSchema = z.object({ followSaleRule: z.boolean().nullable() });
+
+/** Persist the store-wide sale-rule default — the bulk "ignore discounts" switch. */
+export async function setGlobalSaleRule(
+  input: z.infer<typeof GlobalSaleRuleSchema>,
+): Promise<OverrideResult> {
+  const parsed = GlobalSaleRuleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const current = await getOverrides();
+    await saveOverrides(withGlobalSaleRule(current, parsed.data.followSaleRule));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 const SaleRuleSchema = z.object({

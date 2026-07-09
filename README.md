@@ -82,15 +82,18 @@ computed price**:
 - **Manual price lock** (variant level) — set a price directly on a matched variation
   from the preview table. It wins over the StockX-computed price and never drifts on
   re-runs (like the sale-price safe-lock), and is what the export writes.
-- **Sale rule** (product level) — the historical "leave a discounted variation
-  untouched" behaviour is now a per-product toggle (**Preserve sales**), default on.
-  Turn it off to reprice discounted variations of that product too.
+- **Sale rule** — "leave a discounted variation untouched" is controlled by a bulk
+  **Reprice discounted** switch in the Pricing bar (store-wide, default off = preserve),
+  with a per-product override on each product header. Effective value =
+  **product override → global default → preserve**.
 
-**Sanitize** (`src/server/store-json/sanitize.ts`) produces a separate cleaned
-re-import JSON: it drops ghost variations (`stock_quantity === 0`) and realigns
-`pa_taglia` — both the per-variation value and the parent option list — to the real
-sizes, which fixes variations WooCommerce silently hides. Non-destructive: only changed
-products are emitted, everything else is preserved.
+**Sanitize is folded into the export**, not a separate file. `buildReimport`
+(`src/server/store-json/patch.ts`) sanitizes then reprices in one pass: with the
+export bar's **Sanitize file** toggle on (default), the single downloaded JSON both
+drops ghost variations (`stock_quantity === 0`) and realigns `pa_taglia` — per-variation
+value and parent option list — to the real sizes, then applies the selected price
+changes. A product is emitted if it was repriced **or** cleaned; everything else is
+preserved. Selecting nothing with the toggle on gives a clean-only file.
 
 ## Scripts
 
