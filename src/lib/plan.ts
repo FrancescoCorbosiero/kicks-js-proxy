@@ -22,10 +22,13 @@ export function summarize(items: Pick<PlanItem, "action">[]): PlanSummary {
 export interface PreviewPlan {
   planId: string;
   market: string;
+  sku: string; // parent SKU — the stable key for product/variation overrides
   title: string;
   brand: string;
   plan: Plan;
   summary: PlanSummary;
   euSizes: Record<string, string>; // stockxVariantId -> EU size, when known
   exactMatch: boolean; // sku/title exactly matches the search term
+  followSaleRule: boolean; // product-level: preserve manual sale prices (default true)
+  manualPrices: Record<string, number>; // stockxVariantId -> operator-locked price
 }

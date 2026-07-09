@@ -1,0 +1,179 @@
+import type { StoreModel, StoreProductModel, StoreVariation } from "./model";
+import { normSize, variationEuSize } from "./match";
+
+/**
+ * Two automatic fixes for the WooCommerce round-trip model, both known to cause
+ * the "variation silently not shown on the product page" glitch:
+ *
+ *  1. Ghost variations — a variation with stock_quantity === 0 is returned by the
+ *     JSON/REST APIs but never rendered on the storefront. They pile up and
+ *     conflict with the live ones, so we drop them.
+ *
+ *  2. Misaligned pa_taglia — Woo hides a variation whose `pa_taglia` value does
+ *     not line up with the sizes actually present. We realign every surviving
+ *     variation's `attribute_pa_taglia` to its true size (from the SKU suffix,
+ *     falling back to the existing value) and, when the parent product carries a
+ *     recognizable `pa_taglia` attribute, realign its option list to exactly the
+ *     surviving sizes.
+ *
+ * Pure and non-mutating: it clones the model, keeps only the products it actually
+ * changed (so the re-import touches nothing else), and preserves every other
+ * field (SEO, GMC, images, stock, …).
+ */
+
+export interface SanitizeReport {
+  productsScanned: number;
+  variationsScanned: number;
+  productsChanged: number;
+  ghostsRemoved: number; // variations dropped for zero stock
+  taglieRealigned: number; // variation pa_taglia values corrected
+  parentAttributesRealigned: number; // parent products whose pa_taglia options were realigned
+}
+
+export interface SanitizeOutcome {
+  output: StoreModel; // only changed products, everything else preserved
+  report: SanitizeReport;
+}
+
+/** Coerce a stock field (number or numeric string) to a number, else null. */
+function toNumber(x: unknown): number | null {
+  if (typeof x === "number") return Number.isFinite(x) ? x : null;
+  if (typeof x === "string" && x.trim() !== "") {
+    const n = Number.parseFloat(x);
+    return Number.isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+/** A variation is a ghost when its managed stock quantity is exactly zero. */
+function isGhost(vrt: StoreVariation): boolean {
+  return toNumber(vrt.stock_quantity) === 0;
+}
+
+/** The current pa_taglia value on a variation, as a plain string (or null). */
+function currentTaglia(vrt: StoreVariation): string | null {
+  const raw = vrt.attributes?.["attribute_pa_taglia"];
+  return raw == null ? null : String(raw);
+}
+
+/**
+ * Realign a parent product's `pa_taglia` attribute options to `sizes`. Handles
+ * the two shapes we've seen — an array of attribute objects, or an object keyed
+ * by attribute slug — and only rewrites an `options`/`values` list that already
+ * exists. Returns true if anything changed. Never throws on an unknown shape.
+ */
+function realignParentTaglia(product: StoreProductModel, sizes: string[]): boolean {
+  const attrs = (product as { attributes?: unknown }).attributes;
+  const isTaglia = (name: unknown) => String(name ?? "").toLowerCase().includes("taglia");
+
+  const applyTo = (attr: Record<string, unknown>): boolean => {
+    let changed = false;
+    for (const field of ["options", "values"] as const) {
+      const list = attr[field];
+      if (Array.isArray(list)) {
+        const next = sizes;
+        const same = list.length === next.length && list.every((x, i) => String(x) === next[i]);
+        if (!same) {
+          attr[field] = next;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  };
+
+  if (Array.isArray(attrs)) {
+    let changed = false;
+    for (const attr of attrs) {
+      if (attr && typeof attr === "object") {
+        const a = attr as Record<string, unknown>;
+        if (isTaglia(a.name) || isTaglia(a.slug)) changed = applyTo(a) || changed;
+      }
+    }
+    return changed;
+  }
+
+  if (attrs && typeof attrs === "object") {
+    let changed = false;
+    for (const [key, val] of Object.entries(attrs as Record<string, unknown>)) {
+      if (!isTaglia(key)) continue;
+      if (Array.isArray(val)) {
+        const same = val.length === sizes.length && val.every((x, i) => String(x) === sizes[i]);
+        if (!same) {
+          (attrs as Record<string, unknown>)[key] = sizes;
+          changed = true;
+        }
+      } else if (val && typeof val === "object") {
+        changed = applyTo(val as Record<string, unknown>) || changed;
+      }
+    }
+    return changed;
+  }
+
+  return false;
+}
+
+/** Sort size strings numerically ascending ("42.5" before "43"), stable on ties. */
+function sortSizes(sizes: string[]): string[] {
+  return [...sizes].sort((a, b) => {
+    const na = Number.parseFloat(a);
+    const nb = Number.parseFloat(b);
+    if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b);
+    return na - nb;
+  });
+}
+
+export function sanitizeModel(model: StoreModel): SanitizeOutcome {
+  const clone: StoreModel = structuredClone(model);
+  const report: SanitizeReport = {
+    productsScanned: clone.products.length,
+    variationsScanned: 0,
+    productsChanged: 0,
+    ghostsRemoved: 0,
+    taglieRealigned: 0,
+    parentAttributesRealigned: 0,
+  };
+  const changed = new Set<number>();
+
+  for (const product of clone.products) {
+    report.variationsScanned += product.variations.length;
+
+    // 1. Drop ghost (zero-stock) variations.
+    const kept: StoreVariation[] = [];
+    let removedHere = 0;
+    for (const vrt of product.variations) {
+      if (isGhost(vrt)) removedHere += 1;
+      else kept.push(vrt);
+    }
+    if (removedHere > 0) {
+      product.variations = kept;
+      report.ghostsRemoved += removedHere;
+      changed.add(product.id);
+    }
+
+    // 2. Realign each surviving variation's pa_taglia to its true size.
+    const sizes: string[] = [];
+    for (const vrt of product.variations) {
+      const desired = variationEuSize(product.sku, vrt); // SKU suffix first, then pa_taglia
+      if (desired) sizes.push(desired);
+      if (desired && currentTaglia(vrt) !== desired) {
+        vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
+        report.taglieRealigned += 1;
+        changed.add(product.id);
+      }
+    }
+
+    // 3. Realign the parent product's pa_taglia option list to the surviving sizes.
+    const unique = sortSizes([...new Set(sizes)]);
+    if (unique.length > 0 && realignParentTaglia(product, unique)) {
+      report.parentAttributesRealigned += 1;
+      changed.add(product.id);
+    }
+  }
+
+  clone.products = clone.products.filter((p) => changed.has(p.id));
+  if (typeof clone.product_count === "number") clone.product_count = clone.products.length;
+  report.productsChanged = changed.size;
+
+  return { output: clone, report };
+}

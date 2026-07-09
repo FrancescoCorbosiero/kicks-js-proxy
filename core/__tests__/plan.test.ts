@@ -62,6 +62,42 @@ describe("buildPlan", () => {
     expect(plan.items[0].reason).toContain("discounted");
   });
 
+  it("update — followSaleRule:false reprices a discounted variation", () => {
+    const cfg = makeConfig([flatRule()]);
+    const map = new Map([["v1", { ...mapping(11, 90), saleActive: true }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map, {
+      followSaleRule: false,
+    });
+    expect(plan.items[0]).toMatchObject({ action: "update", proposedPrice: 100 });
+  });
+
+  it("update — manual price wins over the computed price and locks the row", () => {
+    const cfg = makeConfig([flatRule()]);
+    const map = new Map([["v1", { ...mapping(11, 90), manualPrice: 250 }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0]).toMatchObject({
+      action: "update",
+      proposedPrice: 250,
+      locked: true,
+    });
+    expect(plan.items[0].reason).toContain("manual");
+  });
+
+  it("noop — manual price equal to the current price needs no change", () => {
+    const cfg = makeConfig([flatRule()]);
+    const map = new Map([["v1", { ...mapping(11, 250), manualPrice: 250 }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0]).toMatchObject({ action: "noop", locked: true });
+  });
+
+  it("manual price wins even over an active sale and a missing offer", () => {
+    const cfg = makeConfig([flatRule()]);
+    const noOffer: SourceVariant = { stockxVariantId: "v1", sizeLabel: "9", sizeType: "us m", offers: [] };
+    const map = new Map([["v1", { ...mapping(11, 90), saleActive: true, manualPrice: 300 }]]);
+    const plan = buildPlan(makeProduct([noOffer]), cfg, map);
+    expect(plan.items[0]).toMatchObject({ action: "update", proposedPrice: 300, locked: true });
+  });
+
   it("skip — change exceeds maxDeltaPercent guardrail", () => {
     const cfg = makeConfig([flatRule({ maxDeltaPercent: 5 })]);
     const map = new Map([["v1", mapping(11, 90)]]); // 90 -> 100 is ~11% > 5%

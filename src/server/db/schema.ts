@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { AppConfig } from "@core/config";
 import type { Plan, PlanItem, ApplyResult, SourceProduct } from "@core/core-spine";
+import type { StoreOverrides } from "@/server/overrides/model";
 
 /**
  * The persisted AppConfig. Secrets (in ConnectionConfig) are injected from env at
@@ -115,6 +116,19 @@ export const storeSnapshot = pgTable("store_snapshot", {
 });
 
 export type StoreSnapshotRow = typeof storeSnapshot.$inferSelect;
+
+/**
+ * Operator overrides that outlive the snapshot: per-product sale-rule choice and
+ * per-variation manual locked prices. Single active row (one operator), stored
+ * whole as jsonb — keyed by stable SKU/size identities, not Woo row ids.
+ */
+export const storeOverrides = pgTable("store_overrides", {
+  id: text("id").primaryKey().default("current"),
+  data: jsonb("data").$type<StoreOverrides>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type StoreOverridesRow = typeof storeOverrides.$inferSelect;
 
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;

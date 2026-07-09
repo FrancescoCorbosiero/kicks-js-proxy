@@ -272,6 +272,7 @@ export interface PlanItem {
     proposedPrice: number | null;
     action: PlanAction;
     reason?: string; // e.g. "no offer for chosen delivery type", "below minAsks"
+    locked?: boolean; // operator-set manual price wins over the computed price
 }
 
 export interface Plan {
@@ -288,17 +289,36 @@ export interface VariantMapping {
     storeVariationId: number;
     currentPrice: number | null;
     saleActive?: boolean; // store variation has a manual discount (sale_price) -> preserve it
+    manualPrice?: number | null; // operator-locked price: wins over the computed price
+}
+
+/** Per-product knobs for buildPlan; all optional so existing callers are unaffected. */
+export interface BuildPlanOptions {
+    // Preserve variations that carry a manual discount (sale_price). Default true —
+    // the historical behaviour. Set false, per product, to reprice discounted
+    // variations too.
+    followSaleRule?: boolean;
 }
 
 export function buildPlan(
     product: SourceProduct,
     config: AppConfig,
     mappings: Map<string, VariantMapping>, // keyed by stockxVariantId (or by upc)
+    options: BuildPlanOptions = {},
 ): Plan {
+    const followSaleRule = options.followSaleRule ?? true;
     const items = product.variants.map<PlanItem>((v) => {
-        const rule = resolveEffectiveRule(product, v, config);
         const m = mappings.get(v.stockxVariantId);
 
+        // Highest precedence: an operator-locked manual price. It wins over the
+        // sale rule and the computed price, and never drifts on re-runs. Only
+        // meaningful for a variation that exists on the store (has a mapping).
+        if (m && m.manualPrice != null) {
+            const action = m.currentPrice === m.manualPrice ? "noop" : "update";
+            return { ...baseItem(v, m, m.manualPrice, action, "manual price (locked)"), locked: true };
+        }
+
+        const rule = resolveEffectiveRule(product, v, config);
         if (!rule) {
             return baseItem(v, m, null, "skip", "no pricing rule matches");
         }
@@ -311,7 +331,7 @@ export function buildPlan(
             // Not on the store yet -> upsert path would create it.
             return baseItem(v, undefined, proposed, "create");
         }
-        if (m.saleActive) {
+        if (m.saleActive && followSaleRule) {
             // Owner-set discount wins: leave the variation untouched entirely.
             return baseItem(v, m, proposed, "skip", "discounted — sale price preserved");
         }
