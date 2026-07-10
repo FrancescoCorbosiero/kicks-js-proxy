@@ -25,7 +25,8 @@ export interface SanitizeReport {
   productsScanned: number;
   variationsScanned: number;
   productsChanged: number;
-  ghostsRemoved: number; // variations dropped for zero stock
+  ghostsRemoved: number; // zero-stock variations dropped (NOT on KicksDB)
+  stockSynthesized: number; // zero-stock variations kept + made available (on KicksDB)
   taglieRealigned: number; // variation pa_taglia values corrected
   parentAttributesRealigned: number; // parent products whose pa_taglia options were realigned
 }
@@ -126,24 +127,47 @@ function sortSizes(sizes: string[]): string[] {
 /** The counts a single-product sanitize produced. */
 export interface ProductSanitizeResult {
   ghostsRemoved: number;
+  stockSynthesized: number;
   taglieRealigned: number;
   parentRealigned: boolean;
   changed: boolean;
 }
 
+/** Make a zero-stock variation available without a fake count: KicksDB has no
+ *  stock, so if StockX carries the size we sell it on demand. */
+function makeAvailable(vrt: StoreVariation): void {
+  vrt.stock_status = "instock";
+  vrt.manage_stock = false;
+}
+
 /**
- * Sanitize ONE product in place (mutates it): drop ghosts, realign each
- * variation's pa_taglia, realign the parent option list. Returns the counts and
- * whether anything changed. Shared by the standalone sanitize and the unified
- * reprice+sanitize export so both behave identically.
+ * Sanitize ONE product in place (mutates it). A zero-stock variation is a GHOST
+ * only when it is NOT on KicksDB (`keepAvailable` — the store variation ids
+ * present on KicksDB) — those are dropped. A zero-stock variation that IS on
+ * KicksDB is KEPT and made available (StockX carries the size), never cut. Then
+ * realign each surviving variation's pa_taglia and the parent option list.
+ * Shared by the standalone sanitize and the unified reprice+sanitize export.
  */
-export function sanitizeProduct(product: StoreProductModel): ProductSanitizeResult {
-  // 1. Drop ghost (zero-stock) variations.
+export function sanitizeProduct(
+  product: StoreProductModel,
+  keepAvailable: ReadonlySet<number> = new Set(),
+): ProductSanitizeResult {
+  // 1. Zero-stock variations: drop true ghosts, keep + make-available KicksDB ones.
   const kept: StoreVariation[] = [];
   let ghostsRemoved = 0;
+  let stockSynthesized = 0;
   for (const vrt of product.variations) {
-    if (isGhost(vrt)) ghostsRemoved += 1;
-    else kept.push(vrt);
+    if (isGhost(vrt)) {
+      if (keepAvailable.has(vrt.id)) {
+        makeAvailable(vrt);
+        stockSynthesized += 1;
+        kept.push(vrt); // on KicksDB -> stays, now visible
+      } else {
+        ghostsRemoved += 1; // truly dead -> drop
+      }
+    } else {
+      kept.push(vrt);
+    }
   }
   if (ghostsRemoved > 0) product.variations = kept;
 
@@ -165,9 +189,10 @@ export function sanitizeProduct(product: StoreProductModel): ProductSanitizeResu
 
   return {
     ghostsRemoved,
+    stockSynthesized,
     taglieRealigned,
     parentRealigned,
-    changed: ghostsRemoved > 0 || taglieRealigned > 0 || parentRealigned,
+    changed: ghostsRemoved > 0 || stockSynthesized > 0 || taglieRealigned > 0 || parentRealigned,
   };
 }
 
@@ -178,6 +203,7 @@ export function sanitizeModel(model: StoreModel): SanitizeOutcome {
     variationsScanned: 0,
     productsChanged: 0,
     ghostsRemoved: 0,
+    stockSynthesized: 0,
     taglieRealigned: 0,
     parentAttributesRealigned: 0,
   };
@@ -187,6 +213,7 @@ export function sanitizeModel(model: StoreModel): SanitizeOutcome {
     report.variationsScanned += product.variations.length;
     const r = sanitizeProduct(product);
     report.ghostsRemoved += r.ghostsRemoved;
+    report.stockSynthesized += r.stockSynthesized;
     report.taglieRealigned += r.taglieRealigned;
     if (r.parentRealigned) report.parentAttributesRealigned += 1;
     if (r.changed) changed.add(product.id);

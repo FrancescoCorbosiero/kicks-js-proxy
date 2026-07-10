@@ -173,7 +173,8 @@ export const en: Dictionary = {
   },
   // Sanitize counts shown in the export summary (sanitize is folded into export).
   sanitize: {
-    ghostsRemoved: (n) => `${n} ghost variations removed`,
+    stockSynthesized: (n) => `${n} made available (on KicksDB)`,
+    ghostsRemoved: (n) => `${n} ghosts removed (not on KicksDB)`,
     taglieRealigned: (n) => `${n} pa_taglia realigned`,
     parentsRealigned: (n) => `${n} product attributes realigned`,
   },

@@ -11,6 +11,11 @@ const ExportInputSchema = z.object({
     .default([]),
   // Also clean the store in the same file: drop ghosts + realign pa_taglia.
   sanitize: z.boolean().default(true),
+  // Store variation ids present on KicksDB -> zero-stock ones are kept + made
+  // available, not dropped. And the store product ids that were previewed, so
+  // sanitize only touches products we actually have KicksDB data for.
+  kicksdbVariationIds: z.array(z.number()).default([]),
+  previewedProductIds: z.array(z.number()).default([]),
 });
 export type ExportInput = z.infer<typeof ExportInputSchema>;
 
@@ -21,6 +26,7 @@ export interface ExportSummary {
   unmatched: number;
   sanitized: boolean;
   ghostsRemoved: number;
+  stockSynthesized: number;
   taglieRealigned: number;
   parentAttributesRealigned: number;
 }
@@ -67,7 +73,11 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
   }
 
   const sanitize = parsed.data.sanitize;
-  const built = buildReimport(snapshot, patches, { sanitize });
+  const built = buildReimport(snapshot, patches, {
+    sanitize,
+    kicksdbVariationIds: new Set(parsed.data.kicksdbVariationIds),
+    previewedProductIds: new Set(parsed.data.previewedProductIds),
+  });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
 
   return {
@@ -81,6 +91,7 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
       unmatched,
       sanitized: sanitize,
       ghostsRemoved: built.ghostsRemoved,
+      stockSynthesized: built.stockSynthesized,
       taglieRealigned: built.taglieRealigned,
       parentAttributesRealigned: built.parentAttributesRealigned,
     },

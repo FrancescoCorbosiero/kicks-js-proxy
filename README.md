@@ -89,11 +89,18 @@ computed price**:
 
 **Sanitize is folded into the export**, not a separate file. `buildReimport`
 (`src/server/store-json/patch.ts`) sanitizes then reprices in one pass: with the
-export bar's **Sanitize file** toggle on (default), the single downloaded JSON both
-drops ghost variations (`stock_quantity === 0`) and realigns `pa_taglia` — per-variation
-value and parent option list — to the real sizes, then applies the selected price
-changes. A product is emitted if it was repriced **or** cleaned; everything else is
-preserved. Selecting nothing with the toggle on gives a clean-only file.
+export bar's **Sanitize file** toggle on (default), the single downloaded JSON cleans
+the store and applies the selected price changes together.
+
+KicksDB carries **no stock**, so a Woo `stock_quantity === 0` does **not** mean
+unavailable. Sanitize therefore treats a zero-stock variation as a ghost **only when
+it is not on KicksDB** — a zero-stock variation that StockX prices is *kept and made
+available* (`stock_status: instock`, `manage_stock: false`, so it sells on demand),
+never cut. The KicksDB-present set (`kicksdbVariationIds`) and the set of previewed
+products (`previewedProductIds`, so a subset/manual run never touches products it never
+fetched) are derived from the plans and passed into `buildReimport`. Sanitize also
+realigns `pa_taglia` — per-variation value and parent option list — to the real sizes.
+A product is emitted if it was repriced **or** cleaned; everything else is preserved.
 
 ## Scripts
 

@@ -292,6 +292,24 @@ export function PreviewWorkspace({
     }))
     .filter((s) => s.variantIds.length > 0);
 
+  // Sanitize inputs, derived from the whole preview (not just the selection):
+  // store variations that are priceable on KicksDB (kept + made available if
+  // zero-stock), and the store products we actually fetched (only these are
+  // sanitized). Both dedup'd across all plans.
+  const kicksdbVariationIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of plans)
+      for (const i of p.plan.items)
+        if (i.storeVariationId != null && i.proposedPrice != null) ids.add(i.storeVariationId);
+    return [...ids];
+  }, [plans]);
+  const previewedProductIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of plans)
+      for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
+    return [...ids];
+  }, [plans]);
+
   const priceChips: string[] = [
     price.markupPercent != null ? t.pricing.markup(price.markupPercent) : t.pricing.noMarkup,
     ...(price.vatRatePercent ? [t.pricing.vat(price.vatRatePercent)] : []),
@@ -603,7 +621,11 @@ export function PreviewWorkspace({
             ))}
           </div>
 
-          <ExportBar selections={applySelections} />
+          <ExportBar
+            selections={applySelections}
+            kicksdbVariationIds={kicksdbVariationIds}
+            previewedProductIds={previewedProductIds}
+          />
         </div>
       )}
     </div>

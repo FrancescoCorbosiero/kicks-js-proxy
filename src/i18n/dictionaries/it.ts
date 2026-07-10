@@ -181,7 +181,8 @@ export const it = {
   },
   // Sanitize counts shown in the export summary (sanitize is folded into export).
   sanitize: {
-    ghostsRemoved: (n: number) => `${n} varianti fantasma rimosse`,
+    stockSynthesized: (n: number) => `${n} rese disponibili (su KicksDB)`,
+    ghostsRemoved: (n: number) => `${n} fantasma rimosse (non su KicksDB)`,
     taglieRealigned: (n: number) => `${n} pa_taglia riallineati`,
     parentsRealigned: (n: number) => `${n} attributi prodotto riallineati`,
   },

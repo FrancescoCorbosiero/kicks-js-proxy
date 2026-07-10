@@ -202,6 +202,34 @@ describe("buildReimport — reprice + sanitize in one file", () => {
     expect(input.products[0].variations).toHaveLength(2);
     expect(input.products[0].variations[0].regular_price).toBe("100.00");
   });
+
+  it("keeps + makes available a zero-stock variation that IS on KicksDB", () => {
+    // variation 12 is zero-stock but present on KicksDB -> kept & made available,
+    // NOT dropped. Variation 21 (product 2, not on KicksDB) is still a ghost.
+    const out = buildReimport(mixed(), new Map(), {
+      sanitize: true,
+      kicksdbVariationIds: new Set([12]),
+      previewedProductIds: new Set([1, 2]),
+    });
+    expect(out.stockSynthesized).toBe(1);
+    expect(out.ghostsRemoved).toBe(1); // only variation 21
+
+    const v12 = out.output.products.find((p) => p.id === 1)!.variations.find((v) => v.id === 12)!;
+    expect(v12).toBeDefined(); // kept, not cut
+    expect(v12.stock_status).toBe("instock");
+    expect(v12.manage_stock).toBe(false);
+  });
+
+  it("only sanitizes products that were previewed", () => {
+    // Preview covered product 1 only -> product 2 is left entirely alone.
+    const out = buildReimport(mixed(), new Map(), {
+      sanitize: true,
+      kicksdbVariationIds: new Set(),
+      previewedProductIds: new Set([1]),
+    });
+    expect(out.ghostsRemoved).toBe(1); // product 1's ghost only
+    expect(out.output.products.find((p) => p.id === 2)).toBeUndefined(); // untouched, not in file
+  });
 });
 
 describe("parseStoreModel", () => {

@@ -61,37 +61,61 @@ export interface ReimportOutcome {
   productsChanged: number;
   variationsChanged: number; // variations repriced
   gtinsWritten: number;
-  ghostsRemoved: number; // zero-stock variations dropped (sanitize)
+  ghostsRemoved: number; // zero-stock variations dropped — NOT on KicksDB (sanitize)
+  stockSynthesized: number; // zero-stock variations kept + made available — on KicksDB
   taglieRealigned: number; // pa_taglia values corrected (sanitize)
   parentAttributesRealigned: number; // parent option lists realigned (sanitize)
+}
+
+export interface ReimportOptions {
+  sanitize: boolean;
+  /**
+   * Store variation ids present (and priceable) on KicksDB. A zero-stock variation
+   * in this set is KEPT and made available (StockX carries the size) instead of
+   * being dropped as a ghost. Defaults to empty — treat every zero-stock as a ghost.
+   */
+  kicksdbVariationIds?: ReadonlySet<number>;
+  /**
+   * Store product ids that were part of the preview (we have KicksDB data for them).
+   * Sanitize only touches these, so a subset/manual run never cuts variations of
+   * products it never fetched. Omit to sanitize every product (whole-store runs).
+   */
+  previewedProductIds?: ReadonlySet<number>;
 }
 
 /**
  * The single re-import build: **sanitize first, then reprice**, in one pass, so
  * one downloaded file both fixes prices and cleans the store. Sanitizing first
  * means ghost variations are gone before repricing, so a patch never lands on a
- * variation that's about to be removed. A product is kept if it was repriced OR
- * sanitized; everything else (SEO, GMC, stock, images) is preserved. When
- * `sanitize` is false this degrades to a pure reprice. Never mutates the input.
+ * variation that's about to be removed. Crucially, a zero-stock variation that is
+ * on KicksDB is NOT a ghost — it's kept and made available — because KicksDB has
+ * no stock field and StockX can source the size. A product is kept in the output
+ * if it was repriced OR sanitized; everything else (SEO, GMC, stock, images) is
+ * preserved. When `sanitize` is false this degrades to a pure reprice. Never
+ * mutates the input.
  */
 export function buildReimport(
   model: StoreModel,
   patches: Map<number, VariationPatch>,
-  options: { sanitize: boolean },
+  options: ReimportOptions,
 ): ReimportOutcome {
   const clone: StoreModel = structuredClone(model);
+  const keepAvailable = options.kicksdbVariationIds ?? new Set<number>();
+  const previewed = options.previewedProductIds; // undefined => sanitize all products
   const changed = new Set<number>();
   let variationsChanged = 0;
   let gtinsWritten = 0;
   let ghostsRemoved = 0;
+  let stockSynthesized = 0;
   let taglieRealigned = 0;
   let parentAttributesRealigned = 0;
 
   for (const p of clone.products) {
-    // 1. Sanitize (drops ghosts, realigns pa_taglia) so repricing sees the clean set.
-    if (options.sanitize) {
-      const r = sanitizeProduct(p);
+    // 1. Sanitize (only products we have KicksDB data for) before repricing.
+    if (options.sanitize && (!previewed || previewed.has(p.id))) {
+      const r = sanitizeProduct(p, keepAvailable);
       ghostsRemoved += r.ghostsRemoved;
+      stockSynthesized += r.stockSynthesized;
       taglieRealigned += r.taglieRealigned;
       if (r.parentRealigned) parentAttributesRealigned += 1;
       if (r.changed) changed.add(p.id);
@@ -127,6 +151,7 @@ export function buildReimport(
     variationsChanged,
     gtinsWritten,
     ghostsRemoved,
+    stockSynthesized,
     taglieRealigned,
     parentAttributesRealigned,
   };

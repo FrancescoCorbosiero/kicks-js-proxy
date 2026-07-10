@@ -9,6 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 interface Props {
   selections: { planId: string; variantIds: string[] }[];
+  kicksdbVariationIds: number[]; // zero-stock + on KicksDB -> kept & made available
+  previewedProductIds: number[]; // only these products are sanitized
 }
 
 function downloadJson(filename: string, json: string) {
@@ -21,7 +23,7 @@ function downloadJson(filename: string, json: string) {
   URL.revokeObjectURL(url);
 }
 
-export function ExportBar({ selections }: Props) {
+export function ExportBar({ selections, kicksdbVariationIds, previewedProductIds }: Props) {
   const { t } = useI18n();
   const [pending, start] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
@@ -35,7 +37,12 @@ export function ExportBar({ selections }: Props) {
     setError(null);
     setSummary(null);
     start(async () => {
-      const res = await exportRepricedJson({ selections, sanitize });
+      const res = await exportRepricedJson({
+        selections,
+        sanitize,
+        kicksdbVariationIds,
+        previewedProductIds,
+      });
       if (!res.ok || !res.json) {
         setError(res.error ?? t.exportBar.failed);
         return;
@@ -95,6 +102,9 @@ export function ExportBar({ selections }: Props) {
           <span className="font-semibold">{t.exportBar.variationsChanged(summary.variationsChanged)}</span>
           {summary.sanitized && (
             <>
+              {summary.stockSynthesized > 0 && (
+                <span className="text-up">{t.sanitize.stockSynthesized(summary.stockSynthesized)}</span>
+              )}
               <span className="text-down">{t.sanitize.ghostsRemoved(summary.ghostsRemoved)}</span>
               <span className="text-muted">{t.sanitize.taglieRealigned(summary.taglieRealigned)}</span>
               {summary.parentAttributesRealigned > 0 && (
