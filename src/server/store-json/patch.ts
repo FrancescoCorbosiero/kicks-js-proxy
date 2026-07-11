@@ -1,5 +1,5 @@
 import type { StoreModel } from "./model";
-import { sanitizeProduct } from "./sanitize";
+import { alignParentOptions, sanitizeProduct } from "./sanitize";
 
 /** A per-variation change: a new price and/or a GTIN to stamp into global_unique_id. */
 export interface VariationPatch {
@@ -112,6 +112,7 @@ export function buildReimport(
 
   for (const p of clone.products) {
     // 1. Sanitize (only products we have KicksDB data for) before repricing.
+    let sanitized = false;
     if (options.sanitize && (!previewed || previewed.has(p.id))) {
       const r = sanitizeProduct(p, keepAvailable);
       ghostsRemoved += r.ghostsRemoved;
@@ -119,6 +120,7 @@ export function buildReimport(
       taglieRealigned += r.taglieRealigned;
       if (r.parentRealigned) parentAttributesRealigned += 1;
       if (r.changed) changed.add(p.id);
+      sanitized = true;
     }
 
     // 2. Reprice the surviving, selected variations.
@@ -139,6 +141,13 @@ export function buildReimport(
         variationsChanged += 1;
         changed.add(p.id);
       }
+    }
+
+    // 3. Any product we emit must carry a pa_taglia option list that matches its
+    // variations — else the importer's option-replace drifts the dropdown.
+    // Sanitize already did this; do it for emitted-but-not-sanitized products too.
+    if (!sanitized && changed.has(p.id) && alignParentOptions(p)) {
+      parentAttributesRealigned += 1;
     }
   }
 

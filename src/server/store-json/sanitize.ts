@@ -141,6 +141,23 @@ function makeAvailable(vrt: StoreVariation): void {
 }
 
 /**
+ * Realign a product's parent `pa_taglia` option list to the sizes of its CURRENT
+ * variations (mutates in place). The importer REPLACES the size-attribute options
+ * with whatever we send on a variable update, so the option list must always
+ * match the variations we actually emit — otherwise the dropdown drifts. Returns
+ * true if the option list changed.
+ */
+export function alignParentOptions(product: StoreProductModel): boolean {
+  const sizes: string[] = [];
+  for (const vrt of product.variations) {
+    const s = variationEuSize(product.sku, vrt);
+    if (s) sizes.push(s);
+  }
+  const unique = sortSizes([...new Set(sizes)]);
+  return unique.length > 0 && realignParentTaglia(product, unique);
+}
+
+/**
  * Sanitize ONE product in place (mutates it). A zero-stock variation is a GHOST
  * only when it is NOT on KicksDB (`keepAvailable` — the store variation ids
  * present on KicksDB) — those are dropped. A zero-stock variation that IS on
@@ -172,11 +189,9 @@ export function sanitizeProduct(
   if (ghostsRemoved > 0) product.variations = kept;
 
   // 2. Realign each surviving variation's pa_taglia to its true size.
-  const sizes: string[] = [];
   let taglieRealigned = 0;
   for (const vrt of product.variations) {
     const desired = variationEuSize(product.sku, vrt); // SKU suffix first, then pa_taglia
-    if (desired) sizes.push(desired);
     if (desired && currentTaglia(vrt) !== desired) {
       vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
       taglieRealigned += 1;
@@ -184,8 +199,7 @@ export function sanitizeProduct(
   }
 
   // 3. Realign the parent product's pa_taglia option list to the surviving sizes.
-  const unique = sortSizes([...new Set(sizes)]);
-  const parentRealigned = unique.length > 0 && realignParentTaglia(product, unique);
+  const parentRealigned = alignParentOptions(product);
 
   return {
     ghostsRemoved,

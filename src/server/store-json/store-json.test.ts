@@ -230,6 +230,20 @@ describe("buildReimport — reprice + sanitize in one file", () => {
     expect(out.ghostsRemoved).toBe(1); // product 1's ghost only
     expect(out.output.products.find((p) => p.id === 2)).toBeUndefined(); // untouched, not in file
   });
+
+  it("realigns parent pa_taglia options even on a reprice-only (sanitize:false) export", () => {
+    // The importer replaces the option list with whatever we send, so even a pure
+    // reprice must ship options that match the emitted variations — no drift.
+    const m = mixed();
+    (m.products[0] as { attributes?: unknown }).attributes = {
+      pa_taglia: { options: ["42", "43", "99"], variation: true }, // "99" is stale
+    };
+    const out = buildReimport(m, new Map([[11, { price: 120 }]]), { sanitize: false });
+    expect(out.parentAttributesRealigned).toBe(1);
+    const p1 = out.output.products.find((p) => p.id === 1)!;
+    const opts = (p1.attributes as { pa_taglia: { options: string[] } }).pa_taglia.options;
+    expect(opts).toEqual(["42", "43"]); // matches emitted variations (ghost NOT dropped, but 99 gone)
+  });
 });
 
 describe("parseStoreModel", () => {
