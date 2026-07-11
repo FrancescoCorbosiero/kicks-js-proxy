@@ -71,6 +71,9 @@ export const it = {
     fetching: "Recupero…",
     diagnose: "Diagnostica match",
     testBulk: "Test prezzi bulk",
+    stale: (days: number) => `Snapshot di ${days} giorni fa`,
+    staleHint:
+      "Lo snapshot è una fotografia del tuo store. Se è datato, ri-esporta da WooCommerce e ricaricalo per lavorare su dati aggiornati.",
   },
   search: {
     summary: "Oppure cerca manualmente (per SKU / query)",
@@ -195,6 +198,10 @@ export const it = {
     market: "Mercato",
     total: (n: number) => `${n} SKU recuperabili`,
     filterPlaceholder: "Filtra per SKU, modello o brand…",
+    selectAll: "Tutti",
+    selected: (n: number) => `${n} selezionati`,
+    previewSelected: (n: number) => `Anteprima selezionati (${n})`,
+    previewAll: (n: number) => `Anteprima tutti (${n})`,
     copy: (n: number) => `Copia SKU (${n})`,
     copied: "Copiato",
     empty: "Catalogo vuoto — esegui un'anteprima per popolarlo.",

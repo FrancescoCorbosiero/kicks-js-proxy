@@ -34,8 +34,9 @@ import { CatalogPanel } from "./CatalogPanel";
 
 type Mode = "skus" | "query";
 
-/** How the current view was produced — so an override change replays it exactly. */
-type LastRun = { kind: "store" } | { kind: "manual"; input: PreviewInput };
+/** How the current view was produced — so an override change replays it exactly.
+ *  A "store" run with `skus` is a catalog-driven subset; without, the whole file. */
+type LastRun = { kind: "store"; skus?: string[] } | { kind: "manual"; input: PreviewInput };
 
 const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 
@@ -68,6 +69,7 @@ export function PreviewWorkspace({
   const [pinging, startPing] = React.useTransition();
   const [hasSnapshot, setHasSnapshot] = React.useState(!!snapshotInfo);
   const [storeCount, setStoreCount] = React.useState(snapshotInfo?.productCount ?? 0);
+  const [uploadedAt, setUploadedAt] = React.useState<string | null>(snapshotInfo?.uploadedAt ?? null);
   const [diag, setDiag] = React.useState<string | null>(null);
   const [diagPending, startDiag] = React.useTransition();
   const [price, setPrice] = React.useState<PricingSummary>(pricing);
@@ -186,13 +188,21 @@ export function PreviewWorkspace({
     startTransition(async () => applyResult(await previewFromStore(market), true));
   }
 
+  /** Catalog-driven: reprice a chosen set of catalog SKUs against the snapshot. */
+  function previewCatalogSkus(skus: string[], mkt: string) {
+    setError(null);
+    setMarket(mkt);
+    setLastRun({ kind: "store", skus });
+    startTransition(async () => applyResult(await previewFromStore(mkt, skus), true));
+  }
+
   /** Re-run whatever produced the current view (after an override change). */
   function rerun() {
     setError(null);
     startTransition(async () => {
       const res =
         lastRun.kind === "store"
-          ? await previewFromStore(market)
+          ? await previewFromStore(market, lastRun.skus)
           : await fetchAndPreview(lastRun.input);
       applyResult(res, lastRun.kind === "store" || lastRun.input.mode === "skus");
     });
@@ -234,6 +244,13 @@ export function PreviewWorkspace({
       if (hasSnapshot && plans.length > 0) rerun();
     });
   }
+
+  // Snapshot staleness: the file is a point-in-time export of the store, so warn
+  // (softly) once it's a week old — the remedy is to re-export from Woo + reload.
+  const staleDays = React.useMemo(() => {
+    if (!uploadedAt) return null;
+    return Math.floor((Date.now() - new Date(uploadedAt).getTime()) / 86_400_000);
+  }, [uploadedAt]);
 
   /** Rebuild the selection from a predicate over (plan, item). Quick-select. */
   function selectWhere(predicate: (p: PreviewPlan, item: PlanItem) => boolean) {
@@ -415,6 +432,7 @@ export function PreviewWorkspace({
         onLoaded={(info) => {
           setHasSnapshot(true);
           setStoreCount(info.productCount);
+          setUploadedAt(info.uploadedAt);
           loadFromStore(); // auto-fetch StockX for the whole file on upload
         }}
       />
@@ -426,6 +444,18 @@ export function PreviewWorkspace({
             <span className="font-semibold">{t.storeBar.title}</span>
             <span className="ml-2 text-muted">{t.storeBar.desc(storeCount)}</span>
           </div>
+          {staleDays != null && staleDays >= 7 && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-warn/30 bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn"
+              title={t.storeBar.staleHint}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-3.5 w-3.5">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {t.storeBar.stale(staleDays)}
+            </span>
+          )}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button type="button" variant="accent" onClick={loadFromStore} disabled={pending}>
               {pending ? (
@@ -527,7 +557,11 @@ export function PreviewWorkspace({
         </form>
       </details>
 
-      <CatalogPanel defaultMarket={defaultMarket} />
+      <CatalogPanel
+        defaultMarket={defaultMarket}
+        busy={pending}
+        onPreview={hasSnapshot ? previewCatalogSkus : undefined}
+      />
 
       {error && (
         <p className="rounded-lg border border-skip/25 bg-skip/10 px-4 py-3 text-sm text-skip animate-fade-up">
