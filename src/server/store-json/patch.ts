@@ -1,4 +1,4 @@
-import type { StoreModel } from "./model";
+import type { StoreModel, StoreVariation } from "./model";
 import { alignParentOptions, sanitizeProduct } from "./sanitize";
 
 /** A per-variation change: a new price and/or a GTIN to stamp into global_unique_id. */
@@ -12,6 +12,21 @@ export interface PatchOutcome {
   productsChanged: number;
   variationsChanged: number;
   gtinsWritten: number;
+  salesCleared: number;
+}
+
+/**
+ * When we set a price from Kicks (or a manual lock), that price IS the price — the
+ * variation must not stay on sale. Clear an active sale_price so WooCommerce stops
+ * marking it as discounted. Returns true if a live sale was actually cleared.
+ */
+function clearSale(vrt: StoreVariation): boolean {
+  const s = vrt.sale_price;
+  if (s == null || s === "") return false;
+  const n = Number.parseFloat(String(s));
+  if (Number.isNaN(n) || n <= 0) return false; // nothing meaningful to clear
+  vrt.sale_price = "";
+  return true;
 }
 
 /**
@@ -28,6 +43,7 @@ export function applyModelPatch(
   const changedProducts = new Set<number>();
   let variationsChanged = 0;
   let gtinsWritten = 0;
+  let salesCleared = 0;
 
   for (const p of clone.products) {
     for (const vrt of p.variations) {
@@ -36,6 +52,7 @@ export function applyModelPatch(
       let touched = false;
       if (patch.price != null) {
         vrt.regular_price = patch.price.toFixed(2);
+        if (clearSale(vrt)) salesCleared += 1; // priced -> not on sale
         touched = true;
       }
       if (patch.gtin && vrt.global_unique_id !== patch.gtin) {
@@ -53,7 +70,7 @@ export function applyModelPatch(
   clone.products = clone.products.filter((p) => changedProducts.has(p.id));
   if (typeof clone.product_count === "number") clone.product_count = clone.products.length;
 
-  return { output: clone, productsChanged: changedProducts.size, variationsChanged, gtinsWritten };
+  return { output: clone, productsChanged: changedProducts.size, variationsChanged, gtinsWritten, salesCleared };
 }
 
 export interface ReimportOutcome {
@@ -61,6 +78,7 @@ export interface ReimportOutcome {
   productsChanged: number;
   variationsChanged: number; // variations repriced
   gtinsWritten: number;
+  salesCleared: number; // stale sale_price removed from a repriced variation
   ghostsRemoved: number; // zero-stock variations dropped — NOT on KicksDB (sanitize)
   stockSynthesized: number; // zero-stock variations kept + made available — on KicksDB
   taglieRealigned: number; // pa_taglia values corrected (sanitize)
@@ -105,6 +123,7 @@ export function buildReimport(
   const changed = new Set<number>();
   let variationsChanged = 0;
   let gtinsWritten = 0;
+  let salesCleared = 0;
   let ghostsRemoved = 0;
   let stockSynthesized = 0;
   let taglieRealigned = 0;
@@ -130,6 +149,7 @@ export function buildReimport(
       let touched = false;
       if (patch.price != null) {
         vrt.regular_price = patch.price.toFixed(2);
+        if (clearSale(vrt)) salesCleared += 1; // priced from Kicks -> not on sale
         touched = true;
       }
       if (patch.gtin && vrt.global_unique_id !== patch.gtin) {
@@ -159,6 +179,7 @@ export function buildReimport(
     productsChanged: changed.size,
     variationsChanged,
     gtinsWritten,
+    salesCleared,
     ghostsRemoved,
     stockSynthesized,
     taglieRealigned,

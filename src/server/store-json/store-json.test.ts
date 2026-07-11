@@ -231,6 +231,34 @@ describe("buildReimport — reprice + sanitize in one file", () => {
     expect(out.output.products.find((p) => p.id === 2)).toBeUndefined(); // untouched, not in file
   });
 
+  it("clears an active sale_price on a repriced variation (no longer on sale)", () => {
+    const m: StoreModel = {
+      format: "rp_cm_roundtrip",
+      product_count: 1,
+      products: [
+        {
+          id: 1,
+          sku: "AA-1",
+          name: "P1",
+          variations: [
+            // on sale at 325, regular 452.61 — the Kicks reprice must remove the sale
+            { id: 11, sku: "AA-1-42", regular_price: "452.61", sale_price: "325", stock_quantity: 3 },
+            // untouched (not repriced) — its sale must be preserved
+            { id: 12, sku: "AA-1-43", regular_price: "300.00", sale_price: "250", stock_quantity: 2 },
+          ],
+        },
+      ],
+    };
+    const out = buildReimport(m, new Map([[11, { price: 374 }]]), { sanitize: false });
+    expect(out.salesCleared).toBe(1);
+    const p1 = out.output.products[0];
+    const v11 = p1.variations.find((v) => v.id === 11)!;
+    expect(v11.regular_price).toBe("374.00");
+    expect(v11.sale_price).toBe(""); // sale removed
+    const v12 = p1.variations.find((v) => v.id === 12)!;
+    expect(v12.sale_price).toBe("250"); // not repriced -> sale preserved
+  });
+
   it("realigns parent pa_taglia options even on a reprice-only (sanitize:false) export", () => {
     // The importer replaces the option list with whatever we send, so even a pure
     // reprice must ship options that match the emitted variations — no drift.

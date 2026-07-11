@@ -42,6 +42,18 @@ Our output is designed to make that safe.
    currency symbol or separators. We emit **no** currency field (store currency
    governs; market is EUR/IT). `format` and `version` pass through verbatim.
 
+6. **A repriced variation is NOT on sale.** When we write a Kicks (or manual-lock)
+   price to `regular_price`, we clear that variation's `sale_price` to `""` — the
+   Kicks price IS the price, so WooCommerce must not keep marking it discounted.
+   (Variations we don't reprice keep their `sale_price` untouched — e.g. the
+   default "preserve sales" mode skips discounted variations entirely.)
+
+   ⚠️ **Importer dependency:** your brief says empty/null are treated as no-op for
+   most fields. For this to work, an **explicitly empty `sale_price` on a variation
+   update must REMOVE the sale**, not be ignored. If empty = no-op for `sale_price`,
+   our clear won't take effect and the product stays on sale. Please confirm the
+   importer clears the sale on empty `sale_price` (or tell us the signal you want).
+
 ## Out of scope (unassigned)
 
 - **Whole-product retirement.** We have no "retire" signal and never hide whole

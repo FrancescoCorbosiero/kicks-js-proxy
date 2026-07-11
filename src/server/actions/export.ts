@@ -23,6 +23,7 @@ export interface ExportSummary {
   productsChanged: number;
   variationsChanged: number;
   gtinsWritten: number;
+  salesCleared: number;
   unmatched: number;
   sanitized: boolean;
   ghostsRemoved: number;
@@ -88,6 +89,7 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
       productsChanged: built.productsChanged,
       variationsChanged: built.variationsChanged,
       gtinsWritten: built.gtinsWritten,
+      salesCleared: built.salesCleared,
       unmatched,
       sanitized: sanitize,
       ghostsRemoved: built.ghostsRemoved,

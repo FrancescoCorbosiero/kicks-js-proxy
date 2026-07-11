@@ -313,8 +313,10 @@ export function buildPlan(
         // Highest precedence: an operator-locked manual price. It wins over the
         // sale rule and the computed price, and never drifts on re-runs. Only
         // meaningful for a variation that exists on the store (has a mapping).
+        // An active sale forces an update even when the price matches, so the
+        // export can clear the sale (the manual price is THE price, not a sale).
         if (m && m.manualPrice != null) {
-            const action = m.currentPrice === m.manualPrice ? "noop" : "update";
+            const action = m.currentPrice === m.manualPrice && !m.saleActive ? "noop" : "update";
             return { ...baseItem(v, m, m.manualPrice, action, "manual price (locked)"), locked: true };
         }
 
@@ -335,7 +337,10 @@ export function buildPlan(
             // Owner-set discount wins: leave the variation untouched entirely.
             return baseItem(v, m, proposed, "skip", "discounted — sale price preserved");
         }
-        if (m.currentPrice === proposed) {
+        // Price already correct AND nothing to clear -> noop. If the variation is
+        // still on sale here (only possible when followSaleRule is off), it needs
+        // an update so the export clears the stale sale_price.
+        if (m.currentPrice === proposed && !m.saleActive) {
             return baseItem(v, m, proposed, "noop");
         }
         // Plan-time guardrail: reject a change larger than maxDeltaPercent.

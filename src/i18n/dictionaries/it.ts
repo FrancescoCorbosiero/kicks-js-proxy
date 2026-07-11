@@ -159,6 +159,7 @@ export const it = {
     sanitizeToggleHint:
       "Nello stesso file: rimuove le varianti fantasma (stock 0) e riallinea pa_taglia alle taglie reali.",
     variationsChanged: (n: number) => `${n} varianti rivalutate`,
+    salesCleared: (n: number) => `${n} sconti rimossi`,
     productsChanged: (n: number) => `${n} prodotti nel file`,
     gtins: (n: number) => `${n} GTIN scritti`,
     unmatched: (n: number) => `${n} non sullo store (crea)`,

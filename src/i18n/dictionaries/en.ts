@@ -151,6 +151,7 @@ export const en: Dictionary = {
     sanitizeToggleHint:
       "In the same file: remove ghost variations (0 stock) and realign pa_taglia to the real sizes.",
     variationsChanged: (n) => `${n} variations repriced`,
+    salesCleared: (n) => `${n} sales cleared`,
     productsChanged: (n) => `${n} products in file`,
     gtins: (n) => `${n} GTINs written`,
     unmatched: (n) => `${n} not on store (create)`,

@@ -100,6 +100,9 @@ export function ExportBar({ selections, kicksdbVariationIds, previewedProductIds
       {summary && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-sm animate-fade-up">
           <span className="font-semibold">{t.exportBar.variationsChanged(summary.variationsChanged)}</span>
+          {summary.salesCleared > 0 && (
+            <span className="text-warn">{t.exportBar.salesCleared(summary.salesCleared)}</span>
+          )}
           {summary.sanitized && (
             <>
               {summary.stockSynthesized > 0 && (

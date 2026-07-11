@@ -71,6 +71,22 @@ describe("buildPlan", () => {
     expect(plan.items[0]).toMatchObject({ action: "update", proposedPrice: 100 });
   });
 
+  it("update — a discounted variation already at the target price still updates (to clear the sale)", () => {
+    const cfg = makeConfig([flatRule()]);
+    // current == proposed (100), but it's on sale and we're repricing it -> must
+    // update so the export clears the stale sale_price, not noop.
+    const map = new Map([["v1", { ...mapping(11, 100), saleActive: true }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map, { followSaleRule: false });
+    expect(plan.items[0].action).toBe("update");
+  });
+
+  it("update — a manual-locked variation on sale updates even when the price matches", () => {
+    const cfg = makeConfig([flatRule()]);
+    const map = new Map([["v1", { ...mapping(11, 250), manualPrice: 250, saleActive: true }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0]).toMatchObject({ action: "update", locked: true });
+  });
+
   it("update — manual price wins over the computed price and locks the row", () => {
     const cfg = makeConfig([flatRule()]);
     const map = new Map([["v1", { ...mapping(11, 90), manualPrice: 250 }]]);
