@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { StoreModel } from "./model";
-import { sanitizeModel } from "./sanitize";
+import type { StoreModel, StoreProductModel } from "./model";
+import { sanitizeModel, sanitizeProduct } from "./sanitize";
 
 /** A model shaped like the real "FV5029-010" export: some zero-stock ghosts, a
  *  parent pa_taglia attribute, per-variation attribute_pa_taglia. */
@@ -111,5 +111,75 @@ describe("sanitizeModel", () => {
     const { output } = sanitizeModel(m);
     const prod = output.products.find((p) => p.id === 333000)!;
     expect(prod.variations.map((v) => v.id)).toContain(333300); // kept now
+  });
+});
+
+/**
+ * The real corruption: the "IE7002" product carries TWO variations per physical
+ * size — a clean web-app entry ("IE7002-EU36 2/3", pa_taglia "36 2/3") and a stale
+ * snapshot row ("IE7002-3623", pa_taglia "36-2-3", inflated stock). Plus a
+ * snapshot-only size (42 2/3) with no web-app twin.
+ */
+function ie7002(): StoreProductModel {
+  return {
+    id: 304782,
+    sku: "IE7002",
+    name: "adidas Gazelle Indoor Bliss Pink Purple",
+    meta_title: "SEO to preserve",
+    attributes: {
+      pa_taglia: { options: ["stale"], visible: true, variation: true },
+    },
+    variations: [
+      // Clean web-app entries (recent, real stock)
+      { id: 333908, sku: "IE7002-EU36", stock_quantity: 1, attributes: { attribute_pa_taglia: "36" } },
+      { id: 333909, sku: "IE7002-EU36 2/3", stock_quantity: 1, attributes: { attribute_pa_taglia: "36 2/3" } },
+      // Stale snapshot twins (same sizes, corrupt encoding, fake stock 80)
+      { id: 306619, sku: "IE7002-36", stock_quantity: 80, attributes: { attribute_pa_taglia: "36" } },
+      { id: 306624, sku: "IE7002-3623", stock_quantity: 80, attributes: { attribute_pa_taglia: "36-2-3" } },
+      // Snapshot-only size (no web-app twin) — must survive, pa_taglia realigned
+      { id: 306668, sku: "IE7002-4223", stock_quantity: 80, attributes: { attribute_pa_taglia: "42-2-3" } },
+    ],
+  };
+}
+
+describe("sanitizeProduct — duplicate variant dedup (IE7002)", () => {
+  it("keeps the KicksDB-backed web-app twin and drops the stale snapshot one", () => {
+    const product = ie7002();
+    // KicksDB matched the clean web-app twins for the two shared sizes.
+    const r = sanitizeProduct(product, new Set([333908, 333909]));
+    expect(r.duplicatesRemoved).toBe(2);
+    expect(product.variations.map((v) => v.id).sort()).toEqual([306668, 333908, 333909]);
+  });
+
+  it("prefers the clean web-app row over the corrupt snapshot even without KicksDB", () => {
+    const product = ie7002();
+    const r = sanitizeProduct(product, new Set()); // no KicksDB signal
+    expect(r.duplicatesRemoved).toBe(2);
+    // Snapshot twins 306619 / 306624 dropped; clean web-app 333908 / 333909 kept.
+    expect(product.variations.map((v) => v.id).sort()).toEqual([306668, 333908, 333909]);
+  });
+
+  it("syncs pa_taglia to clean human labels on survivors + parent", () => {
+    const product = ie7002();
+    sanitizeProduct(product, new Set([333908, 333909]));
+
+    const taglie = product.variations.map((v) => v.attributes?.attribute_pa_taglia);
+    expect(taglie).toEqual(["36", "36 2/3", "42 2/3"]); // 42-2-3 realigned to 42 2/3
+
+    const parent = (product.attributes as { pa_taglia: { options: string[] } }).pa_taglia;
+    expect(parent.options).toEqual(["36", "36 2/3", "42 2/3"]); // sorted, deduped, human
+  });
+
+  it("keeps a snapshot-only size (no twin) and preserves SEO", () => {
+    const product = ie7002();
+    sanitizeProduct(product, new Set([333908, 333909]));
+    expect(product.variations.some((v) => v.id === 306668)).toBe(true); // 42 2/3 survives
+    expect(product.meta_title).toBe("SEO to preserve");
+  });
+
+  it("counts duplicatesRemoved through sanitizeModel", () => {
+    const m: StoreModel = { format: "rp_cm_roundtrip", product_count: 1, products: [ie7002()] };
+    const { report } = sanitizeModel(m);
+    expect(report.duplicatesRemoved).toBe(2);
   });
 });

@@ -1,5 +1,5 @@
 import type { StoreModel, StoreProductModel, StoreVariation } from "./model";
-import { normSize, variationEuSize } from "./match";
+import { normSize, variationEuSize, variationSizeLabel, preferStoreVariation } from "./match";
 
 /**
  * Two automatic fixes for the WooCommerce round-trip model, both known to cause
@@ -9,12 +9,19 @@ import { normSize, variationEuSize } from "./match";
  *     JSON/REST APIs but never rendered on the storefront. They pile up and
  *     conflict with the live ones, so we drop them.
  *
- *  2. Misaligned pa_taglia — Woo hides a variation whose `pa_taglia` value does
+ *  2. Duplicate variations — the corrupt catalog carries two variations for one
+ *     physical size: a clean web-app entry ("IE7002-EU36 2/3", pa_taglia "36 2/3")
+ *     and a stale snapshot row ("IE7002-3623", pa_taglia "36-2-3"). Woo hides a
+ *     size that has two conflicting variations, so we collapse each size to a
+ *     single best variation — KicksDB-backed first, then the clean web-app row
+ *     over the corrupt snapshot one — and drop the rest.
+ *
+ *  3. Misaligned pa_taglia — Woo hides a variation whose `pa_taglia` value does
  *     not line up with the sizes actually present. We realign every surviving
- *     variation's `attribute_pa_taglia` to its true size (from the SKU suffix,
- *     falling back to the existing value) and, when the parent product carries a
- *     recognizable `pa_taglia` attribute, realign its option list to exactly the
- *     surviving sizes.
+ *     variation's `attribute_pa_taglia` to its true, human-readable size label
+ *     (from pa_taglia, falling back to the SKU suffix) and, when the parent
+ *     product carries a recognizable `pa_taglia` attribute, realign its option
+ *     list to exactly the surviving sizes.
  *
  * Pure and non-mutating: it clones the model, keeps only the products it actually
  * changed (so the re-import touches nothing else), and preserves every other
@@ -27,6 +34,7 @@ export interface SanitizeReport {
   productsChanged: number;
   ghostsRemoved: number; // zero-stock variations dropped (NOT on KicksDB)
   stockSynthesized: number; // zero-stock variations kept + made available (on KicksDB)
+  duplicatesRemoved: number; // stale twin variations dropped (same size, corrupt row)
   taglieRealigned: number; // variation pa_taglia values corrected
   parentAttributesRealigned: number; // parent products whose pa_taglia options were realigned
 }
@@ -114,20 +122,67 @@ function realignParentTaglia(product: StoreProductModel, sizes: string[]): boole
   return false;
 }
 
-/** Sort size strings numerically ascending ("42.5" before "43"), stable on ties. */
-function sortSizes(sizes: string[]): string[] {
-  return [...sizes].sort((a, b) => {
-    const na = Number.parseFloat(a);
-    const nb = Number.parseFloat(b);
+/** Sort human size labels by true numeric value ("36" < "36 2/3" < "37 1/3"),
+ *  via normSize so mixed fractions order correctly; stable on unparseable ties. */
+function sortSizeLabels(labels: string[]): string[] {
+  return [...labels].sort((a, b) => {
+    const na = Number.parseFloat(normSize(a) ?? "");
+    const nb = Number.parseFloat(normSize(b) ?? "");
     if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b);
     return na - nb;
   });
+}
+
+/**
+ * Order two same-size variations, best first (negative => `a` wins): a variation
+ * backed by KicksDB (`keepAvailable`) is authoritative and wins; otherwise defer
+ * to preferStoreVariation (clean web-app row over corrupt snapshot, then newer id).
+ */
+function betterVariation(
+  parentSku: string,
+  a: StoreVariation,
+  b: StoreVariation,
+  keepAvailable: ReadonlySet<number>,
+): number {
+  const kicks = (keepAvailable.has(b.id) ? 1 : 0) - (keepAvailable.has(a.id) ? 1 : 0);
+  if (kicks !== 0) return kicks; // on KicksDB first
+  return preferStoreVariation(parentSku, a, b);
+}
+
+/**
+ * Collapse variations that resolve to the SAME physical EU size down to a single
+ * best one (betterVariation), dropping the rest in place. Variations with no
+ * resolvable size are never touched. Returns how many were dropped.
+ */
+function dedupeBySize(
+  product: StoreProductModel,
+  keepAvailable: ReadonlySet<number>,
+): number {
+  const groups = new Map<string, StoreVariation[]>();
+  for (const vrt of product.variations) {
+    const key = variationEuSize(product.sku, vrt);
+    if (!key) continue; // unknown size — leave it alone
+    const list = groups.get(key);
+    if (list) list.push(vrt);
+    else groups.set(key, [vrt]);
+  }
+
+  const drop = new Set<number>();
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const best = list.reduce((a, b) => (betterVariation(product.sku, a, b, keepAvailable) <= 0 ? a : b));
+    for (const vrt of list) if (vrt !== best) drop.add(vrt.id);
+  }
+  if (drop.size === 0) return 0;
+  product.variations = product.variations.filter((v) => !drop.has(v.id));
+  return drop.size;
 }
 
 /** The counts a single-product sanitize produced. */
 export interface ProductSanitizeResult {
   ghostsRemoved: number;
   stockSynthesized: number;
+  duplicatesRemoved: number;
   taglieRealigned: number;
   parentRealigned: boolean;
   changed: boolean;
@@ -145,8 +200,9 @@ function makeAvailable(vrt: StoreVariation): void {
  * only when it is NOT on KicksDB (`keepAvailable` — the store variation ids
  * present on KicksDB) — those are dropped. A zero-stock variation that IS on
  * KicksDB is KEPT and made available (StockX carries the size), never cut. Then
- * realign each surviving variation's pa_taglia and the parent option list.
- * Shared by the standalone sanitize and the unified reprice+sanitize export.
+ * collapse duplicate variations for the same size (KicksDB > clean web-app entry >
+ * corrupt snapshot), and realign each survivor's pa_taglia and the parent option
+ * list. Shared by the standalone sanitize and the unified reprice+sanitize export.
  */
 export function sanitizeProduct(
   product: StoreProductModel,
@@ -171,28 +227,38 @@ export function sanitizeProduct(
   }
   if (ghostsRemoved > 0) product.variations = kept;
 
-  // 2. Realign each surviving variation's pa_taglia to its true size.
-  const sizes: string[] = [];
+  // 2. Collapse duplicate variations for the same physical size.
+  const duplicatesRemoved = dedupeBySize(product, keepAvailable);
+
+  // 3. Realign each surviving variation's pa_taglia to its human size label.
+  const labels: string[] = [];
   let taglieRealigned = 0;
   for (const vrt of product.variations) {
-    const desired = variationEuSize(product.sku, vrt); // SKU suffix first, then pa_taglia
-    if (desired) sizes.push(desired);
-    if (desired && currentTaglia(vrt) !== desired) {
+    const desired = variationSizeLabel(product.sku, vrt); // pa_taglia first, then SKU suffix
+    if (!desired) continue;
+    labels.push(desired);
+    if (currentTaglia(vrt) !== desired) {
       vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
       taglieRealigned += 1;
     }
   }
 
-  // 3. Realign the parent product's pa_taglia option list to the surviving sizes.
-  const unique = sortSizes([...new Set(sizes)]);
+  // 4. Realign the parent product's pa_taglia option list to the surviving sizes.
+  const unique = sortSizeLabels([...new Set(labels)]);
   const parentRealigned = unique.length > 0 && realignParentTaglia(product, unique);
 
   return {
     ghostsRemoved,
     stockSynthesized,
+    duplicatesRemoved,
     taglieRealigned,
     parentRealigned,
-    changed: ghostsRemoved > 0 || stockSynthesized > 0 || taglieRealigned > 0 || parentRealigned,
+    changed:
+      ghostsRemoved > 0 ||
+      stockSynthesized > 0 ||
+      duplicatesRemoved > 0 ||
+      taglieRealigned > 0 ||
+      parentRealigned,
   };
 }
 
@@ -204,6 +270,7 @@ export function sanitizeModel(model: StoreModel): SanitizeOutcome {
     productsChanged: 0,
     ghostsRemoved: 0,
     stockSynthesized: 0,
+    duplicatesRemoved: 0,
     taglieRealigned: 0,
     parentAttributesRealigned: 0,
   };
@@ -214,6 +281,7 @@ export function sanitizeModel(model: StoreModel): SanitizeOutcome {
     const r = sanitizeProduct(product);
     report.ghostsRemoved += r.ghostsRemoved;
     report.stockSynthesized += r.stockSynthesized;
+    report.duplicatesRemoved += r.duplicatesRemoved;
     report.taglieRealigned += r.taglieRealigned;
     if (r.parentRealigned) report.parentAttributesRealigned += 1;
     if (r.changed) changed.add(product.id);

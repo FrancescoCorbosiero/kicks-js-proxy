@@ -27,6 +27,7 @@ export interface ExportSummary {
   sanitized: boolean;
   ghostsRemoved: number;
   stockSynthesized: number;
+  duplicatesRemoved: number;
   taglieRealigned: number;
   parentAttributesRealigned: number;
 }
@@ -92,6 +93,7 @@ export async function exportRepricedJson(input: ExportInput): Promise<ExportResu
       sanitized: sanitize,
       ghostsRemoved: built.ghostsRemoved,
       stockSynthesized: built.stockSynthesized,
+      duplicatesRemoved: built.duplicatesRemoved,
       taglieRealigned: built.taglieRealigned,
       parentAttributesRealigned: built.parentAttributesRealigned,
     },
