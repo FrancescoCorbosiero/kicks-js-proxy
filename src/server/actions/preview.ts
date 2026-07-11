@@ -176,17 +176,26 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
 }
 
 /**
- * File-driven preview: take the SKUs straight from the uploaded store snapshot,
- * fetch their StockX prices from KicksDB, and preview the whole file at once.
- * This is the primary workflow — upload a file, work on it immediately.
+ * File-driven preview: fetch StockX prices for a set of SKUs and preview them
+ * against the uploaded store snapshot. With no `skusOverride` it previews the
+ * whole file (the primary workflow). With one — e.g. a selection from the KicksDB
+ * catalog — it previews just those SKUs, still matched to the snapshot so the
+ * export stays a valid Woo re-import. Either way the bulk price path is used, so
+ * it scales to thousands of SKUs.
  */
-export async function previewFromStore(marketOverride?: string): Promise<PreviewResult> {
+export async function previewFromStore(
+  marketOverride?: string,
+  skusOverride?: string[],
+): Promise<PreviewResult> {
   const config = await getActiveConfig();
   const snapshot = await getActiveSnapshot();
   if (!snapshot) {
     return { ok: false, error: "Upload a store snapshot first.", plans: [] };
   }
-  const skus = snapshot.products.map((p) => p.sku).filter((s): s is string => !!s);
+  const skus =
+    skusOverride && skusOverride.length > 0
+      ? skusOverride
+      : snapshot.products.map((p) => p.sku).filter((s): s is string => !!s);
   if (skus.length === 0) {
     return { ok: false, error: "The store snapshot has no products.", plans: [] };
   }

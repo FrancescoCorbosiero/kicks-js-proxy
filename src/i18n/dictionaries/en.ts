@@ -64,6 +64,9 @@ export const en: Dictionary = {
     fetching: "Fetching…",
     diagnose: "Diagnose matching",
     testBulk: "Test bulk prices",
+    stale: (days) => `Snapshot ${days} days old`,
+    staleHint:
+      "The snapshot is a point-in-time export of your store. If it's stale, re-export from WooCommerce and reload it to work on fresh data.",
   },
   search: {
     summary: "Or search manually (by SKU / query)",
@@ -187,6 +190,10 @@ export const en: Dictionary = {
     market: "Market",
     total: (n) => `${n} fetchable SKUs`,
     filterPlaceholder: "Filter by SKU, model or brand…",
+    selectAll: "All",
+    selected: (n) => `${n} selected`,
+    previewSelected: (n) => `Preview selected (${n})`,
+    previewAll: (n) => `Preview all (${n})`,
     copy: (n) => `Copy SKUs (${n})`,
     copied: "Copied",
     empty: "Catalog is empty — run a preview to populate it.",

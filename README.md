@@ -54,7 +54,14 @@ never a hard failure):
 
   The **KicksDB catalog** panel on `/preview` discovers this set on demand: load a
   market's whole known-fetchable SKU list (`listCatalog` → `listCatalogEntries`),
-  filter by SKU/model/brand, and copy the SKUs out.
+  filter by SKU/model/brand, and copy the SKUs out. You can also **drive a preview
+  straight from the catalog** — select SKUs (or all filtered) and reprice just those:
+  it calls `previewFromStore(market, skus)`, which fetches those SKUs via the bulk
+  path and matches them against the snapshot, so the export stays a valid Woo
+  re-import. This is why the store snapshot is still required: the catalog has StockX
+  SKUs/prices/sizes but none of Woo's variation ids, SEO, GMC or stock — only the
+  snapshot does. The store bar softly warns when that snapshot is over a week old
+  (re-export from Woo and reload to refresh it).
 
 Large uploads/exports: Server Actions cap the request body (1 MB by default);
 `next.config.ts` raises `serverActions.bodySizeLimit` so multi-MB store JSON
