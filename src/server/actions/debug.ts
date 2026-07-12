@@ -3,7 +3,7 @@
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot } from "@/server/store-json/repo";
 import { getSource } from "@/server/adapters/kicksdb";
-import { resolveFromModel, sourceEuSize, variationEuSize } from "@/server/store-json/match";
+import { resolveFromModel, sourceEuSize, variationEuSize, readTaglia } from "@/server/store-json/match";
 import { skuKey } from "@/lib/skus";
 
 export interface DebugResult {
@@ -35,7 +35,7 @@ export async function debugMatch(): Promise<DebugResult> {
 
     const storeSample = prod.variations.slice(0, 6).map((v) => ({
       sku: v.sku,
-      pa_taglia: v.attributes?.["attribute_pa_taglia"],
+      pa_taglia: readTaglia(v),
       eu: variationEuSize(prod.sku, v),
     }));
     const stockxSample = sx

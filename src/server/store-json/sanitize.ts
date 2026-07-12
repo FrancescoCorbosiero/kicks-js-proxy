@@ -1,5 +1,12 @@
 import type { StoreModel, StoreProductModel, StoreVariation } from "./model";
-import { normSize, variationEuSize, variationSizeLabel, preferStoreVariation } from "./match";
+import {
+  normSize,
+  variationEuSize,
+  variationSizeLabel,
+  preferStoreVariation,
+  readTaglia,
+  writeTaglia,
+} from "./match";
 
 /**
  * Two automatic fixes for the WooCommerce round-trip model, both known to cause
@@ -57,12 +64,6 @@ function toNumber(x: unknown): number | null {
 /** A variation is a ghost when its managed stock quantity is exactly zero. */
 function isGhost(vrt: StoreVariation): boolean {
   return toNumber(vrt.stock_quantity) === 0;
-}
-
-/** The current pa_taglia value on a variation, as a plain string (or null). */
-function currentTaglia(vrt: StoreVariation): string | null {
-  const raw = vrt.attributes?.["attribute_pa_taglia"];
-  return raw == null ? null : String(raw);
 }
 
 /**
@@ -237,8 +238,8 @@ export function sanitizeProduct(
     const desired = variationSizeLabel(product.sku, vrt); // pa_taglia first, then SKU suffix
     if (!desired) continue;
     labels.push(desired);
-    if (currentTaglia(vrt) !== desired) {
-      vrt.attributes = { ...(vrt.attributes ?? {}), attribute_pa_taglia: desired };
+    if (readTaglia(vrt) !== desired) {
+      writeTaglia(vrt, desired); // shape-aware: object form, or update a REST array in place
       taglieRealigned += 1;
     }
   }

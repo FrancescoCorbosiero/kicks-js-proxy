@@ -12,7 +12,10 @@ const VariationSchema = z.looseObject({
   sku: z.string().nullish(),
   regular_price: z.string().nullish(),
   global_unique_id: z.string().nullish(),
-  attributes: z.looseObject({}).nullish(),
+  // Woo emits variation attributes as an object ({ attribute_pa_taglia: "36" }),
+  // but PHP serializes an EMPTY set as `[]` and the REST shape is an array of
+  // { name, option }. Accept all three — pa_taglia is read/written shape-aware.
+  attributes: z.union([z.looseObject({}), z.array(z.unknown())]).nullish(),
 });
 
 const ProductSchema = z.looseObject({
@@ -36,7 +39,7 @@ export interface StoreVariation {
   regular_price?: string | null;
   sale_price?: string | null;
   global_unique_id?: string | null;
-  attributes?: Record<string, unknown> | null;
+  attributes?: Record<string, unknown> | unknown[] | null;
   [k: string]: unknown;
 }
 export interface StoreProductModel {
