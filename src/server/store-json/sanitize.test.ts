@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { StoreModel, StoreProductModel } from "./model";
 import { sanitizeModel, sanitizeProduct } from "./sanitize";
+import { readTaglia } from "./match";
 
 /** A model shaped like the real "FV5029-010" export: some zero-stock ghosts, a
  *  parent pa_taglia attribute, per-variation attribute_pa_taglia. */
@@ -67,9 +68,9 @@ describe("sanitizeModel", () => {
     expect(report.taglieRealigned).toBe(1); // only the "wrong" one changes
     const prod = output.products.find((p) => p.id === 333000)!;
     const v43 = prod.variations.find((v) => v.id === 333301)!;
-    expect(v43.attributes?.attribute_pa_taglia).toBe("43");
+    expect(readTaglia(v43)).toBe("43");
     const v44 = prod.variations.find((v) => v.id === 333302)!;
-    expect(v44.attributes?.attribute_pa_taglia).toBe("44"); // untouched, already correct
+    expect(readTaglia(v44)).toBe("44"); // untouched, already correct
   });
 
   it("realigns the parent pa_taglia option list to the surviving sizes", () => {
@@ -163,7 +164,7 @@ describe("sanitizeProduct — duplicate variant dedup (IE7002)", () => {
     const product = ie7002();
     sanitizeProduct(product, new Set([333908, 333909]));
 
-    const taglie = product.variations.map((v) => v.attributes?.attribute_pa_taglia);
+    const taglie = product.variations.map((v) => readTaglia(v));
     expect(taglie).toEqual(["36", "36 2/3", "42 2/3"]); // 42-2-3 realigned to 42 2/3
 
     const parent = (product.attributes as { pa_taglia: { options: string[] } }).pa_taglia;
@@ -181,5 +182,29 @@ describe("sanitizeProduct — duplicate variant dedup (IE7002)", () => {
     const m: StoreModel = { format: "rp_cm_roundtrip", product_count: 1, products: [ie7002()] };
     const { report } = sanitizeModel(m);
     expect(report.duplicatesRemoved).toBe(2);
+  });
+});
+
+describe("sanitizeProduct — array-shaped variation attributes", () => {
+  it("realigns pa_taglia in a Woo REST array in place, never corrupting it", () => {
+    const product: StoreProductModel = {
+      id: 1,
+      sku: "AA-1",
+      variations: [
+        // corrupt SKU + array pa_taglia -> realigned in place to the human label
+        { id: 11, sku: "AA-1-3623", stock_quantity: 2, attributes: [{ name: "pa_taglia", option: "36-2-3" }] },
+        // empty PHP array -> gets the object form, size from the clean SKU suffix
+        { id: 12, sku: "AA-1-EU38", stock_quantity: 2, attributes: [] },
+      ],
+    };
+    const r = sanitizeProduct(product);
+    expect(r.taglieRealigned).toBe(2);
+
+    const v11 = product.variations.find((v) => v.id === 11)!;
+    expect(Array.isArray(v11.attributes)).toBe(true); // shape preserved
+    expect(readTaglia(v11)).toBe("36 2/3");
+
+    const v12 = product.variations.find((v) => v.id === 12)!;
+    expect(readTaglia(v12)).toBe("38");
   });
 });

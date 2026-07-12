@@ -7,6 +7,8 @@ import {
   variationEuSize,
   humanEuSize,
   variationSizeLabel,
+  readTaglia,
+  writeTaglia,
 } from "./match";
 import { applyModelPatch, buildReimport } from "./patch";
 
@@ -121,6 +123,40 @@ describe("humanEuSize / variationSizeLabel", () => {
     ).toBe("36 2/3");
     // No pa_taglia -> derive the label from the SKU suffix.
     expect(variationSizeLabel("IE7002", { id: 3, sku: "IE7002-EU41 1/3" })).toBe("41 1/3");
+  });
+});
+
+describe("readTaglia / writeTaglia — object and array shapes", () => {
+  it("reads pa_taglia from the object form and the Woo REST array form", () => {
+    expect(readTaglia({ id: 1, attributes: { attribute_pa_taglia: "36" } })).toBe("36");
+    expect(readTaglia({ id: 2, attributes: [{ name: "pa_taglia", option: "36" }] })).toBe("36");
+    expect(readTaglia({ id: 3, attributes: [{ name: "Taglia", option: "37 1/3" }] })).toBe("37 1/3");
+    expect(readTaglia({ id: 4, attributes: [] })).toBeNull(); // empty PHP array
+    expect(readTaglia({ id: 5, attributes: null })).toBeNull();
+  });
+
+  it("writes the object form for object / null / empty-array shapes", () => {
+    const obj = { id: 1, attributes: { attribute_pa_taglia: "old", other: "keep" } };
+    writeTaglia(obj, "36");
+    expect(obj.attributes).toEqual({ attribute_pa_taglia: "36", other: "keep" });
+
+    const empty = { id: 2, attributes: [] as unknown[] };
+    writeTaglia(empty, "38");
+    expect(empty.attributes).toEqual({ attribute_pa_taglia: "38" }); // [] -> object, no corruption
+  });
+
+  it("updates a populated REST array in place (never spreads it into an object)", () => {
+    const arr = { id: 1, attributes: [{ id: 9, name: "pa_taglia", option: "wrong" }] };
+    writeTaglia(arr, "36 2/3");
+    expect(Array.isArray(arr.attributes)).toBe(true);
+    expect(arr.attributes).toEqual([{ id: 9, name: "pa_taglia", option: "36 2/3" }]);
+  });
+
+  it("resolves EU size for an array-shaped variation via pa_taglia", () => {
+    // Corrupt SKU + array pa_taglia still collapses to the right key.
+    const v = { id: 1, sku: "IE7002-3623", attributes: [{ name: "pa_taglia", option: "36-2-3" }] };
+    expect(variationEuSize("IE7002", v)).toBe("36.67");
+    expect(variationSizeLabel("IE7002", v)).toBe("36 2/3");
   });
 });
 
@@ -300,7 +336,7 @@ describe("buildReimport — reprice + sanitize in one file", () => {
     const prod = out.output.products.find((p) => p.id === 9)!;
     expect(prod.variations.map((v) => v.id)).toEqual([91]); // corrupt twin 92 gone
     expect(prod.variations[0].regular_price).toBe("100.00"); // survivor repriced
-    expect(prod.variations[0].attributes?.attribute_pa_taglia).toBe("36 2/3");
+    expect(readTaglia(prod.variations[0])).toBe("36 2/3");
   });
 });
 
@@ -312,5 +348,26 @@ describe("parseStoreModel", () => {
   it("throws on non-JSON and on a missing products array", () => {
     expect(() => parseStoreModel("nope")).toThrow();
     expect(() => parseStoreModel(JSON.stringify({ foo: 1 }))).toThrow();
+  });
+
+  it("accepts array-shaped variation attributes (Woo REST form and PHP empty [])", () => {
+    // Regression: PHP serializes empty attributes as `[]` and the REST shape is an
+    // array of {name, option}; the schema must accept both, not only the object.
+    const withArrays = {
+      format: "rp_cm_roundtrip",
+      products: [
+        {
+          id: 237,
+          sku: "AA-1",
+          variations: [
+            { id: 1, sku: "AA-1-42", attributes: [] }, // empty PHP array
+            { id: 2, sku: "AA-1-43", attributes: [{ name: "pa_taglia", option: "43" }] },
+          ],
+        },
+      ],
+    };
+    const parsed = parseStoreModel(JSON.stringify(withArrays));
+    expect(parsed.products[0].variations).toHaveLength(2);
+    expect(readTaglia(parsed.products[0].variations[1])).toBe("43"); // read back intact
   });
 });

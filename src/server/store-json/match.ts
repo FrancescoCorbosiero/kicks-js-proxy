@@ -63,6 +63,51 @@ export function sourceEuSize(v: SourceVariant): string | null {
   return null;
 }
 
+/** In the Woo REST array form, the pa_taglia entry is the object whose name/slug
+ *  mentions "taglia" (e.g. { name: "pa_taglia", option: "36" }). */
+function isTagliaAttr(el: unknown): el is Record<string, unknown> {
+  if (!el || typeof el !== "object") return false;
+  const o = el as Record<string, unknown>;
+  return String(o.name ?? o.slug ?? "").toLowerCase().includes("taglia");
+}
+
+/**
+ * Read a variation's pa_taglia across the shapes Woo emits: the object form
+ * `{ attribute_pa_taglia: "36" }` and the REST array form
+ * `[{ name: "pa_taglia", option: "36" }]` (an empty set serializes as `[]`).
+ */
+export function readTaglia(vrt: StoreVariation): string | null {
+  const a = vrt.attributes;
+  if (a == null) return null;
+  if (Array.isArray(a)) {
+    const el = a.find(isTagliaAttr);
+    const v = el ? (el.option ?? el.value ?? el.options) : undefined;
+    return v == null ? null : String(v);
+  }
+  const v = (a as Record<string, unknown>)["attribute_pa_taglia"];
+  return v == null ? null : String(v);
+}
+
+/**
+ * Write a variation's pa_taglia, preserving the existing shape. A populated REST
+ * array is updated in place (never spread into an object, which would corrupt
+ * it); an object, null, or the empty-array PHP form becomes the object form.
+ */
+export function writeTaglia(vrt: StoreVariation, value: string): void {
+  const a = vrt.attributes;
+  if (Array.isArray(a) && a.length > 0) {
+    const el = a.find(isTagliaAttr);
+    if (el) {
+      el.option = value;
+      if ("value" in el) el.value = value;
+    } else {
+      a.push({ name: "pa_taglia", option: value });
+    }
+    return;
+  }
+  vrt.attributes = { ...(Array.isArray(a) ? {} : (a ?? {})), attribute_pa_taglia: value };
+}
+
 /** The "{sku}-{size}" suffix of a store variation, or null when the SKU does not
  *  follow the parent-prefixed convention. */
 function skuSuffix(parentSku: string, vrt: StoreVariation): string | null {
@@ -82,9 +127,9 @@ export function variationEuSize(parentSku: string, vrt: StoreVariation): string 
   const suffix = skuSuffix(parentSku, vrt);
   const fromSku = suffix != null ? normSize(suffix) : null;
   if (plausibleEu(fromSku)) return fromSku;
-  const ta = vrt.attributes?.["attribute_pa_taglia"];
+  const ta = readTaglia(vrt);
   if (ta != null) {
-    const fromTa = normSize(String(ta));
+    const fromTa = normSize(ta);
     if (fromTa != null) return fromTa;
   }
   return fromSku; // implausible SKU with no usable pa_taglia — best effort
@@ -113,8 +158,7 @@ export function humanEuSize(raw: string | null | undefined): string | null {
 /** The human EU size label for a store variation: pa_taglia (the store's own
  *  label) first, then the SKU suffix. Null when neither is a recognizable size. */
 export function variationSizeLabel(parentSku: string, vrt: StoreVariation): string | null {
-  const ta = vrt.attributes?.["attribute_pa_taglia"];
-  const fromTa = humanEuSize(ta == null ? null : String(ta));
+  const fromTa = humanEuSize(readTaglia(vrt));
   if (fromTa) return fromTa;
   const suffix = skuSuffix(parentSku, vrt);
   return suffix != null ? humanEuSize(suffix) : null;
