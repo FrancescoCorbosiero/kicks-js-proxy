@@ -186,6 +186,7 @@ export const it = {
   sanitize: {
     stockSynthesized: (n: number) => `${n} rese disponibili (su KicksDB)`,
     ghostsRemoved: (n: number) => `${n} fantasma rimosse (non su KicksDB)`,
+    duplicatesRemoved: (n: number) => `${n} duplicati rimossi`,
     taglieRealigned: (n: number) => `${n} pa_taglia riallineati`,
     parentsRealigned: (n: number) => `${n} attributi prodotto riallineati`,
   },

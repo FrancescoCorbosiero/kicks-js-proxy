@@ -105,6 +105,9 @@ export function ExportBar({ selections, kicksdbVariationIds, previewedProductIds
               {summary.stockSynthesized > 0 && (
                 <span className="text-up">{t.sanitize.stockSynthesized(summary.stockSynthesized)}</span>
               )}
+              {summary.duplicatesRemoved > 0 && (
+                <span className="text-down">{t.sanitize.duplicatesRemoved(summary.duplicatesRemoved)}</span>
+              )}
               <span className="text-down">{t.sanitize.ghostsRemoved(summary.ghostsRemoved)}</span>
               <span className="text-muted">{t.sanitize.taglieRealigned(summary.taglieRealigned)}</span>
               {summary.parentAttributesRealigned > 0 && (

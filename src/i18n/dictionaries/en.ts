@@ -178,6 +178,7 @@ export const en: Dictionary = {
   sanitize: {
     stockSynthesized: (n) => `${n} made available (on KicksDB)`,
     ghostsRemoved: (n) => `${n} ghosts removed (not on KicksDB)`,
+    duplicatesRemoved: (n) => `${n} duplicates removed`,
     taglieRealigned: (n) => `${n} pa_taglia realigned`,
     parentsRealigned: (n) => `${n} product attributes realigned`,
   },

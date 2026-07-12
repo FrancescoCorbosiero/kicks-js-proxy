@@ -63,6 +63,7 @@ export interface ReimportOutcome {
   gtinsWritten: number;
   ghostsRemoved: number; // zero-stock variations dropped — NOT on KicksDB (sanitize)
   stockSynthesized: number; // zero-stock variations kept + made available — on KicksDB
+  duplicatesRemoved: number; // stale twin variations dropped — same size (sanitize)
   taglieRealigned: number; // pa_taglia values corrected (sanitize)
   parentAttributesRealigned: number; // parent option lists realigned (sanitize)
 }
@@ -107,6 +108,7 @@ export function buildReimport(
   let gtinsWritten = 0;
   let ghostsRemoved = 0;
   let stockSynthesized = 0;
+  let duplicatesRemoved = 0;
   let taglieRealigned = 0;
   let parentAttributesRealigned = 0;
 
@@ -116,6 +118,7 @@ export function buildReimport(
       const r = sanitizeProduct(p, keepAvailable);
       ghostsRemoved += r.ghostsRemoved;
       stockSynthesized += r.stockSynthesized;
+      duplicatesRemoved += r.duplicatesRemoved;
       taglieRealigned += r.taglieRealigned;
       if (r.parentRealigned) parentAttributesRealigned += 1;
       if (r.changed) changed.add(p.id);
@@ -152,6 +155,7 @@ export function buildReimport(
     gtinsWritten,
     ghostsRemoved,
     stockSynthesized,
+    duplicatesRemoved,
     taglieRealigned,
     parentAttributesRealigned,
   };

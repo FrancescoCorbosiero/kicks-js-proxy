@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import { parseStoreModel, type StoreModel } from "./model";
-import { resolveFromModel, normSize, variationEuSize } from "./match";
+import {
+  resolveFromModel,
+  normSize,
+  variationEuSize,
+  humanEuSize,
+  variationSizeLabel,
+} from "./match";
 import { applyModelPatch, buildReimport } from "./patch";
 
 const model: StoreModel = {
@@ -74,6 +80,47 @@ describe("normSize / variationEuSize", () => {
   it("derives EU size from the sku suffix, falling back to pa_taglia", () => {
     expect(variationEuSize("IQ7604-100", { id: 1, sku: "IQ7604-100-42.5" })).toBe("42.5");
     expect(variationEuSize("IQ7604-100", { id: 1, attributes: { attribute_pa_taglia: "42-5" } })).toBe("42.5");
+  });
+
+  it("decodes the corrupt dash-triple pa_taglia fraction", () => {
+    expect(normSize("36-2-3")).toBe("36.67"); // 36 + 2/3
+    expect(normSize("35-1-3")).toBe("35.33"); // 35 + 1/3
+    expect(normSize("42-5")).toBe("42.5"); // still a half, not a triple
+  });
+
+  it("rejects an implausible SKU size and falls back to pa_taglia", () => {
+    // The corrupt snapshot SKU "IE7002-3623" encodes 36 2/3 as "3623" -> 3623,
+    // so pa_taglia "36-2-3" is used instead. The clean web-app twin agrees.
+    const snapshot = { id: 1, sku: "IE7002-3623", attributes: { attribute_pa_taglia: "36-2-3" } };
+    const webApp = { id: 2, sku: "IE7002-EU36 2/3", attributes: { attribute_pa_taglia: "36 2/3" } };
+    expect(variationEuSize("IE7002", snapshot)).toBe("36.67");
+    expect(variationEuSize("IE7002", webApp)).toBe("36.67");
+    // A plain whole size still comes straight from the SKU.
+    expect(variationEuSize("IE7002", { id: 3, sku: "IE7002-36" })).toBe("36");
+  });
+});
+
+describe("humanEuSize / variationSizeLabel", () => {
+  it("collapses every encoding to one human label", () => {
+    expect(humanEuSize("36 2/3")).toBe("36 2/3"); // clean web-app
+    expect(humanEuSize("36-2-3")).toBe("36 2/3"); // corrupt snapshot
+    expect(humanEuSize("EU 37 1/3")).toBe("37 1/3");
+    expect(humanEuSize("42.5")).toBe("42.5");
+    expect(humanEuSize("42-5")).toBe("42.5");
+    expect(humanEuSize("36")).toBe("36");
+    expect(humanEuSize("wrong")).toBeNull();
+  });
+
+  it("labels a variation from pa_taglia first, then the SKU suffix", () => {
+    // The corrupt snapshot twin humanizes to the SAME label as the clean web-app one.
+    expect(
+      variationSizeLabel("IE7002", { id: 1, sku: "IE7002-3623", attributes: { attribute_pa_taglia: "36-2-3" } }),
+    ).toBe("36 2/3");
+    expect(
+      variationSizeLabel("IE7002", { id: 2, sku: "IE7002-EU36 2/3", attributes: { attribute_pa_taglia: "36 2/3" } }),
+    ).toBe("36 2/3");
+    // No pa_taglia -> derive the label from the SKU suffix.
+    expect(variationSizeLabel("IE7002", { id: 3, sku: "IE7002-EU41 1/3" })).toBe("41 1/3");
   });
 });
 
@@ -229,6 +276,31 @@ describe("buildReimport — reprice + sanitize in one file", () => {
     });
     expect(out.ghostsRemoved).toBe(1); // product 1's ghost only
     expect(out.output.products.find((p) => p.id === 2)).toBeUndefined(); // untouched, not in file
+  });
+
+  it("collapses duplicate variations and reports duplicatesRemoved", () => {
+    // One size (36 2/3) carried twice: clean web-app twin + corrupt snapshot row.
+    const dup = (): StoreModel => ({
+      format: "rp_cm_roundtrip",
+      product_count: 1,
+      products: [
+        {
+          id: 9,
+          sku: "IE7002",
+          name: "Dup",
+          variations: [
+            { id: 91, sku: "IE7002-EU36 2/3", regular_price: "92.00", stock_quantity: 1, attributes: { attribute_pa_taglia: "36 2/3" } },
+            { id: 92, sku: "IE7002-3623", regular_price: "148.35", stock_quantity: 80, attributes: { attribute_pa_taglia: "36-2-3" } },
+          ],
+        },
+      ],
+    });
+    const out = buildReimport(dup(), new Map([[91, { price: 100 }]]), { sanitize: true });
+    expect(out.duplicatesRemoved).toBe(1);
+    const prod = out.output.products.find((p) => p.id === 9)!;
+    expect(prod.variations.map((v) => v.id)).toEqual([91]); // corrupt twin 92 gone
+    expect(prod.variations[0].regular_price).toBe("100.00"); // survivor repriced
+    expect(prod.variations[0].attributes?.attribute_pa_taglia).toBe("36 2/3");
   });
 });
 
