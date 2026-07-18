@@ -295,6 +295,27 @@ export const it = {
       line: (updated: number, requested: number) => `${updated}/${requested} varianti`,
     },
   },
+  feeds: {
+    title: "Feed",
+    desc: "Le sorgenti che alimentano il catalogo. Ogni feed passa dalla stessa pipeline verificata e lascia traccia nello storico ingestioni.",
+    builtIn: "integrato",
+    runNow: "Esegui ora",
+    running: "Esecuzione…",
+    failed: "Esecuzione fallita",
+    progressRefreshed: (n: number) => `${n} rinfrescati`,
+    progressRemaining: (n: number) => `${n} ancora da aggiornare`,
+    runLine: (refreshed: number, missed: number) =>
+      `${refreshed} rinfrescati · ${missed} non restituiti`,
+    kicksdb: {
+      name: "Aggiornamento KicksDB",
+      desc: (ttl: number) =>
+        `Ri-prezza le voci del catalogo più vecchie di ${Math.round(ttl / 60)} minuti tramite l'endpoint bulk (50 SKU per chiamata).`,
+      stale: (stale: number, total: number) => `${stale} di ${total} da aggiornare`,
+    },
+    externalTitle: "Feed esterni",
+    externalDesc:
+      "I feed dei fornitori esterni si collegheranno qui: stessa pipeline (verifica → upsert), stesso storico. Dettagli e formati in una sessione dedicata.",
+  },
   importPage: {
     title: "Importa",
     desc: "Aggiungi SKU al catalogo: inserimento manuale o file. Ogni SKU nuovo viene verificato su KicksDB prima di entrare — il catalogo cresce soltanto con prodotti recuperabili.",

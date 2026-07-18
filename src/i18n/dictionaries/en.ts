@@ -286,6 +286,26 @@ export const en: Dictionary = {
       line: (updated, requested) => `${updated}/${requested} variations`,
     },
   },
+  feeds: {
+    title: "Feeds",
+    desc: "The sources that feed the catalog. Every feed goes through the same verified pipeline and leaves a trace in the ingestion history.",
+    builtIn: "built-in",
+    runNow: "Run now",
+    running: "Running…",
+    failed: "Run failed",
+    progressRefreshed: (n) => `${n} refreshed`,
+    progressRemaining: (n) => `${n} still stale`,
+    runLine: (refreshed, missed) => `${refreshed} refreshed · ${missed} not returned`,
+    kicksdb: {
+      name: "KicksDB refresh",
+      desc: (ttl) =>
+        `Re-prices catalog entries older than ${Math.round(ttl / 60)} minutes via the bulk endpoint (50 SKUs per call).`,
+      stale: (stale, total) => `${stale} of ${total} stale`,
+    },
+    externalTitle: "External feeds",
+    externalDesc:
+      "External supplier feeds will plug in here: same pipeline (verify → upsert), same history. Formats and details in a dedicated session.",
+  },
   importPage: {
     title: "Import",
     desc: "Add SKUs to the catalog: manual entry or a file. Every new SKU is verified on KicksDB before it joins — the catalog only ever grows with fetchable products.",

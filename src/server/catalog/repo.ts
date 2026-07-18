@@ -284,6 +284,42 @@ export async function getCatalogEntry(market: string, sku: string): Promise<Cata
   }
 }
 
+/** SKUs whose prices are past the TTL, oldest first (the refresh feed's queue). */
+export async function listStaleSkus(
+  market: string,
+  ttlSeconds: number,
+  limit: number,
+): Promise<string[]> {
+  const threshold = new Date(Date.now() - ttlSeconds * 1000);
+  try {
+    const rows = await db
+      .select({ sku: catalogProducts.sku })
+      .from(catalogProducts)
+      .where(and(eq(catalogProducts.market, market), lt(catalogProducts.fetchedAt, threshold)))
+      .orderBy(catalogProducts.fetchedAt)
+      .limit(limit);
+    return rows.map((r) => r.sku);
+  } catch (e) {
+    console.warn("[catalog] stale list skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
+/** How many catalog entries are past the TTL for a market. */
+export async function countStale(market: string, ttlSeconds: number): Promise<number> {
+  const threshold = new Date(Date.now() - ttlSeconds * 1000);
+  try {
+    const rows = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(catalogProducts)
+      .where(and(eq(catalogProducts.market, market), lt(catalogProducts.fetchedAt, threshold)));
+    return rows[0]?.n ?? 0;
+  } catch (e) {
+    console.warn("[catalog] stale count skipped (cache unavailable):", describeDbError(e));
+    return 0;
+  }
+}
+
 /** The lowest ask across every variant/offer of a product, or null when unpriced. */
 export function minAskOf(p: SourceProduct): number | null {
   let min: number | null = null;
