@@ -17,7 +17,7 @@ export default async function Home() {
         <p className="mt-3 max-w-lg text-[15px] leading-relaxed text-muted">{t.home.desc}</p>
         <div className="mt-7 flex items-center gap-3">
           <Link
-            href="/preview"
+            href="/catalog"
             className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-5 text-sm font-semibold text-accent-fg shadow-[0_10px_24px_-10px] shadow-accent/60 transition-transform hover:scale-[1.02] active:scale-[0.98]"
           >
             {t.home.cta}
