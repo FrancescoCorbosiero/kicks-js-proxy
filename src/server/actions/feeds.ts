@@ -19,7 +19,8 @@ import {
  * under a "feed:<name>" source. External feeds plug in beside it.
  */
 
-export const KICKSDB_FEED_SOURCE = "feed:kicksdb";
+// Not exported: "use server" modules may only export async functions.
+const KICKSDB_FEED_SOURCE = "feed:kicksdb";
 
 export interface FeedsState {
   market: string;
