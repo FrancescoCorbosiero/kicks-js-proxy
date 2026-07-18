@@ -82,9 +82,12 @@ export const applyAudit = pgTable("apply_audit", {
 });
 
 /**
- * Persistent "smart" catalog cache: every StockX product successfully looked up
- * on KicksDB is upserted here, keyed by (market, sku). Survives restarts and
- * builds a known-SKU catalog; freshness is decided by fetchedAt + the config TTL.
+ * The core domain table: every StockX product successfully looked up on KicksDB
+ * is upserted here, keyed by (market, sku). Ever-increasing (SKUs never leave);
+ * freshness is decided by fetchedAt + the config TTL. The image/minAsk/
+ * variantCount columns are denormalized from `data` at upsert time so the
+ * discovery grid can filter/sort/paginate in SQL without unpacking jsonb.
+ * addedAt is the first-insert time (fetchedAt means "last refreshed").
  */
 export const catalogProducts = pgTable(
   "catalog_products",
@@ -94,23 +97,37 @@ export const catalogProducts = pgTable(
     stockxId: text("stockx_id").notNull(),
     title: text("title").notNull().default(""),
     brand: text("brand").notNull().default(""),
+    image: text("image").notNull().default(""),
+    minAsk: numeric("min_ask", { mode: "number" }),
+    variantCount: integer("variant_count").notNull().default(0),
     data: jsonb("data").$type<SourceProduct>().notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.market, t.sku] }), index("catalog_brand_idx").on(t.brand)],
+  (t) => [
+    primaryKey({ columns: [t.market, t.sku] }),
+    index("catalog_brand_idx").on(t.brand),
+    index("catalog_market_brand_idx").on(t.market, t.brand),
+    index("catalog_market_added_idx").on(t.market, t.addedAt),
+    index("catalog_market_fetched_idx").on(t.market, t.fetchedAt),
+  ],
 );
 
 export type CatalogProductRow = typeof catalogProducts.$inferSelect;
 
 /**
- * The uploaded WooCommerce round-trip model (single active snapshot). Preview and
- * the JSON export both read it. Stored whole as jsonb so nothing is lost.
+ * The WooCommerce store-state model (single active snapshot). Preview, the REST
+ * apply and the JSON export all read it. Stored whole as jsonb so nothing is
+ * lost. `source` records the transport that produced it: "rest" (pulled live
+ * from the Woo REST API — the primary path) or "upload" (the hidden file
+ * round-trip fallback).
  */
 export const storeSnapshot = pgTable("store_snapshot", {
   id: text("id").primaryKey().default("current"),
   siteUrl: text("site_url"),
   productCount: integer("product_count").notNull().default(0),
+  source: text("source", { enum: ["upload", "rest"] }).notNull().default("upload"),
   data: jsonb("data").$type<unknown>().notNull(),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -129,6 +146,70 @@ export const storeOverrides = pgTable("store_overrides", {
 });
 
 export type StoreOverridesRow = typeof storeOverrides.$inferSelect;
+
+/**
+ * One row per catalog-ingestion run, whatever the frontend: manual entry, bulk
+ * file, a feed run, or growth from a preview. Powers the Import history and the
+ * Feeds tab status column.
+ */
+export const ingestionRuns = pgTable(
+  "ingestion_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // "manual" | "file" | "feed:kicksdb" | "preview" — free-form so new feeds
+    // don't need a migration.
+    source: text("source").notNull(),
+    market: text("market").notNull(),
+    requested: integer("requested").notNull().default(0),
+    added: integer("added").notNull().default(0),
+    known: integer("known").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("ingestion_runs_started_idx").on(t.startedAt)],
+);
+
+export type IngestionRunRow = typeof ingestionRuns.$inferSelect;
+
+/**
+ * A resumable Woo REST store pull. The pull walks GET /products (+ variations)
+ * in chunks driven by repeated advance calls; the cursor lives here so a pull
+ * survives interruption and shows live progress. Pulled products accumulate in
+ * store_pull_products until the run completes, then become the active snapshot.
+ */
+export const storePullRuns = pgTable("store_pull_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status", { enum: ["running", "done", "failed", "cancelled"] })
+    .notNull()
+    .default("running"),
+  // Next Woo /products page to fetch (1-based).
+  cursorPage: integer("cursor_page").notNull().default(1),
+  productsFetched: integer("products_fetched").notNull().default(0),
+  variationsFetched: integer("variations_fetched").notNull().default(0),
+  // From Woo's X-WP-Total header on the first page; null until known.
+  totalProducts: integer("total_products"),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+export type StorePullRunRow = typeof storePullRuns.$inferSelect;
+
+/** Staging area for an in-flight pull: one row per pulled parent product. */
+export const storePullProducts = pgTable(
+  "store_pull_products",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => storePullRuns.id, { onDelete: "cascade" }),
+    storeProductId: integer("store_product_id").notNull(),
+    data: jsonb("data").$type<unknown>().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.storeProductId] })],
+);
 
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;

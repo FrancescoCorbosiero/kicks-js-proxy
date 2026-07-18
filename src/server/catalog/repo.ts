@@ -99,7 +99,23 @@ export async function listCatalogEntries(
   }
 }
 
-/** Upsert (insert-or-refresh) the products that were just fetched from KicksDB. */
+/** The lowest ask across every variant/offer of a product, or null when unpriced. */
+export function minAskOf(p: SourceProduct): number | null {
+  let min: number | null = null;
+  for (const v of p.variants) {
+    for (const o of v.offers) {
+      if (o.lowestAsk > 0 && (min == null || o.lowestAsk < min)) min = o.lowestAsk;
+    }
+  }
+  return min;
+}
+
+/**
+ * Upsert (insert-or-refresh) the products that were just fetched from KicksDB.
+ * The denormalized discovery columns (image/minAsk/variantCount) are recomputed
+ * on every write; addedAt is only set on first insert (it means "joined the
+ * catalog", while fetchedAt means "last refreshed").
+ */
 export async function upsertCatalog(market: string, products: SourceProduct[]): Promise<void> {
   if (products.length === 0) return;
 
@@ -110,7 +126,11 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     stockxId: p.stockxId,
     title: p.title,
     brand: p.brand,
+    image: p.image ?? "",
+    minAsk: minAskOf(p),
+    variantCount: p.variants.length,
     data: p,
+    addedAt: now,
     fetchedAt: now,
     updatedAt: now,
   }));
@@ -125,9 +145,13 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
           stockxId: sql`excluded.stockx_id`,
           title: sql`excluded.title`,
           brand: sql`excluded.brand`,
+          image: sql`excluded.image`,
+          minAsk: sql`excluded.min_ask`,
+          variantCount: sql`excluded.variant_count`,
           data: sql`excluded.data`,
           fetchedAt: sql`excluded.fetched_at`,
           updatedAt: sql`excluded.updated_at`,
+          // added_at intentionally NOT updated: it records first insert.
         },
       });
   } catch (e) {
