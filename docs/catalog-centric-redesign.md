@@ -1,9 +1,19 @@
-# Catalog-Centric Redesign — Audit & Design Brainstorm
+# Catalog-Centric Redesign — Audit & Design (v2)
 
-Status: **brainstorm / proposal** (nothing here is implemented yet).
-Reference inspiration: [`FrancescoCorbosiero/scs-b2b`](https://github.com/FrancescoCorbosiero/scs-b2b) —
-a feed-driven B2B catalog whose discovery UX and ingestion pipeline we borrow from,
-while inverting its "read-only products" axis into product CRUD.
+Status: **agreed direction, not yet implemented.**
+Reference inspiration: [`FrancescoCorbosiero/scs-b2b`](https://github.com/FrancescoCorbosiero/scs-b2b)
+(discovery UX, precompute-at-ingestion, sync-log patterns — *not* its margins/accounts/order
+funnel, which are out of scope).
+
+## Decisions log
+
+| Question | Decision |
+|---|---|
+| Product detail | **Drawer** (slide-over on desktop, full-screen sheet on mobile), deep-linkable via query param |
+| File round-trip flow | **Kept in code, hidden from UI** — fallback in case we need to reverse |
+| Primary Woo integration | **Live REST sync**: pull store state from the WooCommerce REST API, push price updates back via REST |
+| Scope | Stays this project's scope: sync our Woo products with the KicksDB catalog. No new i18n work, no margin-rule system, no accounts/orders |
+| Product CRUD | Current feature set is enough: patch prices (manual locks), sale rules, re-sync from KicksDB. No hard delete |
 
 ---
 
@@ -14,7 +24,7 @@ while inverting its "read-only products" axis into product CRUD.
 - **Hexagonal core.** `core/core-spine.ts` + `core/config.ts` are framework-free:
   normalized `SourceProduct`/`SourceVariant` model, data-driven scoped pricing rules
   (`resolveEffectiveRule` → `computePrice`), plan/diff engine (`buildPlan`), and the
-  `SourcePort` seam. This is exactly the foundation a catalog-centric platform needs.
+  `SourcePort` seam.
 - **The catalog table already exists and is the strategic asset.**
   `catalog_products` (`src/server/db/schema.ts:89`) is ever-increasing, unique by
   `(market, sku)`, GET-verified (every SKU is guaranteed fetchable on KicksDB), and
@@ -22,177 +32,208 @@ while inverting its "read-only products" axis into product CRUD.
   (`resolveSkusViaCatalog`, `growCatalogFromSkus` in `src/server/catalog/service.ts`).
 - **Overrides are already snapshot-independent.** `src/server/overrides/` keys manual
   price locks and sale rules by stable `parentSku::euSize` identities — not Woo row
-  ids. This means product-level CRUD (patch prices) can be built on the catalog *now*,
-  and the reprice/export flow picks the same overrides up automatically. Precedence
-  is fixed: **manual lock > sale rule > computed price**.
-- **Woo JSON round-trip discipline.** `src/server/store-json/model.ts` parses loosely
-  and returns the raw object so unknown fields round-trip untouched; sanitize + reprice
-  are folded into one export (`buildReimport`). This stays as-is: it is the Woo
-  *integration*, no longer the center of the app.
+  ids. Product-level CRUD can be built on the catalog *now*, and any sync/export flow
+  picks the same overrides up automatically. Precedence stays fixed:
+  **manual lock > sale rule > computed price**.
+- **The matching + plan engine is transport-agnostic.** `resolveFromModel`
+  (GTIN-first, then EU-size, `src/server/store-json/match.ts`) consumes a parsed Woo
+  model — it does not care whether that model was *uploaded as a file* or *pulled via
+  REST*. This is the load-bearing fact for the REST pivot: the battle-tested
+  matching/plan logic transfers unchanged.
 
 ### 1.2 The core problem: the file is the center, the catalog is a cache
 
 Today's mental model (README, module names, UI) is:
-
-> upload snapshot file → preview against it → export patched file
+*upload snapshot file → preview against it → export patched file.*
 
 - The **only** real screen is `/preview` — a 668-line monolithic client component
-  (`PreviewWorkspace.tsx`) stacking pricing bar, snapshot upload, manual search,
-  catalog panel, diff tables, export bar. No navigation/tab structure exists
+  (`PreviewWorkspace.tsx`) stacking every panel. No navigation/tab structure exists
   (`src/app/layout.tsx` has a single hardcoded nav link).
-- `previewFromStore` hard-requires a snapshot; the catalog panel is a side drawer
-  *inside* the file workflow (client-side filter over the whole set, 500-row render cap,
-  no server-side pagination — `CatalogPanel.tsx`, `listCatalogEntries` returns only
-  sku/title/brand).
-- Naming is file-centric throughout: `store-json`, `previewFromStore`, `buildReimport`,
-  "sanitize file", `rp_cm_roundtrip`.
+- `previewFromStore` hard-requires an uploaded snapshot; the catalog panel is a side
+  drawer *inside* the file workflow (client-side filter over the whole set, 500-row
+  render cap, no server-side pagination).
+- Naming is file-centric throughout: `store-json`, `previewFromStore`,
+  `buildReimport`, "sanitize file", `rp_cm_roundtrip`.
 
-### 1.3 Dead / vestigial code found by the audit
+### 1.3 Dormant vs. dead code — revised under the REST decision
 
-| Item | Location | Status |
+The audit initially classed the live-apply machinery as dead. With REST sync as the
+main goal, most of it is **dormant infrastructure to revive**, not waste:
+
+**Revive (was flagged dead, now the seed of the REST path):**
+
+| Item | Location | New role |
 |---|---|---|
-| `WooStoreAdapter`, `StorePort`, `renderSkuTemplate`, `ApplyResult` | `core/core-spine.ts:396-609` | Dormant live-REST apply path; referenced only by its own tests |
-| `variant_mappings`, `apply_audit` tables | `src/server/db/schema.ts:36,69` | Zero application references; created by migrations, never used |
-| `applyModelPatch` | `src/server/store-json/patch.ts:23` | Superseded by `buildReimport`; test-only |
-| `sanitizeModel` | `src/server/store-json/sanitize.ts:266` | Superseded by inline sanitize in `buildReimport`; test-only |
-| `fetchPricesCached` | `src/server/kicks/service.ts:22` | Not wired into any preview path; test-only |
-| `getBulkPriceMap` | `src/server/adapters/kicksdb/client.ts:101` | No references |
-| `ApplyConfig` extras (`includeActions`, `dryRunByDefault`, `requireApprovalAboveDeltaPercent`, `concurrency`, `wooBatchSize`, `schedule`) | `core/config.ts:77` | Only `retry` is read |
-| `ConnectionConfig.woo` + `WOO_*` env | `core/config.ts:92`, `src/lib/env.ts` | Carried for the dormant adapter |
-| `snapshotInfo` action | `src/server/actions/store.ts:36` | Exported, never called |
-| Stale docstrings | `defaults.ts` ("12%" vs actual 17), `core-spine.ts` header | Misleading |
+| `StorePort` + `WooStoreAdapter` | `core/core-spine.ts:396-609` | The REST adapter: `resolveMappings`, `applyPrices` (per-parent `variations/batch`), `upsertProduct`. Has tests already |
+| `ConnectionConfig.woo` + `WOO_*` env | `core/config.ts:92`, `src/lib/env.ts` | Woo REST credentials (base URL, consumer key/secret) |
+| `ApplyConfig` (`dryRunByDefault`, `concurrency`, `wooBatchSize`, `retry`, …) | `core/config.ts:77` | Apply-run safety knobs |
+| `apply_audit` table | `schema.ts:69` | One row per apply attempt (incl. dry runs) — the sync history |
+| `variant_mappings` table | `schema.ts:36` | Optional cache of confirmed StockX-variant ↔ Woo-variation links so re-syncs skip re-matching; also the home for future manual matches |
 
-Other debt:
+**Still dead (delete in cleanup):**
 
-- `plans` table grows unbounded (one row per product per preview run, no TTL/cleanup).
-- `resolveSkusViaCatalog` fetches cold SKUs sequentially, while `growCatalogFromSkus`
-  uses bounded concurrency (6) — a large cold manual list is needlessly slow.
-- Server actions, repos, adapters, and all React components are untested (core domain
-  and store-json logic are well covered).
+| Item | Location |
+|---|---|
+| `applyModelPatch` (superseded by `buildReimport`) | `src/server/store-json/patch.ts:23` |
+| `sanitizeModel` (superseded by inline sanitize) | `src/server/store-json/sanitize.ts:266` |
+| `fetchPricesCached` (never wired) | `src/server/kicks/service.ts:22` |
+| `getBulkPriceMap` (no references) | `src/server/adapters/kicksdb/client.ts:101` |
+| `snapshotInfo` action (exported, uncalled) | `src/server/actions/store.ts:36` |
+| Stale docstrings ("12%" vs 17, "dry-run apply" framing) | `defaults.ts`, `core-spine.ts` header |
+
+Other debt (unchanged): `plans` table grows unbounded (needs TTL/cleanup);
+`resolveSkusViaCatalog` fetches cold SKUs sequentially while `growCatalogFromSkus`
+bounds concurrency at 6; server actions / repos / components are untested (core and
+store-json logic are well covered).
 
 ---
 
-## 2. Target model — invert the pyramid
+## 2. Target model
 
-**Catalog = core domain. Everything else is a port around it.**
+**Catalog = core domain. Woo is a sync target reached over REST. The file flow is a
+hidden fallback.**
 
 ```
                     ┌────────────────────────────┐
    INGESTION        │        CATALOG             │        CONSUMPTION
                     │  catalog_products          │
   KicksDB sync ───▶ │  (market, sku) → product   │ ───▶  Discovery tab (browse/search)
-  External feeds ─▶ │  ever-increasing,          │ ───▶  Product CRUD (patch prices,
-  Manual entry  ──▶ │  GET-verified,             │        sale rules, KicksDB re-sync)
-  Bulk file     ──▶ │  price-carrying            │ ───▶  Reprice & export (Woo snapshot
-                    └────────────────────────────┘        round-trip — unchanged)
+  External feeds ─▶ │  ever-increasing,          │ ───▶  Product drawer: CRUD
+  Manual entry  ──▶ │  GET-verified,             │        (patch price, sale rule,
+  Bulk file     ──▶ │  price-carrying            │         re-sync from KicksDB)
+                    └────────────────────────────┘ ───▶  WOO SYNC via REST
+                                                          pull store state → plan diff
+                                                          → push prices (variations/batch)
+                                                   ───▶  (hidden) file round-trip fallback
 ```
 
-Principles (several stolen from scs-b2b):
+Principles (several from scs-b2b):
 
 1. **Every ingestion source funnels through one pipeline** — the existing
-   verify-then-upsert path (`growCatalogFromSkus` / `upsertCatalog`). A feed, a pasted
-   SKU list, and a bulk file are the same operation with different frontends.
-2. **Precompute at ingestion, read at runtime** (scs-b2b's `FeedSyncService` pattern):
-   promote the fields discovery needs (image, min ask, variant count) to indexed
-   columns at upsert time so the grid never unpacks jsonb.
-3. **URL-as-state discovery** (scs-b2b's catalog page): filters live in the query
-   string — shareable, back-button-friendly; view preferences (grid density) live
-   client-side.
-4. **Append-only, deactivate-never-delete.** The catalog only grows (current
-   invariant, same as scs-b2b's `is_active`). CRUD means *edit prices / re-sync /
-   flag*, not destroy.
-5. **The snapshot remains required only where it is genuinely needed** — matching
-   Woo variation ids for a valid re-import. Discovery and product CRUD never touch it.
+   verify-then-upsert path (`growCatalogFromSkus` / `upsertCatalog`).
+2. **Precompute at ingestion, read at runtime**: promote the fields discovery needs
+   (image, min ask, variant count) to indexed columns at upsert time.
+3. **URL-as-state discovery**: filters live in the query string.
+4. **Append-only, deactivate-never-delete.** CRUD means edit prices / re-sync / flag,
+   never destroy.
+5. **One store-state model, two transports.** The Woo model (`store-json/model.ts`)
+   stays the single parsed representation of the store; it can be *pulled* (REST,
+   primary) or *uploaded* (file, hidden fallback). Matching, plan, overrides, and
+   sanitize all sit above that seam and never know the difference.
 
 ---
 
 ## 3. Proposed app structure
 
-### 3.1 Navigation shell (new)
-
-Replace the single-link header with a real tab bar (scs-b2b's layout pattern:
-sticky header, active-tab highlight, mobile collapse):
+### 3.1 Navigation shell
 
 | Tab | Route | Purpose |
 |---|---|---|
-| **Discovery** | `/catalog` | Default landing. Browse/search/filter the catalog |
-| **Reprice** | `/reprice` (today's `/preview`) | The Woo snapshot round-trip workflow, unchanged |
+| **Discovery** | `/catalog` | Default landing. Browse/search/filter the catalog; product drawer |
+| **Sync** | `/sync` | Woo REST sync: pull store state → diff preview → apply prices |
 | **Import** | `/import` | Manual entry + bulk file entry into the catalog |
 | **Feeds** | `/feeds` | External feed registry (skeleton now, details TBD) |
+| *(hidden)* | `/preview` | The file round-trip flow — route kept, no nav link |
 
-Pricing config stays reachable from Discovery and Reprice (it is global).
+Pricing config stays reachable from Discovery and Sync (it is global). Existing
+i18n (it/en dictionaries) is reused for new strings; no i18n system work.
 
 ### 3.2 Discovery tab (`/catalog`)
 
-Server component reading `searchParams` → SQL-level filter/sort/paginate
-(replaces `CatalogPanel`'s load-everything + client-filter + 500-cap approach).
+Server component reading `searchParams` → SQL-level filter/sort/paginate (replaces
+`CatalogPanel`'s load-everything + client-filter + 500-cap approach).
 
-- **Brand sidebar with per-brand counts** (scs-b2b `activeBrandsWithCounts`),
-  sticky on desktop, chips on mobile; links preserve other filters.
+- **Brand sidebar with per-brand counts** (scs-b2b pattern), sticky on desktop,
+  horizontal chips on mobile; brand links preserve other filters.
 - **Debounced search** on SKU / title.
-- **Filters**: market, freshness (fresh vs stale by TTL), price range (on the new
-  `min_ask` column). Sort: brand, title, recently added, recently fetched, price.
-- **Pagination**: classic paged (24/page, scs-b2b style) — the catalog is
-  ever-increasing, so no full-table loads in the browser.
-- **Product card**: image (fallback placeholder), brand link, title, monospace SKU
-  with copy-to-clipboard, variant/size count, "from X €" (min ask), freshness badge
-  (fetchedAt vs TTL). Card click → product detail.
-- Bulk affordance kept: select cards (or all filtered) → "Reprice selection" jumps to
-  `/reprice` with those SKUs (the existing `previewFromStore(market, skus)` path).
+- **Filters**: freshness (fresh vs stale by TTL), price range (new `min_ask` column).
+  **Sort**: brand, title, recently added, recently fetched, price.
+- **Pagination**: classic paged (24/page) — no full-table loads in the browser.
+- **Product card**: image (placeholder fallback), brand, title, monospace SKU with
+  copy-to-clipboard, size count, "from X €" (min ask), freshness badge. Click →
+  drawer.
+- Bulk affordance: select cards (or all filtered) → "Sync selection" seeds `/sync`
+  with those SKUs.
 
-### 3.3 Product detail + CRUD (click a card)
+### 3.3 Product drawer (click a card)
 
-Route `/catalog/[market]/[sku]` (page, not modal — deep-linkable, consistent with
-URL-as-state). Sections:
+**Slide-over drawer on desktop; full-screen sheet on mobile** (no cramped panel —
+on small viewports it takes over the screen with a sticky close/back header).
+Deep-linkable as `/catalog?product=<sku>` so URL-as-state survives and back-button
+closes the drawer. Content:
 
 1. **Header**: image, title, brand, SKU, StockX id, market/currency, added/fetched
    timestamps, staleness badge.
-2. **Variant table**: per size — size conversions, UPC, offers per delivery type
-   (lowest ask + depth), **computed proposed price** under the current pricing rules
-   (pure read of `resolveEffectiveRule` + `computePrice`), and the operator override
-   state.
-3. **CRUD operations** (current feature set is enough — no new pricing concepts):
-   - **Sync with KicksDB** — new `refreshCatalogProduct(market, sku)` action:
-     re-fetch via `getProduct`, `upsertCatalog`, bump `fetchedAt`. This is the "U"
-     that matters for a fetch-only catalog.
-   - **Patch price** — per-size manual price lock, reusing
-     `setVariationManualPrice` (`src/server/actions/overrides.ts`) verbatim; it is
-     already keyed by `parentSku::euSize`, so a lock set here is honored by the next
-     reprice/export run with zero new plumbing.
+2. **Variant table** (mobile: stacked rows, not a wide table): per size — size
+   conversions, UPC, offers per delivery type (lowest ask + depth), **computed
+   proposed price** under current pricing rules, and the operator override state.
+3. **Operations** (current feature set, nothing new conceptually):
+   - **Re-sync from KicksDB** — new `refreshCatalogProduct(market, sku)` action:
+     re-fetch via `getProduct`, `upsertCatalog`, bump `fetchedAt`.
+   - **Patch price** — per-size manual lock, reusing `setVariationManualPrice`
+     verbatim (already keyed by `parentSku::euSize`; the next Woo sync honors it
+     with zero new plumbing).
    - **Sale rule** — per-product toggle, reusing `setProductSaleRule`.
-   - **No hard delete** (append-only invariant). Optional later: an `archived` flag
-     to hide an entry from Discovery without breaking the invariant.
-4. **Shortcut**: "Reprice this product" → `/reprice` seeded with this SKU.
+   - **No hard delete** (append-only invariant). Optional later: `archived` flag.
+4. **Shortcut**: "Sync this product to Woo" → `/sync` seeded with this SKU.
 
-> Key insight from the audit: because overrides are keyed by SKU/size — not by Woo
-> ids or snapshot state — the product CRUD tab and the file workflow share one
-> source of operator intent for free. No migration needed.
+### 3.4 Woo Sync tab (`/sync`) — the main goal
 
-### 3.4 Import tab (`/import`) — manual + bulk entry
+Replaces the visible part of the file workflow. Same engine, new transport:
 
-Two frontends over the **same** existing pipeline (`growCatalogFromSkus`):
+**Pull (store state via REST).** A `pullStoreState` action walks the Woo REST API
+(`GET /products` + `GET /products/{id}/variations`, paginated 100/page, with the
+existing `requestJson` retry/backoff infra) and materializes the same shape
+`parseStoreModel` produces today. Persist it in `store_snapshot` with a new
+`source: "rest" | "upload"` column — so downstream code sees "the active snapshot"
+exactly as before, and the staleness warning becomes a "Refresh from store" button
+instead of "re-export from Woo and re-upload".
 
-- **Manual entry**: textarea of SKUs (`parseSkus` in `src/lib/skus.ts` already
-  handles separators) → grow → report `added / known / rejected`.
-- **Bulk file entry**: upload CSV/TXT/XLSX, extract the SKU column, same call.
-  Large files: chunked with progress (the service already bounds concurrency at 6).
-- Every run is recorded in a new **`ingestion_runs`** table (source = `manual` |
-  `file` | `feed:<name>` | `preview`, counts, duration, error) — scs-b2b's
-  `sync_logs` pattern. This one table then powers both the Import history and the
-  Feeds tab status column.
+**Plan (unchanged).** `previewFromStore` → `resolveFromModel` (GTIN-first, EU-size)
+→ `buildPlan` with overrides overlaid. The diff UI (per-product collapsible tables,
+row selection, manual-price cells) is lifted from `PreviewWorkspace` largely as-is.
 
-### 3.5 Feeds tab (`/feeds`) — skeleton now, details later
+**Push (apply via REST).** Revive `WooStoreAdapter.applyPrices`: group selected
+`update` items by parent product → `POST /products/{id}/variations/batch`
+(`wooBatchSize` ≤ 100, `concurrency` from `ApplyConfig`). Safety rails:
 
-Details deliberately deferred (per discussion), but the seams cost nothing to lay now:
+- **Dry-run by default** (`ApplyConfig.dryRunByDefault` — finally meaningful):
+  first click shows exactly what would be written; a second, explicit "Apply N
+  changes" confirms.
+- `maxDeltaPercent` guardrail already applies at plan time.
+- Every run (incl. dry runs) recorded in `apply_audit` → a sync-history list on the
+  tab (scs-b2b's sync-log pattern).
+- **Update-only at first**: no product/variation creation over REST (`upsertProduct`
+  stays dormant). Matches "current features are enough".
+- **Sanitize stays file-only for now.** Deleting ghost variations over live REST is
+  destructive; the hidden `/preview` flow keeps that capability until we decide to
+  port it with an explicit confirm step.
+
+**Fallback.** `/preview` (upload → export) remains fully functional, just unlinked.
+Because both transports feed the same `store_snapshot` + plan engine, reversing is a
+one-line nav change.
+
+### 3.5 Import tab (`/import`)
+
+Two frontends over the same existing pipeline (`growCatalogFromSkus`):
+
+- **Manual entry**: textarea of SKUs (`parseSkus` handles separators) → grow →
+  report `added / known / rejected`.
+- **Bulk file entry**: upload CSV/TXT/XLSX, extract the SKU column, same call
+  (service already bounds concurrency at 6).
+- Every run recorded in a new **`ingestion_runs`** table (source = `manual` | `file`
+  | `feed:<name>` | `preview`, counts, duration, error) — powers Import history and
+  the Feeds tab status column.
+
+### 3.6 Feeds tab (`/feeds`) — skeleton now, details later
 
 - A **`FeedPort`** concept: a feed is anything that yields SKUs (or full
   `SourceProduct`s) for a market; ingestion goes through the same verify-then-upsert
   pipeline and logs to `ingestion_runs`.
-- UI skeleton: feed registry table (name, type, schedule, last run, status,
-  added-last-run) + a manual "Run now" — mirroring scs-b2b's sync page
-  (lock-guarded, transactional, deactivate-not-delete semantics when we get there).
-- KicksDB itself can be re-framed as the built-in first feed (staleness refresh as a
-  scheduled run), which makes the feed abstraction honest from day one.
+- UI skeleton: registry table (name, type, schedule, last run, status, added-last-run)
+  + manual "Run now".
+- KicksDB staleness refresh re-framed as the built-in first feed, keeping the
+  abstraction honest. Real external feeds: separate discussion.
 
 ---
 
@@ -204,44 +245,48 @@ catalog_products
   + min_ask        numeric   -- min lowest_ask across variants, at upsert
   + variant_count  integer   -- at upsert
   + added_at       timestamp -- first-insert time (fetchedAt keeps meaning "last refresh")
-  + (optional later) archived boolean default false
-  + index on (market, brand), (market, added_at), title search (ILIKE/trigram)
+  + indexes: (market, brand), (market, added_at), title search (ILIKE/trigram)
+
+store_snapshot
+  + source         text      -- "rest" | "upload" (default "upload" for backfill)
 
 ingestion_runs (new)
   id, source, market, requested, added, known, rejected, startedAt, finishedAt, error
 
-drop: variant_mappings, apply_audit          -- vestigial (audit §1.3)
-plans: add cleanup (delete rows older than N days, or on-new-preview purge)
+apply_audit      -- KEPT & wired: one row per sync apply (incl. dry runs)
+variant_mappings -- KEPT (dormant): confirmed-link cache / future manual matches
+plans            -- add cleanup (delete rows older than N days)
 ```
 
-All new columns are derivable from `data` — a one-shot backfill migration recomputes
-them for existing rows; `upsertCatalog` maintains them going forward.
+All new `catalog_products` columns are derivable from `data` — one backfill
+migration recomputes them; `upsertCatalog` maintains them going forward.
 
 ---
 
-## 5. Suggested phasing
+## 5. Phasing
 
-| Phase | Scope | Risk |
+| Phase | Scope | Notes |
 |---|---|---|
-| **0 — Cleanup** | Delete dead code (§1.3), drop vestigial tables, fix stale docstrings, add `plans` cleanup. Optionally parallelize `resolveSkusViaCatalog`. | None — pure deletion + docs |
-| **1 — Shell + Discovery** | Tab navigation; `/catalog` with server-side filtered/paginated grid; schema additions + backfill; move `/preview` → `/reprice` (redirect kept). | Low — additive |
-| **2 — Product detail + CRUD** | Detail route; `refreshCatalogProduct`; manual-price + sale-rule UI on top of existing overrides actions. | Low — reuses proven subsystems |
-| **3 — Import tab** | Manual + bulk file entry UIs over `growCatalogFromSkus`; `ingestion_runs`. | Low |
-| **4 — Feeds skeleton** | Registry UI + `FeedPort` seam + "run now" for the built-in KicksDB staleness refresh. Real external feeds: separate discussion. | Medium (scheduling) |
+| **0 — Cleanup** | Delete the *still-dead* items (§1.3 second table), fix stale docstrings, `plans` cleanup, parallelize `resolveSkusViaCatalog`. **Do not** touch the Woo adapter / apply tables — they get revived | Pure deletion + docs |
+| **1 — Shell + Discovery** | Tab navigation; `/catalog` grid (server-side filter/sort/paginate); schema additions + backfill; product drawer with CRUD (patch price, sale rule, KicksDB re-sync); `/preview` unlinked from nav | The catalog-centric shift |
+| **2 — Woo REST sync** | `pullStoreState` (REST pull → `store_snapshot`), `/sync` tab (diff preview lifted from `PreviewWorkspace`), revive `WooStoreAdapter.applyPrices` with dry-run default + `apply_audit` history | The main goal |
+| **3 — Import tab** | Manual + bulk file entry over `growCatalogFromSkus`; `ingestion_runs` | |
+| **4 — Feeds skeleton** | Registry UI + `FeedPort` seam + "run now" for the built-in KicksDB staleness refresh | Details TBD |
 
-Each phase ships independently; the Reprice flow keeps working untouched throughout.
+Phases 1 and 2 are independent enough to swap if getting REST sync live sooner
+matters more than the discovery grid.
 
 ---
 
-## 6. Open questions
+## 6. Remaining open questions
 
-1. **Product detail**: full page (proposed, deep-linkable) vs. slide-over drawer on
-   the grid?
-2. **Archiving**: do we want an `archived` flag from day one, or keep strict
-   append-only until a real need appears?
-3. **Renames**: adopt catalog-centric naming now (`store-json` → `woo-snapshot`,
-   `previewFromStore` → `previewForExport`) or defer to avoid churn during the
-   redesign?
+1. **Woo credentials & store size**: `WOO_*` env vars exist but were optional —
+   need the real base URL + consumer key/secret with read/write on products.
+   Roughly how many products/variations is the store? (Drives pull pagination time
+   and whether the pull needs a progress UI.)
+2. **Pull cadence**: on-demand "Refresh from store" button only, or also a scheduled
+   pull (would piggyback on the Feeds scheduling work)?
+3. **Sanitize over REST**: keep file-only (current plan), or eventually port
+   ghost-variation deletion to REST behind an explicit multi-step confirm
+   (scs-b2b's dropship confirm pattern)?
 4. **Feeds**: formats/suppliers/schedule — parked for the dedicated session.
-5. **Markets**: today effectively single-market ("IT"). Should Discovery expose a
-   market switcher, or hide it until a second market is real?
