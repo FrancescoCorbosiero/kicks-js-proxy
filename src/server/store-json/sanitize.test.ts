@@ -1,7 +1,36 @@
 import { describe, it, expect } from "vitest";
 import type { StoreModel, StoreProductModel } from "./model";
-import { sanitizeModel, sanitizeProduct } from "./sanitize";
+import { sanitizeProduct } from "./sanitize";
 import { readTaglia } from "./match";
+
+/**
+ * Test harness: run sanitizeProduct over a whole model the way buildReimport
+ * does (clone, keep only changed products, refresh product_count) so the
+ * per-product engine can be exercised through realistic whole-model fixtures.
+ */
+function sanitizeModel(model: StoreModel) {
+  const clone: StoreModel = structuredClone(model);
+  const report = {
+    ghostsRemoved: 0,
+    stockSynthesized: 0,
+    duplicatesRemoved: 0,
+    taglieRealigned: 0,
+    parentAttributesRealigned: 0,
+  };
+  const changed = new Set<number>();
+  for (const product of clone.products) {
+    const r = sanitizeProduct(product);
+    report.ghostsRemoved += r.ghostsRemoved;
+    report.stockSynthesized += r.stockSynthesized;
+    report.duplicatesRemoved += r.duplicatesRemoved;
+    report.taglieRealigned += r.taglieRealigned;
+    if (r.parentRealigned) report.parentAttributesRealigned += 1;
+    if (r.changed) changed.add(product.id);
+  }
+  clone.products = clone.products.filter((p) => changed.has(p.id));
+  if (typeof clone.product_count === "number") clone.product_count = clone.products.length;
+  return { output: clone, report };
+}
 
 /** A model shaped like the real "FV5029-010" export: some zero-stock ghosts, a
  *  parent pa_taglia attribute, per-variation attribute_pa_taglia. */

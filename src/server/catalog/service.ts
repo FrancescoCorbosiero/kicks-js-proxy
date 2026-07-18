@@ -68,9 +68,11 @@ export async function resolveSkusViaCatalog(
     }
   }
 
+  // Fetch misses with the same bounded concurrency growth uses, so a large,
+  // cold manual SKU list resolves in parallel instead of one-by-one.
   const fetchedProducts: SourceProduct[] = [];
   const notFound: string[] = [];
-  for (const sku of misses) {
+  await forEachLimit(misses, 6, async (sku) => {
     const product = await fetchProductBySku(source, sku, market);
     if (product) {
       fetchedProducts.push(product);
@@ -78,7 +80,7 @@ export async function resolveSkusViaCatalog(
     } else {
       notFound.push(sku);
     }
-  }
+  });
 
   await store.upsert(market, fetchedProducts);
 

@@ -32,7 +32,3 @@ function describeError(e: unknown): string {
   }
   return message;
 }
-
-export async function snapshotInfo(): Promise<SnapshotInfo | null> {
-  return getSnapshotInfo();
-}

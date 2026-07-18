@@ -10,7 +10,7 @@ import {
   readTaglia,
   writeTaglia,
 } from "./match";
-import { applyModelPatch, buildReimport } from "./patch";
+import { buildReimport } from "./patch";
 
 const model: StoreModel = {
   format: "rp_cm_roundtrip",
@@ -187,11 +187,12 @@ describe("resolveFromModel", () => {
   });
 });
 
-describe("applyModelPatch", () => {
+describe("buildReimport — pure reprice (sanitize off)", () => {
   it("patches price + GTIN, keeps changed products, preserves other fields", () => {
-    const { output, productsChanged, variationsChanged, gtinsWritten } = applyModelPatch(
+    const { output, productsChanged, variationsChanged, gtinsWritten } = buildReimport(
       model,
       new Map([[334133, { price: 248.99, gtin: "00194501234567" }]]),
+      { sanitize: false },
     );
     expect(variationsChanged).toBe(1);
     expect(productsChanged).toBe(1);
@@ -207,7 +208,7 @@ describe("applyModelPatch", () => {
   });
 
   it("does not mutate the input snapshot", () => {
-    applyModelPatch(model, new Map([[334133, { price: 1 }]]));
+    buildReimport(model, new Map([[334133, { price: 1 }]]), { sanitize: false });
     expect(model.products[0].variations[0].regular_price).toBe("566.03");
   });
 });

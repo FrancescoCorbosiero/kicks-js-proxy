@@ -1,15 +1,13 @@
 /**
  * core-spine.ts
  * -----------------------------------------------------------------------------
- * The framework-agnostic heart of the StockX -> store repricing tool.
+ * The framework-agnostic heart of the KicksDB -> store repricing tool.
  * Nothing in this file knows about Next.js, Woo, Shopify, HTTP, or the DB.
  * It defines: the normalized domain model, a mapper from KicksDB responses,
  * a pricing-rule engine, the plan/diff model (preview), and the ports that
- * adapters implement. The Woo adapter at the bottom is a skeleton showing the
- * one real structural constraint (batch is per-parent-product, not global).
- *
- * Swap-in points are marked with TODO. This compiles conceptually; wire the
- * TODOs to your HTTP client and DB.
+ * adapters implement. The Woo REST adapter at the bottom implements StorePort
+ * around the one real structural constraint (variation batches are
+ * per-parent-product, not global) and backs the live sync path.
  */
 
 import type { AppConfig, EffectivePricingRule, MatchingConfig } from "./config";
