@@ -11,7 +11,7 @@
  */
 
 import type { AppConfig, EffectivePricingRule, MatchingConfig } from "./config";
-import { resolveEffectiveRule } from "./config";
+import { markupForAsk, resolveEffectiveRule } from "./config";
 
 /* ========================================================================== *
  * 1. DOMAIN MODEL  (the shared language; sources and stores map to/from this)
@@ -237,15 +237,16 @@ export function roundPrice(price: number, rounding: EffectivePricingRule["roundi
  * Returns the proposed retail price for a variant under an effective rule, or
  * null if the rule says "don't price" (no offer for the chosen delivery type,
  * or liquidity below minAsks). Applies, in order: delivery-type selection,
- * minAsks skip, markup, floor, VAT, rounding. The maxDeltaPercent guardrail is
- * NOT applied here — it is a plan-time compare against the current price.
+ * minAsks skip, markup (banded by the raw ask when markupBands is set), floor,
+ * VAT, rounding. The maxDeltaPercent guardrail is NOT applied here — it is a
+ * plan-time compare against the current price.
  */
 export function computePrice(variant: SourceVariant, rule: EffectivePricingRule): number | null {
     const offer = variant.offers.find((o) => o.deliveryType === rule.sourceDeliveryType);
     if (!offer) return null;
     if (rule.minAsks != null && offer.asks < rule.minAsks) return null;
 
-    let price = offer.lowestAsk * (1 + rule.markupPercent / 100);
+    let price = offer.lowestAsk * (1 + markupForAsk(offer.lowestAsk, rule) / 100);
     if (rule.floor != null) price = Math.max(price, rule.floor);
     if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
         price = price * (1 + rule.tax.vatRatePercent / 100);

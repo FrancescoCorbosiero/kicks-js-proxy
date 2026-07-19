@@ -2,7 +2,10 @@ import { SyncWorkspace } from "@/components/sync/SyncWorkspace";
 import { DbUnavailable } from "@/components/DbUnavailable";
 import { assertSchemaCurrent } from "@/server/db/probe";
 import { getActiveConfig } from "@/server/config/repo";
+import { pricingSummary } from "@/server/config/summary";
 import { getSnapshotInfo } from "@/server/store-json/repo";
+import { getOverrides } from "@/server/overrides/repo";
+import { globalFollowSaleRule } from "@/server/overrides/model";
 import { getSyncState } from "@/server/actions/sync";
 import { getServerDictionary } from "@/i18n/server";
 import { parseSkus } from "@/lib/skus";
@@ -22,12 +25,14 @@ export default async function SyncPage({
   const sp = await searchParams;
   const { t } = await getServerDictionary();
 
-  let config, snapshotInfo, syncState;
+  let config, snapshotInfo, syncState, followSaleRule;
   try {
     await assertSchemaCurrent();
     config = await getActiveConfig();
     snapshotInfo = await getSnapshotInfo().catch(() => null);
     syncState = await getSyncState();
+    const overrides = await getOverrides().catch(() => null);
+    followSaleRule = overrides ? globalFollowSaleRule(overrides) : true;
   } catch (e) {
     return <DbUnavailable error={e} />;
   }
@@ -49,6 +54,8 @@ export default async function SyncPage({
         snapshotInfo={snapshotInfo}
         initialState={syncState}
         seedSkus={seedSkus}
+        pricing={pricingSummary(config)}
+        initialFollowSaleRule={followSaleRule}
       />
     </main>
   );

@@ -101,10 +101,19 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refre
 
 ## Pricing config
 
-Defaults in `src/server/config/defaults.ts` (general rule: 17% markup, 22% VAT,
-charm `.99`, no delta cap). Edit markup / VAT / rounding / minAsks live from the
-**Pricing** bar on `/preview` (saved to Postgres), or **Reset** to defaults.
-Precedence for any variant price: **manual lock > sale rule > computed price**.
+KicksDB returns **raw lowest asks** — every markup is applied by this app
+(`computePrice`: ask → markup → floor → VAT → rounding). The default rule
+(`src/server/config/defaults.ts`) uses a **dynamic, price-banded markup** on
+the raw ask: ≤150€ → 35%, ≤300€ → 30%, ≤500€ → 25%, above → 19% — plus 22%
+VAT on top and charm `.99` rounding. Band selection happens on the ask
+(pre-markup, pre-VAT), so the retail price never shifts its own band.
+
+The **Pricing** bar (on `/sync` and `/preview`) shows the live bands and the
+store-wide **Reprice discounted** switch, and hosts the editor: saving a flat
+markup there switches banding off; **Reset** restores the banded defaults.
+After upgrading an existing DB, press **Reset** once — the stored config row
+still carries the old flat rule. Precedence for any variant price:
+**manual lock > sale rule > computed price**.
 
 ## Caching
 
