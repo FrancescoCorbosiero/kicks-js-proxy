@@ -9,7 +9,7 @@ import {
   type PullProgress,
 } from "@/server/woo/pull";
 import {
-  applyPrices,
+  applySync,
   listApplyHistory,
   type ApplyHistoryEntry,
   type ApplyOutcome,
@@ -111,12 +111,21 @@ export async function getSyncState(): Promise<SyncPageState> {
   };
 }
 
-const ApplySchema = z.object({
-  selections: z
-    .array(z.object({ planId: z.string().min(1), variantIds: z.array(z.string().min(1)).min(1) }))
-    .min(1),
-  dryRun: z.boolean(),
-});
+const ApplySchema = z
+  .object({
+    selections: z
+      .array(z.object({ planId: z.string().min(1), variantIds: z.array(z.string().min(1)).min(1) }))
+      .default([]),
+    dryRun: z.boolean(),
+    // Align sizes before pricing: delete orphan/duplicate variations and
+    // realign pa_taglia (variants + parent option list). Default on.
+    sanitize: z.boolean().default(true),
+    kicksdbVariationIds: z.array(z.number()).default([]),
+    previewedProductIds: z.array(z.number()).default([]),
+  })
+  .refine((v) => v.selections.length > 0 || v.sanitize, {
+    message: "Nothing to do: no price selection and cleanup is off.",
+  });
 
 export interface ApplyActionResult {
   ok: boolean;
@@ -125,8 +134,9 @@ export interface ApplyActionResult {
 }
 
 /**
- * Execute (or dry-run) the selected price changes against the live store.
- * Dry-run computes and audits the exact writes without touching Woo.
+ * Execute (or dry-run) the sync against the live store: size cleanup first
+ * (orphan deletion + pa_taglia alignment), then the selected price writes.
+ * Dry-run computes and audits the exact operations without touching Woo.
  */
 export async function applySyncPrices(
   input: z.infer<typeof ApplySchema>,
@@ -134,7 +144,12 @@ export async function applySyncPrices(
   const parsed = ApplySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const outcome = await applyPrices(parsed.data.selections, parsed.data.dryRun);
+    const outcome = await applySync(parsed.data.selections, {
+      dryRun: parsed.data.dryRun,
+      sanitize: parsed.data.sanitize,
+      kicksdbVariationIds: parsed.data.kicksdbVariationIds,
+      previewedProductIds: parsed.data.previewedProductIds,
+    });
     return { ok: true, outcome };
   } catch (e) {
     return { ok: false, error: errMessage(e) };

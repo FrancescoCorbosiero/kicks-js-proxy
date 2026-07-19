@@ -42,18 +42,29 @@ filters/sorts/paginates in SQL.
   KicksDB**, per-size **manual price locks** and the per-product **sale rule**
   (both via `store_overrides`, keyed by SKU/EU size — snapshot-independent, so
   the sync honors them automatically).
-- **Sync** (`/sync`) — the main workflow, all REST:
-  1. **Pull**: walk the Woo REST API (`products` + variations) into the active
-     store snapshot (`source: "rest"`). Cursor-driven and resumable
-     (`store_pull_runs` + staging), sized for thousands of products, with live
-     progress and cancel.
+- **Sync** (`/sync`) — the main workflow: **align sizes, then patch prices**,
+  all over REST:
+  1. **Pull**: walk the Woo REST API (`products` incl. attributes + variations)
+     into the active store snapshot (`source: "rest"`). Cursor-driven and
+     resumable (`store_pull_runs` + staging), sized for thousands of products,
+     with live progress and cancel.
   2. **Preview**: the plan engine (`buildPlan`) matches StockX variants to Woo
      variations GTIN-first then by EU size, prices them through the scoped
      rules, and shows the per-variant diff (update / create / noop / skip).
-  3. **Apply**: selected `update` rows are written back via
-     `products/{id}/variations/batch` — **dry-run first** (live apply unlocks
-     only after a dry run of the same selection). Every run lands in
-     `apply_audit`; recent history shows on the tab.
+  3. **Apply** — two passes per product, dry-run first (live apply unlocks only
+     after a dry run of the same selection + cleanup scope):
+     - **Size cleanup** (default on): the sanitize engine plans REST
+       operations — DELETE orphan/ghost/duplicate variations that don't align
+       with `pa_taglia` (so Woo never shows them), rewrite survivors with the
+       realigned `attribute_pa_taglia`, make zero-stock sizes carried by
+       KicksDB available, and PUT the parent's realigned option list. Only
+       previewed products are ever touched.
+     - **Prices**: the selected `update` rows via
+       `products/{id}/variations/batch` (a price aimed at a deleted duplicate
+       is dropped — its surviving twin carries its own row).
+     Every run lands in `apply_audit`; after a live run the stored snapshot is
+     patched to the post-apply state, so the next preview reflects reality
+     without a re-pull.
 - **Import** (`/import`) — manual textarea or CSV/TXT/TSV upload. SKUs are
   extracted, chunked, GET-verified and upserted through the same pipeline;
   each operator action is one `ingestion_runs` row (added / known / rejected).
@@ -63,9 +74,10 @@ filters/sorts/paginates in SQL.
   supplier feeds plug in beside it (same pipeline, same history) — planned.
 - *(hidden)* `/preview` — the legacy **file round-trip** flow (upload a Woo
   export, preview, download a patched re-import JSON with sanitize folded in).
-  Fully functional, just unlinked — the fallback if REST must be reversed.
-  Sanitize (ghost/duplicate variation cleanup, `pa_taglia` realignment) lives
-  only here for now: deleting variations over live REST stays out of scope.
+  Fully functional, just unlinked — the fallback if REST must be reversed. It
+  shares the same sanitize engine as the REST cleanup
+  (`src/server/store-json/sanitize.ts`), so file and live cleanup can never
+  disagree.
 
 ## Scheduled runs
 

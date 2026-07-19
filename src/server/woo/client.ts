@@ -35,6 +35,8 @@ const WooProductSchema = z.looseObject({
   status: z.string().nullish(),
   permalink: z.string().nullish(),
   date_modified: z.string().nullish(),
+  // Needed by the cleanup: the parent pa_taglia option list lives here.
+  attributes: z.array(z.unknown()).nullish(),
 });
 
 export type WooRestProduct = z.infer<typeof WooProductSchema>;
@@ -115,16 +117,29 @@ export class WooClient {
   }
 
   /**
-   * Write prices: Woo's one structural constraint — variation batches are
+   * Write variations: Woo's one structural constraint — variation batches are
    * per-parent-product (POST products/{id}/variations/batch), never global.
+   * `update` rows may carry any variation fields (regular_price, attributes,
+   * stock_status, …); `delete` removes variations permanently (the cleanup's
+   * orphan/duplicate removal).
    */
-  async batchUpdateVariations(
+  async batchVariations(
     productId: number,
-    update: { id: number; regular_price: string }[],
+    payload: { update?: Record<string, unknown>[]; delete?: number[] },
   ): Promise<void> {
+    if (!payload.update?.length && !payload.delete?.length) return;
     await requestJson(
       this.apiUrl(`products/${productId}/variations/batch`),
-      { method: "POST", headers: this.headers(), body: JSON.stringify({ update }) },
+      { method: "POST", headers: this.headers(), body: JSON.stringify(payload) },
+      this.retry,
+    );
+  }
+
+  /** Update parent-product fields (e.g. the realigned pa_taglia option list). */
+  async updateProduct(productId: number, body: Record<string, unknown>): Promise<void> {
+    await requestJson(
+      this.apiUrl(`products/${productId}`),
+      { method: "PUT", headers: this.headers(), body: JSON.stringify(body) },
       this.retry,
     );
   }

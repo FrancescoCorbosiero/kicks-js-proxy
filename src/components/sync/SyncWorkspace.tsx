@@ -75,6 +75,9 @@ export function SyncWorkspace({
   const [applied, setApplied] = React.useState<ApplyOutcome | null>(null);
   const [applyError, setApplyError] = React.useState<string | null>(null);
   const [applying, setApplying] = React.useState<"dry" | "live" | null>(null);
+  // Align sizes (delete orphan/duplicate variations, realign pa_taglia) before
+  // pricing — the standardization pass. Default on.
+  const [sanitize, setSanitize] = React.useState(true);
 
   const hasSnapshot = !!snapshotInfo;
 
@@ -236,8 +239,30 @@ export function SyncWorkspace({
     }))
     .filter((s) => s.variantIds.length > 0);
   const applyCount = applySelections.reduce((n, s) => n + s.variantIds.length, 0);
-  const signature = selectionSignature(applySelections);
+
+  // Cleanup scope, derived from the whole preview (not just the selection):
+  // variations priceable on KicksDB (kept + made available when zero-stock),
+  // and the previewed store products (cleanup never touches anything else).
+  const kicksdbVariationIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of plans)
+      for (const i of p.plan.items)
+        if (i.storeVariationId != null && i.proposedPrice != null) ids.add(i.storeVariationId);
+    return [...ids];
+  }, [plans]);
+  const previewedProductIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of plans)
+      for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
+    return [...ids];
+  }, [plans]);
+
+  // A dry run is only valid for the exact same work: selection + cleanup scope.
+  const signature = `${sanitize ? "s" : "-"}|${plans.map((p) => p.planId).join(",")}|${selectionSignature(applySelections)}`;
   const dryValid = dry != null && dry.signature === signature;
+  const canRun = plans.length > 0 && (applyCount > 0 || sanitize);
+  const dryHasWork =
+    dryValid && dry != null && (dry.outcome.variations > 0 || (dry.outcome.cleanup?.deletions ?? 0) > 0 || (dry.outcome.cleanup?.taglieRealigned ?? 0) > 0 || (dry.outcome.cleanup?.stockSynthesized ?? 0) > 0 || (dry.outcome.cleanup?.parentsRealigned ?? 0) > 0);
 
   async function refreshHistory() {
     const state = await getSyncState();
@@ -245,13 +270,19 @@ export function SyncWorkspace({
   }
 
   function runDry() {
-    if (applySelections.length === 0) return;
+    if (!canRun) return;
     setApplyError(null);
     setApplied(null);
     setApplying("dry");
     void (async () => {
       try {
-        const res = await applySyncPrices({ selections: applySelections, dryRun: true });
+        const res = await applySyncPrices({
+          selections: applySelections,
+          dryRun: true,
+          sanitize,
+          kicksdbVariationIds,
+          previewedProductIds,
+        });
         if (!res.ok || !res.outcome) setApplyError(res.error ?? t.sync.apply.failed);
         else setDry({ outcome: res.outcome, signature });
         await refreshHistory();
@@ -262,12 +293,18 @@ export function SyncWorkspace({
   }
 
   function runApply() {
-    if (!dryValid || applySelections.length === 0) return;
+    if (!dryValid || !canRun) return;
     setApplyError(null);
     setApplying("live");
     void (async () => {
       try {
-        const res = await applySyncPrices({ selections: applySelections, dryRun: false });
+        const res = await applySyncPrices({
+          selections: applySelections,
+          dryRun: false,
+          sanitize,
+          kicksdbVariationIds,
+          previewedProductIds,
+        });
         if (!res.ok || !res.outcome) {
           setApplyError(res.error ?? t.sync.apply.failed);
           return;
@@ -275,7 +312,8 @@ export function SyncWorkspace({
         setApplied(res.outcome);
         setDry(null);
         await refreshHistory();
-        // Re-pull nothing — but recompute the preview so applied rows go noop.
+        // The snapshot was patched server-side — recompute so applied rows go
+        // noop and deleted orphans disappear from the diff.
         rerun();
       } finally {
         setApplying(null);
@@ -468,18 +506,31 @@ export function SyncWorkspace({
             ))}
           </div>
 
-          {/* Apply bar — dry-run first, live apply unlocked by a matching dry run */}
+          {/* Apply bar — cleanup + prices; dry-run first, live apply unlocked by a matching dry run */}
           <div className="sticky bottom-3 z-20 rounded-xl border border-line bg-surface/95 p-4 shadow-lg backdrop-blur-md">
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-sm">
                 <span className="font-semibold tnum">{t.sync.apply.ready(applyCount)}</span>
               </div>
+              <label
+                className="flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-xs font-medium text-muted"
+                title={t.sync.apply.cleanupHint}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-current"
+                  checked={sanitize}
+                  disabled={applying != null}
+                  onChange={(e) => setSanitize(e.target.checked)}
+                />
+                {t.sync.apply.cleanup}
+              </label>
               <div className="ml-auto flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={runDry}
-                  disabled={applyCount === 0 || applying != null}
+                  disabled={!canRun || applying != null}
                 >
                   {applying === "dry" ? t.sync.apply.dryRunning : t.sync.apply.dryRun}
                 </Button>
@@ -487,10 +538,14 @@ export function SyncWorkspace({
                   type="button"
                   variant="accent"
                   onClick={runApply}
-                  disabled={!dryValid || applyCount === 0 || applying != null}
+                  disabled={!dryHasWork || applying != null}
                   title={dryValid ? undefined : t.sync.apply.needDryRun}
                 >
-                  {applying === "live" ? t.sync.apply.applying : t.sync.apply.apply(applyCount)}
+                  {applying === "live"
+                    ? t.sync.apply.applying
+                    : applyCount > 0
+                      ? t.sync.apply.apply(applyCount)
+                      : t.sync.apply.applyCleanupOnly}
                 </Button>
               </div>
             </div>
@@ -498,7 +553,53 @@ export function SyncWorkspace({
             {applyError && <p className="mt-2 text-sm text-skip">{applyError}</p>}
 
             {dryValid && dry && (
-              <div className="mt-3 space-y-1 border-t border-line pt-3 text-xs animate-fade-up">
+              <div className="mt-3 space-y-2 border-t border-line pt-3 text-xs animate-fade-up">
+                {/* Cleanup: what standardization would do, before any pricing */}
+                {dry.outcome.cleanup && (
+                  <div className="space-y-1">
+                    <div className="font-semibold">
+                      {t.sync.apply.cleanupTitle(dry.outcome.cleanup.products)}
+                    </div>
+                    {dry.outcome.cleanup.products === 0 ? (
+                      <div className="text-faint">{t.sync.apply.cleanupNone}</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted tnum">
+                        <span className="font-medium text-skip">
+                          {t.sync.apply.deletions(dry.outcome.cleanup.deletions)}
+                        </span>
+                        <span>{t.sanitize.ghostsRemoved(dry.outcome.cleanup.ghostsRemoved)}</span>
+                        <span>{t.sanitize.duplicatesRemoved(dry.outcome.cleanup.duplicatesRemoved)}</span>
+                        <span>{t.sanitize.stockSynthesized(dry.outcome.cleanup.stockSynthesized)}</span>
+                        <span>{t.sanitize.taglieRealigned(dry.outcome.cleanup.taglieRealigned)}</span>
+                        <span>{t.sanitize.parentsRealigned(dry.outcome.cleanup.parentsRealigned)}</span>
+                      </div>
+                    )}
+                    {dry.outcome.cleanupDetails.length > 0 && (
+                      <ul className="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
+                        {dry.outcome.cleanupDetails.slice(0, 8).map((d) => (
+                          <li key={d.storeProductId} className="flex items-center gap-2 tnum">
+                            <span className="font-mono text-faint">{d.sku}</span>
+                            <span className="ml-auto text-muted">
+                              {t.sync.apply.cleanupLine(d.deletions, d.rewrites)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {dry.outcome.cleanupDetails.length > 8 && (
+                      <div className="text-faint">
+                        {t.sync.apply.dryMore(dry.outcome.cleanupDetails.length - 8)}
+                      </div>
+                    )}
+                    {dry.outcome.droppedByCleanup > 0 && (
+                      <div className="text-faint">
+                        {t.sync.apply.droppedByCleanup(dry.outcome.droppedByCleanup)}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Prices */}
                 <div className="font-semibold">{t.sync.apply.dryTitle(dry.outcome.variations)}</div>
                 <ul className="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
                   {dry.outcome.changes.slice(0, 12).map((c) => (
@@ -519,11 +620,22 @@ export function SyncWorkspace({
             )}
 
             {applied && (
-              <p className={`mt-2 text-sm font-medium ${applied.status === "applied" ? "text-up" : "text-skip"}`}>
-                {applied.status === "applied"
-                  ? t.sync.apply.applied(applied.updated)
-                  : t.sync.apply.partial(applied.updated, applied.failed.length)}
-              </p>
+              <div className="mt-2 space-y-0.5 text-sm font-medium">
+                <p className={applied.status === "applied" ? "text-up" : "text-skip"}>
+                  {applied.status === "applied"
+                    ? t.sync.apply.applied(applied.updated)
+                    : t.sync.apply.partial(applied.updated, applied.failed.length)}
+                </p>
+                {applied.cleanup && applied.cleanup.products > 0 && (
+                  <p className="text-xs font-normal text-muted tnum">
+                    {t.sync.apply.cleanupApplied(
+                      applied.cleanup.deletions,
+                      applied.cleanup.taglieRealigned,
+                      applied.cleanup.parentsRealigned,
+                    )}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -553,6 +665,9 @@ export function SyncWorkspace({
                 </span>
                 <span className="ml-auto text-xs text-muted tnum">
                   {t.sync.history.line(h.updatedCount, h.requestedVariations ?? 0)}
+                  {h.cleanupDeletions != null && h.cleanupDeletions > 0 && (
+                    <span className="text-skip"> · {t.sync.apply.deletions(h.cleanupDeletions)}</span>
+                  )}
                 </span>
               </li>
             ))}

@@ -268,12 +268,25 @@ export const it = {
     },
     apply: {
       ready: (n: number) => `${n} varianti pronte alla scrittura`,
+      cleanup: "Allinea taglie (pa_taglia)",
+      cleanupHint:
+        "Prima dei prezzi: elimina le varianti orfane/duplicate che Woo non mostra, riallinea pa_taglia sulle varianti superstiti e sull'attributo del prodotto, e rende disponibili le taglie a stock zero presenti su KicksDB.",
       dryRun: "Prova (dry run)",
       dryRunning: "Prova…",
       apply: (n: number) => `Applica ${n} modifiche`,
+      applyCleanupOnly: "Applica pulizia",
       applying: "Applicazione…",
       needDryRun: "Esegui prima la prova sulla selezione corrente",
-      dryTitle: (n: number) => `La prova scriverebbe ${n} varianti:`,
+      cleanupTitle: (n: number) =>
+        n === 0 ? "Pulizia taglie" : `Pulizia taglie su ${n} ${n === 1 ? "prodotto" : "prodotti"}:`,
+      cleanupNone: "Nessuna pulizia necessaria — taglie già allineate.",
+      cleanupLine: (del: number, rw: number) => `−${del} varianti · ${rw} riallineate`,
+      deletions: (n: number) => `${n} varianti da eliminare`,
+      droppedByCleanup: (n: number) =>
+        `${n} prezzi puntavano a varianti eliminate dalla pulizia e sono stati scartati`,
+      cleanupApplied: (del: number, taglie: number, parents: number) =>
+        `Pulizia: ${del} varianti eliminate · ${taglie} pa_taglia riallineati · ${parents} attributi prodotto riallineati`,
+      dryTitle: (n: number) => `La prova scriverebbe ${n} prezzi:`,
       dryMore: (n: number) => `…e altre ${n}`,
       applied: (n: number) => `${n} varianti aggiornate sullo store ✓`,
       partial: (ok: number, ko: number) => `${ok} aggiornate, ${ko} fallite`,

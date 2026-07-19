@@ -89,6 +89,8 @@ function toStoreProduct(p: WooRestProduct, variations: WooRestVariation[]): Stor
     status: p.status ?? null,
     permalink: p.permalink ?? null,
     date_modified: p.date_modified ?? null,
+    // Parent attributes carry the pa_taglia option list the cleanup realigns.
+    attributes: p.attributes ?? null,
     variations: variations.map((v) => ({
       id: v.id,
       sku: v.sku ?? null,

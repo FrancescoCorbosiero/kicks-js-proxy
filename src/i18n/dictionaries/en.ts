@@ -259,12 +259,25 @@ export const en: Dictionary = {
     },
     apply: {
       ready: (n) => `${n} variations ready to write`,
+      cleanup: "Align sizes (pa_taglia)",
+      cleanupHint:
+        "Before prices: delete the orphan/duplicate variations Woo never shows, realign pa_taglia on the surviving variations and the product attribute, and make zero-stock sizes carried by KicksDB available.",
       dryRun: "Dry run",
       dryRunning: "Dry running…",
       apply: (n) => `Apply ${n} changes`,
+      applyCleanupOnly: "Apply cleanup",
       applying: "Applying…",
       needDryRun: "Run a dry run on the current selection first",
-      dryTitle: (n) => `The dry run would write ${n} variations:`,
+      cleanupTitle: (n) =>
+        n === 0 ? "Size cleanup" : `Size cleanup on ${n} ${n === 1 ? "product" : "products"}:`,
+      cleanupNone: "No cleanup needed — sizes already aligned.",
+      cleanupLine: (del, rw) => `−${del} variations · ${rw} realigned`,
+      deletions: (n) => `${n} variations to delete`,
+      droppedByCleanup: (n) =>
+        `${n} price writes targeted variations the cleanup deletes and were dropped`,
+      cleanupApplied: (del, taglie, parents) =>
+        `Cleanup: ${del} variations deleted · ${taglie} pa_taglia realigned · ${parents} product attributes realigned`,
+      dryTitle: (n) => `The dry run would write ${n} prices:`,
       dryMore: (n) => `…and ${n} more`,
       applied: (n) => `${n} variations updated on the store ✓`,
       partial: (ok, ko) => `${ok} updated, ${ko} failed`,
