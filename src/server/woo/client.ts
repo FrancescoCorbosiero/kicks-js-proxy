@@ -42,6 +42,18 @@ const WooProductSchema = z.looseObject({
 export type WooRestProduct = z.infer<typeof WooProductSchema>;
 export type WooRestVariation = z.infer<typeof WooVariationSchema>;
 
+/** One row of a variations/batch response: an id on success, error on failure. */
+const BatchRowSchema = z.looseObject({
+  id: z.number().optional(),
+  error: z.looseObject({ code: z.string().optional(), message: z.string().optional() }).optional(),
+});
+const BatchResponseSchema = z.looseObject({
+  create: z.array(BatchRowSchema).optional(),
+  update: z.array(BatchRowSchema).optional(),
+  delete: z.array(BatchRowSchema).optional(),
+});
+export type BatchResultRow = z.infer<typeof BatchRowSchema>;
+
 const VARIATIONS_PER_PAGE = 100;
 
 export class WooClient {
@@ -116,23 +128,58 @@ export class WooClient {
     }
   }
 
+  /** One full product payload (attributes, meta, everything) — the rebuild input. */
+  async getFullProduct(productId: number): Promise<Record<string, unknown>> {
+    const raw = await requestJson(
+      this.apiUrl(`products/${productId}`),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    return z.looseObject({ id: z.number() }).parse(raw);
+  }
+
+  /** Global attribute taxonomies (to bind pa_taglia by id when a parent lacks it). */
+  async getAttributeTaxonomies(): Promise<{ id: number; name: string; slug: string }[]> {
+    const raw = await requestJson(
+      this.apiUrl("products/attributes", { per_page: "100" }),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    return z
+      .array(z.looseObject({ id: z.number(), name: z.string(), slug: z.string() }))
+      .parse(raw);
+  }
+
   /**
    * Write variations: Woo's one structural constraint — variation batches are
    * per-parent-product (POST products/{id}/variations/batch), never global.
-   * `update` rows may carry any variation fields (regular_price, attributes,
-   * stock_status, …); `delete` removes variations permanently (the cleanup's
-   * orphan/duplicate removal).
+   * `create` builds fresh variations (the rebuild), `update` rows may carry any
+   * variation fields, `delete` removes variations permanently. Returns the
+   * parsed response — created rows carry their new ids, and failed rows embed
+   * an `error` object instead of failing the whole batch.
    */
   async batchVariations(
     productId: number,
-    payload: { update?: Record<string, unknown>[]; delete?: number[] },
-  ): Promise<void> {
-    if (!payload.update?.length && !payload.delete?.length) return;
-    await requestJson(
+    payload: {
+      create?: Record<string, unknown>[];
+      update?: Record<string, unknown>[];
+      delete?: number[];
+    },
+  ): Promise<{ create: BatchResultRow[]; update: BatchResultRow[]; delete: BatchResultRow[] }> {
+    if (!payload.create?.length && !payload.update?.length && !payload.delete?.length) {
+      return { create: [], update: [], delete: [] };
+    }
+    const raw = await requestJson(
       this.apiUrl(`products/${productId}/variations/batch`),
       { method: "POST", headers: this.headers(), body: JSON.stringify(payload) },
       this.retry,
     );
+    const parsed = BatchResponseSchema.parse(raw);
+    return {
+      create: parsed.create ?? [],
+      update: parsed.update ?? [],
+      delete: parsed.delete ?? [],
+    };
   }
 
   /** Update parent-product fields (e.g. the realigned pa_taglia option list). */

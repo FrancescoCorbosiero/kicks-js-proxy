@@ -290,6 +290,23 @@ export const en: Dictionary = {
       partial: (ok, ko) => `${ok} updated, ${ko} failed`,
       failed: "Apply failed",
     },
+    rebuild: {
+      title: "Product rebuild",
+      tag: "destructive — deletes and re-creates variations",
+      desc: "For unrecoverable products: deletes ALL existing variations and re-creates them from the KicksDB catalog (canonical sizes, standard SKUs, GTINs, banded prices). The parent product is untouched: SEO, media, categories and swatches stay. Existing variation meta is carried over to the matching size; the parent's pa_taglia attribute is reconstructed even when empty.",
+      usePreview: (n) => `Use the ${n} previewed products`,
+      rebuild: (n) => `Rebuild ${n} ${n === 1 ? "product" : "products"}`,
+      rebuilding: "Rebuilding…",
+      ack: "I understand: these products' existing variations will be permanently deleted and re-created from the catalog.",
+      failed: "Rebuild failed",
+      dryTitle: (n) => `The dry run would cover ${n} ${n === 1 ? "product" : "products"}:`,
+      doneTitle: (created, deleted, failed) =>
+        `Done: ${created} variations created · ${deleted} deleted${failed > 0 ? ` · ${failed} products failed` : ""}`,
+      line: (oldN, newN) => `${oldN} variations → ${newN} sizes`,
+      carried: (n) => `${n} meta carried`,
+      dropped: (n) => `${n} orphan sizes lost`,
+      unpriced: (n) => `${n} unpriced`,
+    },
     history: {
       title: "Sync history",
       empty: "No runs recorded.",
