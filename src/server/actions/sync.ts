@@ -15,6 +15,7 @@ import {
   type ApplyOutcome,
 } from "@/server/woo/apply";
 import { wooConfigured } from "@/server/woo/client";
+import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -131,6 +132,35 @@ export interface ApplyActionResult {
   ok: boolean;
   error?: string;
   outcome?: ApplyOutcome;
+}
+
+const RebuildSchema = z.object({
+  skus: z.array(z.string().min(1)).min(1).max(100),
+  dryRun: z.boolean(),
+});
+
+export interface RebuildActionResult {
+  ok: boolean;
+  error?: string;
+  outcome?: RebuildOutcome;
+}
+
+/**
+ * Obliterate + re-create the variation sets of the given products from the
+ * KicksDB catalog (parent untouched; per-variation extras carried over by
+ * size). Destructive — dry-run first, always.
+ */
+export async function rebuildStoreProducts(
+  input: z.infer<typeof RebuildSchema>,
+): Promise<RebuildActionResult> {
+  const parsed = RebuildSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const outcome = await rebuildProducts(parsed.data.skus, parsed.data.dryRun);
+    return { ok: true, outcome };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
+  }
 }
 
 /**

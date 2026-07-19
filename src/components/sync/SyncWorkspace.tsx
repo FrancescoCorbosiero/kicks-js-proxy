@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { PricingBar } from "@/components/pricing/PricingBar";
 import { ProductGroup } from "@/components/preview/ProductGroup";
 import { NotFoundCard } from "@/components/preview/NotFoundCard";
+import { RebuildPanel } from "./RebuildPanel";
 
 const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 
@@ -655,6 +656,18 @@ export function SyncWorkspace({
             )}
           </div>
         </div>
+      )}
+
+      {/* Destructive standardization: obliterate + re-create variation sets */}
+      {hasSnapshot && (
+        <RebuildPanel
+          previewSkus={plans.map((p) => p.sku)}
+          disabled={!initialState.wooConfigured || pulling || applying != null}
+          onDone={() => {
+            void refreshHistory();
+            if (plans.length > 0) rerun();
+          }}
+        />
       )}
 
       {/* History */}

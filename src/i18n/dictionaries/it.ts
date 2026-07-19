@@ -299,6 +299,23 @@ export const it = {
       partial: (ok: number, ko: number) => `${ok} aggiornate, ${ko} fallite`,
       failed: "Applicazione fallita",
     },
+    rebuild: {
+      title: "Ricostruzione prodotti",
+      tag: "distruttiva — elimina e ricrea le varianti",
+      desc: "Per i prodotti irrecuperabili: elimina TUTTE le varianti esistenti e le ricrea dal catalogo KicksDB (taglie canoniche, SKU standard, GTIN, prezzi a fasce). Il prodotto padre non viene toccato: SEO, media, categorie e swatch restano. I meta delle varianti esistenti vengono riportati sulla taglia corrispondente; l'attributo pa_taglia del padre viene ricostruito anche se vuoto.",
+      usePreview: (n: number) => `Usa i ${n} prodotti in anteprima`,
+      rebuild: (n: number) => `Ricostruisci ${n} ${n === 1 ? "prodotto" : "prodotti"}`,
+      rebuilding: "Ricostruzione…",
+      ack: "Ho capito: le varianti esistenti di questi prodotti verranno eliminate definitivamente e ricreate dal catalogo.",
+      failed: "Ricostruzione fallita",
+      dryTitle: (n: number) => `La prova coprirebbe ${n} ${n === 1 ? "prodotto" : "prodotti"}:`,
+      doneTitle: (created: number, deleted: number, failed: number) =>
+        `Fatto: ${created} varianti create · ${deleted} eliminate${failed > 0 ? ` · ${failed} prodotti falliti` : ""}`,
+      line: (oldN: number, newN: number) => `${oldN} varianti → ${newN} taglie`,
+      carried: (n: number) => `${n} meta riportati`,
+      dropped: (n: number) => `${n} taglie orfane perse`,
+      unpriced: (n: number) => `${n} senza prezzo`,
+    },
     history: {
       title: "Storico sincronizzazioni",
       empty: "Nessuna esecuzione registrata.",
