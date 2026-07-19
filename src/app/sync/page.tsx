@@ -1,5 +1,6 @@
 import { SyncWorkspace } from "@/components/sync/SyncWorkspace";
 import { DbUnavailable } from "@/components/DbUnavailable";
+import { assertSchemaCurrent } from "@/server/db/probe";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSnapshotInfo } from "@/server/store-json/repo";
 import { getSyncState } from "@/server/actions/sync";
@@ -23,6 +24,7 @@ export default async function SyncPage({
 
   let config, snapshotInfo, syncState;
   try {
+    await assertSchemaCurrent();
     config = await getActiveConfig();
     snapshotInfo = await getSnapshotInfo().catch(() => null);
     syncState = await getSyncState();

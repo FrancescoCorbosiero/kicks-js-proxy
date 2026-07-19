@@ -1,5 +1,6 @@
 import { FeedsWorkspace } from "@/components/feeds/FeedsWorkspace";
 import { DbUnavailable } from "@/components/DbUnavailable";
+import { assertSchemaCurrent } from "@/server/db/probe";
 import { getFeedsState } from "@/server/actions/feeds";
 import { getServerDictionary } from "@/i18n/server";
 
@@ -15,6 +16,7 @@ export default async function FeedsPage() {
 
   let state;
   try {
+    await assertSchemaCurrent();
     state = await getFeedsState();
   } catch (e) {
     return <DbUnavailable error={e} />;

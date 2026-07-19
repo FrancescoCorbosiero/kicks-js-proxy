@@ -1,5 +1,6 @@
 import { PreviewWorkspace } from "@/components/preview/PreviewWorkspace";
 import { DbUnavailable } from "@/components/DbUnavailable";
+import { assertSchemaCurrent } from "@/server/db/probe";
 import { getActiveConfig } from "@/server/config/repo";
 import { pricingSummary } from "@/server/config/summary";
 import { getSnapshotInfo } from "@/server/store-json/repo";
@@ -14,6 +15,7 @@ export default async function PreviewPage() {
 
   let config, snapshotInfo, overrides;
   try {
+    await assertSchemaCurrent();
     config = await getActiveConfig();
     snapshotInfo = await getSnapshotInfo().catch(() => null);
     overrides = await getOverrides().catch(() => null);

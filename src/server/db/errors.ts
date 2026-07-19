@@ -38,7 +38,12 @@ export function classifyDbError(e: unknown): DbFailure {
       kind = "unreachable";
       break;
     }
-    if (code === "42P01" || /relation .* does not exist/i.test(err.message ?? "")) {
+    if (
+      code === "42P01" || // undefined_table
+      code === "42703" || // undefined_column (schema older than the code)
+      /relation .* does not exist/i.test(err.message ?? "") ||
+      /column .* does not exist/i.test(err.message ?? "")
+    ) {
       kind = "unmigrated";
       break;
     }
