@@ -12,6 +12,8 @@ import { CatalogFilters } from "@/components/catalog/CatalogFilters";
 import { CardImage } from "@/components/catalog/CardImage";
 import { ProductDrawer } from "@/components/catalog/ProductDrawer";
 import { loadDrawerData } from "@/components/catalog/drawer-data";
+import { DbUnavailable } from "@/components/DbUnavailable";
+import { assertSchemaCurrent } from "@/server/db/probe";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +34,9 @@ const eur = new Intl.NumberFormat("it-IT", {
 
 type Search = Record<string, string | undefined>;
 
-export default async function CatalogPage({
-  searchParams,
-}: {
-  searchParams: Promise<Search>;
-}) {
-  const sp = await searchParams;
-  const { t } = await getServerDictionary();
+/** Everything the page needs, loaded in one place so a DB failure is one catch. */
+async function loadPageData(sp: Search) {
+  await assertSchemaCurrent(); // pending migrations must render the remedy page
   const config = await getActiveConfig();
 
   const market = (sp.market ?? config.source.market).toUpperCase();
@@ -75,6 +73,25 @@ export default async function CatalogPage({
 
   const catalogSize = brands.reduce((n, b) => n + b.count, 0);
   const drawer = sp.product ? await loadDrawerData(market, sp.product, config) : null;
+  return { market, params, page, brands, catalogSize, drawer };
+}
+
+export default async function CatalogPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
+  const sp = await searchParams;
+  const { t } = await getServerDictionary();
+
+  let data: Awaited<ReturnType<typeof loadPageData>>;
+  try {
+    data = await loadPageData(sp);
+  } catch (e) {
+    // The landing tab must explain a dead/unmigrated DB, not crash-overlay it.
+    return <DbUnavailable error={e} />;
+  }
+  const { market, params, page, brands, catalogSize, drawer } = data;
   const closeHref = `/catalog${buildQuery({ ...params, product: undefined })}`;
 
   const brandLink = (brand?: string) =>

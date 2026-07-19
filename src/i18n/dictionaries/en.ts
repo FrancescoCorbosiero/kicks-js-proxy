@@ -299,6 +299,16 @@ export const en: Dictionary = {
       line: (updated, requested) => `${updated}/${requested} variations`,
     },
   },
+  dbError: {
+    title: "Database unreachable",
+    unreachable:
+      "Postgres is not answering: the Docker container is down or DATABASE_URL points at the wrong host.",
+    unmigrated: "The database answers but tables are missing: migrations have not been applied.",
+    unknown: "Unexpected database error.",
+    remedyTitle: "How to fix",
+    envHint: "Also check DATABASE_URL in your .env file (see .env.example).",
+    details: "Technical details",
+  },
   feeds: {
     title: "Feeds",
     desc: "The sources that feed the catalog. Every feed goes through the same verified pipeline and leaves a trace in the ingestion history.",

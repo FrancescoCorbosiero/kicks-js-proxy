@@ -1,4 +1,6 @@
 import { ImportWorkspace } from "@/components/import/ImportWorkspace";
+import { DbUnavailable } from "@/components/DbUnavailable";
+import { assertSchemaCurrent } from "@/server/db/probe";
 import { getActiveConfig } from "@/server/config/repo";
 import { listIngestionRuns } from "@/server/ingestion/repo";
 import { getServerDictionary } from "@/i18n/server";
@@ -11,8 +13,15 @@ export const dynamic = "force-dynamic";
  */
 export default async function ImportPage() {
   const { t } = await getServerDictionary();
-  const config = await getActiveConfig();
-  const history = await listIngestionRuns();
+
+  let config, history;
+  try {
+    await assertSchemaCurrent();
+    config = await getActiveConfig();
+    history = await listIngestionRuns();
+  } catch (e) {
+    return <DbUnavailable error={e} />;
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
