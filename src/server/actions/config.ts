@@ -37,6 +37,9 @@ export async function updatePricing(
     sourceDeliveryType: "standard" as const,
   };
   rule.markupPercent = d.markupPercent;
+  // Saving an explicit flat markup switches banded pricing off — the operator
+  // chose a single percent. "Reset" restores the banded defaults.
+  delete rule.markupBands;
   rule.minAsks = d.minAsks;
   rule.rounding = {
     mode: d.roundingMode,

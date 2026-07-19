@@ -1,9 +1,12 @@
 import type { AppConfig, ConnectionConfig } from "@core/config";
 
 /**
- * A sensible starting AppConfig: one general pricing rule (17% markup, VAT 22%,
- * charm .99 rounding), UPC-first matching, dry-run-by-default apply. Operators
- * refine this in the config UI — new pricing behaviour is just more rows, never code.
+ * A sensible starting AppConfig: one general pricing rule with a DYNAMIC,
+ * price-banded markup on the raw KicksDB ask (≤150€ → 35%, ≤300€ → 30%,
+ * ≤500€ → 25%, above → 19% — competitive at the top, real margin at the
+ * bottom), VAT 22% on top, charm .99 rounding, UPC-first matching,
+ * dry-run-by-default apply. Operators refine this in the config UI — new
+ * pricing behaviour is just more rows, never code.
  */
 export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
   return {
@@ -24,7 +27,15 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         scope: {}, // matches everything
         enabled: true,
         sourceDeliveryType: "standard",
-        markupPercent: 17,
+        // Banded by the raw ask (pre-markup, pre-VAT). markupPercent is the
+        // fallback for anything the bands miss (mirrors the top band).
+        markupPercent: 19,
+        markupBands: [
+          { upTo: 150, percent: 35 },
+          { upTo: 300, percent: 30 },
+          { upTo: 500, percent: 25 },
+          { upTo: null, percent: 19 },
+        ],
         minAsks: 1,
         rounding: { mode: "charm", increment: 0.99 },
         tax: { priceIncludesVat: true, vatRatePercent: 22 },

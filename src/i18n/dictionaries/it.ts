@@ -39,6 +39,13 @@ export const it = {
     title: "Prezzi",
     markup: (n: number) => `+${n}% ricarico`,
     noMarkup: "nessun ricarico",
+    dynamicBadge: "ricarico dinamico",
+    dynamicHint:
+      "Il ricarico dipende dal prezzo ask KicksDB (prima di ricarico e IVA): fasce più alte per gli articoli economici, più basse per quelli costosi.",
+    bandUpTo: (limit: number, pct: number) => `≤${limit}€ → +${pct}%`,
+    bandAbove: (pct: number) => `oltre → +${pct}%`,
+    bandsEditHint:
+      "È attivo il ricarico dinamico a fasce. Salvando un ricarico fisso qui lo disattivi; usa Ripristina per tornare alle fasce predefinite.",
     vat: (n: number) => `${n}% IVA`,
     rounding: (mode: string, inc: number | null) => `arrotonda ${mode}${inc != null ? ` ${inc}` : ""}`,
     minAsks: (n: number) => `minAsks ${n}`,

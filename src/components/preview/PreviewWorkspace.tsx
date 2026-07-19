@@ -11,9 +11,8 @@ import {
 } from "@/server/actions/preview";
 import { pingKicksDb } from "@/server/actions/health";
 import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
-import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
-import { setGlobalSaleRule, setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
-import type { PricingSummary, RoundingMode } from "@/server/config/summary";
+import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
+import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
@@ -25,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import type { SnapshotInfo } from "@/server/store-json/repo";
-import { Checkbox } from "@/components/ui/checkbox";
+import { PricingBar } from "@/components/pricing/PricingBar";
 import { ProductGroup } from "./ProductGroup";
 import { ExportBar } from "./ExportBar";
 import { StoreSnapshotPanel } from "./StoreSnapshotPanel";
@@ -72,55 +71,6 @@ export function PreviewWorkspace({
   const [uploadedAt, setUploadedAt] = React.useState<string | null>(snapshotInfo?.uploadedAt ?? null);
   const [diag, setDiag] = React.useState<string | null>(null);
   const [diagPending, startDiag] = React.useTransition();
-  const [price, setPrice] = React.useState<PricingSummary>(pricing);
-  const [followSaleRule, setFollowSaleRule] = React.useState(initialFollowSaleRule);
-  const [resetting, startReset] = React.useTransition();
-  const [editing, setEditing] = React.useState(false);
-  const [saving, startSave] = React.useTransition();
-
-  // Draft fields for the pricing editor (strings so inputs stay controlled).
-  const [dMarkup, setDMarkup] = React.useState("");
-  const [dVat, setDVat] = React.useState("");
-  const [dRounding, setDRounding] = React.useState<RoundingMode>("charm");
-  const [dIncrement, setDIncrement] = React.useState("");
-  const [dMinAsks, setDMinAsks] = React.useState("");
-
-  function openEditor() {
-    setDMarkup(String(price.markupPercent ?? 0));
-    setDVat(String(price.vatRatePercent ?? 0));
-    setDRounding(price.roundingMode ?? "charm");
-    setDIncrement(price.increment != null ? String(price.increment) : "");
-    setDMinAsks(String(price.minAsks ?? 0));
-    setEditing(true);
-  }
-
-  function savePricing() {
-    startSave(async () => {
-      const res = await updatePricing({
-        markupPercent: Number(dMarkup),
-        vatRatePercent: Number(dVat),
-        roundingMode: dRounding,
-        increment: dIncrement.trim() === "" ? undefined : Number(dIncrement),
-        minAsks: Number(dMinAsks),
-      });
-      if (!res.ok || !res.summary) {
-        setError(res.error ?? t.pricing.saveFailed);
-        return;
-      }
-      setPrice(res.summary);
-      setEditing(false);
-      if (hasSnapshot && plans.length > 0) loadFromStore(); // recompute with new pricing
-    });
-  }
-
-  function onResetPricing() {
-    startReset(async () => {
-      const next = await resetPricingToDefaults();
-      setPrice(next);
-      setEditing(false);
-      if (hasSnapshot && plans.length > 0) loadFromStore(); // recompute with new pricing
-    });
-  }
 
   function onDiagnose() {
     setDiag(null);
@@ -232,19 +182,6 @@ export function PreviewWorkspace({
     });
   }
 
-  /** Bulk switch: preserve (default) vs reprice discounted items across all products. */
-  function onToggleGlobalSaleRule(follow: boolean) {
-    setFollowSaleRule(follow);
-    startTransition(async () => {
-      const res = await setGlobalSaleRule({ followSaleRule: follow });
-      if (!res.ok) {
-        setError(res.error ?? "Could not save override");
-        return;
-      }
-      if (hasSnapshot && plans.length > 0) rerun();
-    });
-  }
-
   // Snapshot staleness: the file is a point-in-time export of the store, so warn
   // (softly) once it's a week old — the remedy is to re-export from Woo + reload.
   const staleDays = React.useMemo(() => {
@@ -327,105 +264,16 @@ export function PreviewWorkspace({
     return [...ids];
   }, [plans]);
 
-  const priceChips: string[] = [
-    price.markupPercent != null ? t.pricing.markup(price.markupPercent) : t.pricing.noMarkup,
-    ...(price.vatRatePercent ? [t.pricing.vat(price.vatRatePercent)] : []),
-    ...(price.roundingMode
-      ? [t.pricing.rounding(t.pricing.roundingOptions[price.roundingMode], price.increment ?? null)]
-      : []),
-    ...(price.minAsks != null ? [t.pricing.minAsks(price.minAsks)] : []),
-    price.hasGuardrail ? t.pricing.guardrailOn : t.pricing.guardrailOff,
-  ];
-
   return (
     <div className="space-y-5">
-      {/* Pricing rule bar */}
-      <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/15 text-accent-text">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[17px] w-[17px]">
-              <path d="M3 6h13M3 12h8M3 18h11" />
-              <circle cx="19" cy="6" r="2" />
-              <circle cx="15" cy="12" r="2" />
-              <circle cx="18" cy="18" r="2" />
-            </svg>
-          </span>
-          <span className="text-sm font-semibold">{t.pricing.title}</span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {priceChips.map((c) => (
-              <span
-                key={c}
-                className="rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-muted"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-          <label
-            className={cn(
-              "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-              followSaleRule
-                ? "border-line bg-surface-2 text-muted hover:text-ink"
-                : "border-accent/50 bg-accent/10 text-accent-text",
-            )}
-            title={t.pricing.discountRuleHint}
-          >
-            <Checkbox
-              checked={!followSaleRule}
-              disabled={pending}
-              onCheckedChange={(c) => onToggleGlobalSaleRule(c !== true)}
-              aria-label={t.pricing.discountRule}
-            />
-            {t.pricing.discountRule}
-          </label>
-          <div className="ml-auto flex gap-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
-              {editing ? t.pricing.cancel : t.pricing.edit}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={onResetPricing} disabled={resetting}>
-              {resetting ? t.pricing.resetting : t.pricing.reset}
-            </Button>
-          </div>
-        </div>
-
-        {editing && (
-          <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3 animate-fade-up">
-            <div className="space-y-1">
-              <Label htmlFor="p-markup">{t.pricing.labelMarkup}</Label>
-              <Input id="p-markup" className="w-24" value={dMarkup} onChange={(e) => setDMarkup(e.target.value)} inputMode="decimal" />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="p-vat">{t.pricing.labelVat}</Label>
-              <Input id="p-vat" className="w-24" value={dVat} onChange={(e) => setDVat(e.target.value)} inputMode="decimal" />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="p-round">{t.pricing.labelRounding}</Label>
-              <select
-                id="p-round"
-                value={dRounding}
-                onChange={(e) => setDRounding(e.target.value as RoundingMode)}
-                className="h-9 rounded-md border border-line bg-surface-2 px-2 text-sm text-ink focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/15"
-              >
-                <option value="none">{t.pricing.roundingOptions.none}</option>
-                <option value="integer">{t.pricing.roundingOptions.integer}</option>
-                <option value="charm">{t.pricing.roundingOptions.charm}</option>
-                <option value="nearest">{t.pricing.roundingOptions.nearest}</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="p-inc">{t.pricing.labelIncrement}</Label>
-              <Input id="p-inc" className="w-24" placeholder="0.99 / 5" value={dIncrement} onChange={(e) => setDIncrement(e.target.value)} inputMode="decimal" />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="p-min">{t.pricing.labelMinAsks}</Label>
-              <Input id="p-min" className="w-20" value={dMinAsks} onChange={(e) => setDMinAsks(e.target.value)} inputMode="numeric" />
-            </div>
-            <Button type="button" onClick={savePricing} disabled={saving}>
-              {saving ? t.pricing.saving : t.pricing.save}
-            </Button>
-          </div>
-        )}
-      </div>
+      <PricingBar
+        initial={pricing}
+        initialFollowSaleRule={initialFollowSaleRule}
+        busy={pending}
+        onChanged={() => {
+          if (hasSnapshot && plans.length > 0) rerun(); // recompute with new pricing
+        }}
+      />
 
       <StoreSnapshotPanel
         initialInfo={snapshotInfo}

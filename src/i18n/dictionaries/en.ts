@@ -32,6 +32,13 @@ export const en: Dictionary = {
     title: "Pricing",
     markup: (n) => `+${n}% markup`,
     noMarkup: "no markup",
+    dynamicBadge: "dynamic markup",
+    dynamicHint:
+      "The markup depends on the KicksDB ask price (before markup and VAT): higher bands for cheap items, lower for expensive ones.",
+    bandUpTo: (limit, pct) => `≤${limit}€ → +${pct}%`,
+    bandAbove: (pct) => `above → +${pct}%`,
+    bandsEditHint:
+      "Dynamic banded markup is active. Saving a flat markup here switches it off; use Reset to return to the banded defaults.",
     vat: (n) => `${n}% VAT`,
     rounding: (mode, inc) => `round ${mode}${inc != null ? ` ${inc}` : ""}`,
     minAsks: (n) => `minAsks ${n}`,

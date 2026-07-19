@@ -1,9 +1,12 @@
-import type { AppConfig } from "@core/config";
+import type { AppConfig, MarkupBand } from "@core/config";
+import { sortMarkupBands } from "@core/config";
 
 export type RoundingMode = "none" | "integer" | "charm" | "nearest";
 
 export interface PricingSummary {
   markupPercent: number | null;
+  /** Price-banded markup (ordered ascending); when set it wins over the flat percent. */
+  markupBands: MarkupBand[] | null;
   vatRatePercent: number | null;
   roundingMode: RoundingMode | null;
   increment: number | null;
@@ -16,6 +19,7 @@ export function pricingSummary(cfg: AppConfig): PricingSummary {
   const r = cfg.pricingRules[0];
   return {
     markupPercent: r?.markupPercent ?? null,
+    markupBands: r?.markupBands?.length ? sortMarkupBands(r.markupBands) : null,
     vatRatePercent: r?.tax?.vatRatePercent ?? null,
     roundingMode: r?.rounding?.mode ?? null,
     increment: r?.rounding?.increment ?? null,

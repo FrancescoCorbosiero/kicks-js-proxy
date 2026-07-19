@@ -50,6 +50,16 @@ export interface TaxConfig {
     vatRatePercent: number;               // e.g. 22 for IT
 }
 
+/**
+ * One step of a price-banded markup: applies to asks ≤ upTo (in the market's
+ * major currency, BEFORE markup/VAT — i.e. the raw KicksDB lowest ask).
+ * upTo null = no upper bound (the top band). Bands are ordered ascending.
+ */
+export interface MarkupBand {
+    upTo: number | null;
+    percent: number;
+}
+
 export interface ScopedPricingRule {
     id: string;
     scope: RuleScope;
@@ -57,6 +67,9 @@ export interface ScopedPricingRule {
     // pricing knobs (any may be omitted; the resolver fills from less-specific rules)
     sourceDeliveryType?: DeliveryType;
     markupPercent?: number;
+    // Dynamic markup by ask price. When present it wins over markupPercent,
+    // which remains the fallback for asks no band covers.
+    markupBands?: MarkupBand[];
     floor?: number;
     minAsks?: number;                     // skip if liquidity below this
     rounding?: RoundingConfig;
@@ -106,12 +119,30 @@ export interface AppConfig {
 /* ------------------------------------------------------------------ */
 export interface EffectivePricingRule {
     sourceDeliveryType: DeliveryType;
-    markupPercent: number;
+    markupPercent: number;               // fallback when no band covers the ask
+    markupBands?: MarkupBand[];          // ordered ascending; wins when present
     floor?: number;
     minAsks?: number;
     rounding: RoundingConfig;
     tax: TaxConfig;
     maxDeltaPercent?: number;
+}
+
+/** Ascending by upTo, unbounded band last — resolution order for markupForAsk. */
+export function sortMarkupBands(bands: MarkupBand[]): MarkupBand[] {
+    return [...bands].sort((a, b) => {
+        if (a.upTo == null) return 1;
+        if (b.upTo == null) return -1;
+        return a.upTo - b.upTo;
+    });
+}
+
+/** The markup percent for a raw ask under a rule: first covering band, else the flat fallback. */
+export function markupForAsk(ask: number, rule: EffectivePricingRule): number {
+    for (const band of rule.markupBands ?? []) {
+        if (band.upTo == null || ask <= band.upTo) return band.percent;
+    }
+    return rule.markupPercent;
 }
 
 function sizeToNumber(size: string): number {
@@ -156,6 +187,7 @@ export function resolveEffectiveRule(
     for (const r of matched) {
         if (r.sourceDeliveryType != null) merged.sourceDeliveryType = r.sourceDeliveryType;
         if (r.markupPercent != null) merged.markupPercent = r.markupPercent;
+        if (r.markupBands != null) merged.markupBands = sortMarkupBands(r.markupBands);
         if (r.floor != null) merged.floor = r.floor;
         if (r.minAsks != null) merged.minAsks = r.minAsks;
         if (r.rounding != null) merged.rounding = r.rounding;
@@ -163,10 +195,17 @@ export function resolveEffectiveRule(
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
     }
 
-    if (merged.markupPercent == null) return null; // no rule actually set a markup
+    // A rule must set a markup somehow: flat, or banded (whose top band then
+    // doubles as the flat fallback for anything the bands miss).
+    if (merged.markupPercent == null) {
+        const bands = merged.markupBands;
+        if (!bands || bands.length === 0) return null;
+        merged.markupPercent = bands[bands.length - 1].percent;
+    }
     return {
         sourceDeliveryType: merged.sourceDeliveryType!,
         markupPercent: merged.markupPercent,
+        markupBands: merged.markupBands,
         floor: merged.floor,
         minAsks: merged.minAsks,
         rounding: merged.rounding ?? { mode: "none" },

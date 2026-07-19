@@ -16,11 +16,13 @@ import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/ov
 import type { PullProgress } from "@/server/woo/pull";
 import type { ApplyOutcome, ApplyHistoryEntry } from "@/server/woo/apply";
 import type { SnapshotInfo } from "@/server/store-json/repo";
+import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, summarize } from "@/lib/plan";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PricingBar } from "@/components/pricing/PricingBar";
 import { ProductGroup } from "@/components/preview/ProductGroup";
 import { NotFoundCard } from "@/components/preview/NotFoundCard";
 
@@ -41,11 +43,15 @@ export function SyncWorkspace({
   snapshotInfo,
   initialState,
   seedSkus,
+  pricing,
+  initialFollowSaleRule,
 }: {
   defaultMarket: string;
   snapshotInfo: SnapshotInfo | null;
   initialState: SyncPageState;
   seedSkus: string[];
+  pricing: PricingSummary;
+  initialFollowSaleRule: boolean;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -327,6 +333,16 @@ export function SyncWorkspace({
 
   return (
     <div className="space-y-5">
+      {/* Pricing rule + store-wide discount switch — changes recompute the plan */}
+      <PricingBar
+        initial={pricing}
+        initialFollowSaleRule={initialFollowSaleRule}
+        busy={pending || pulling}
+        onChanged={() => {
+          if (plans.length > 0) rerun();
+        }}
+      />
+
       {/* Store state / pull bar */}
       <div className="relative flex flex-wrap items-center gap-3 overflow-hidden rounded-xl border border-line bg-surface p-4 shadow-xs">
         <span className="absolute inset-y-0 left-0 w-1 bg-accent" />
