@@ -48,6 +48,18 @@ export async function requestJson<T = unknown>(
   init: RequestInit,
   policy: RetryPolicy = DEFAULT_RETRY,
 ): Promise<T> {
+  return (await requestJsonWithHeaders<T>(url, init, policy)).data;
+}
+
+/**
+ * Like requestJson, but also returns the response headers — Woo's REST API
+ * reports pagination totals in X-WP-Total / X-WP-TotalPages.
+ */
+export async function requestJsonWithHeaders<T = unknown>(
+  url: string,
+  init: RequestInit,
+  policy: RetryPolicy = DEFAULT_RETRY,
+): Promise<{ data: T; headers: Headers }> {
   let lastErr: HttpError | undefined;
 
   for (let attempt = 0; attempt < policy.attempts; attempt++) {
@@ -56,7 +68,7 @@ export async function requestJson<T = unknown>(
     try {
       const res = await fetch(url, { ...init, signal: controller.signal });
       if (res.ok) {
-        return (await res.json()) as T;
+        return { data: (await res.json()) as T, headers: res.headers };
       }
       const body = await res.text().catch(() => "");
       lastErr = makeError(`HTTP ${res.status} for ${url}: ${body.slice(0, 500)}`, res.status, body);

@@ -1,9 +1,9 @@
 import type { AppConfig, ConnectionConfig } from "@core/config";
 
 /**
- * A sensible starting AppConfig: one general pricing rule (12% markup, VAT 22%,
- * charm .99 rounding), UPC-first matching, dry-run apply. Operators refine this
- * in the config UI — new pricing behaviour is just more rows, never code.
+ * A sensible starting AppConfig: one general pricing rule (17% markup, VAT 22%,
+ * charm .99 rounding), UPC-first matching, dry-run-by-default apply. Operators
+ * refine this in the config UI — new pricing behaviour is just more rows, never code.
  */
 export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
   return {

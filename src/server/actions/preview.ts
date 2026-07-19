@@ -6,7 +6,7 @@ import { getActiveConfig } from "@/server/config/repo";
 import { getSource } from "@/server/adapters/kicksdb";
 import { getActiveSnapshot } from "@/server/store-json/repo";
 import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
-import { savePlan } from "@/server/plans/repo";
+import { savePlan, prunePlans } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
@@ -64,6 +64,7 @@ async function assemblePlans(
   term: string | null,
   overrides: StoreOverrides,
 ): Promise<PreviewPlan[]> {
+  await prunePlans(); // best-effort retention: plans are per-run scratch data
   const out: PreviewPlan[] = [];
   for (const product of products) {
     const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();

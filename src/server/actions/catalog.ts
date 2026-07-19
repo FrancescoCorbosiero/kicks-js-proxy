@@ -2,7 +2,9 @@
 
 import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
-import { listCatalogEntries } from "@/server/catalog/repo";
+import { getSource } from "@/server/adapters/kicksdb";
+import { listCatalogEntries, upsertCatalog } from "@/server/catalog/repo";
+import { skuKey } from "@/lib/skus";
 import type { CatalogItem } from "@/lib/catalog";
 
 export interface CatalogListResult {
@@ -38,5 +40,32 @@ export async function listCatalog(input: CatalogListInput = {}): Promise<Catalog
       total: 0,
       items: [],
     };
+  }
+}
+
+const RefreshSchema = z.object({ market: z.string().min(1), sku: z.string().min(1) });
+
+/**
+ * Re-sync one catalog product from KicksDB right now (the drawer's refresh
+ * button): re-fetch by exact SKU, upsert, bump fetchedAt. The catalog invariant
+ * holds — a SKU that stopped resolving is reported as an error, never removed.
+ */
+export async function refreshCatalogProduct(
+  input: z.infer<typeof RefreshSchema>,
+): Promise<{ ok: boolean; error?: string }> {
+  const parsed = RefreshSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+
+  try {
+    const config = await getActiveConfig();
+    const source = getSource(config);
+    const { market, sku } = parsed.data;
+    const list = await source.getProduct(sku, market);
+    const product = list.find((p) => skuKey(p.sku) === skuKey(sku));
+    if (!product) return { ok: false, error: `No exact KicksDB match for ${sku}` };
+    await upsertCatalog(market, [product]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

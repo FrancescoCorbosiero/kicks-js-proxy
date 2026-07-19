@@ -11,10 +11,15 @@ const EnvSchema = z.object({
   KICKS_SECRET: z.string().min(1, "KICKS_SECRET is required"),
   KICKS_BASE_URL: z.url().default("https://api.kicks.dev/v3"),
 
-  // WooCommerce — optional: the store integration is JSON round-trip, not live REST.
+  // WooCommerce REST — powers the live sync (pull store state, push prices).
+  // Optional: without them the Sync tab explains what to configure, and the
+  // hidden file round-trip flow (/preview) still works.
   WOO_BASE_URL: z.url().optional(),
   WOO_CONSUMER_KEY: z.string().optional(),
   WOO_CONSUMER_SECRET: z.string().optional(),
+
+  // Shared secret for the scheduled endpoints (/api/cron/*). Unset = disabled.
+  CRON_SECRET: z.string().optional(),
 
   // Persistence
   DATABASE_URL: z.url(),

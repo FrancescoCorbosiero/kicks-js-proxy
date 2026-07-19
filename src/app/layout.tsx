@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { MainNav } from "@/components/MainNav";
 import { I18nProvider } from "@/i18n/provider";
 import { getServerDictionary } from "@/i18n/server";
 
@@ -36,17 +37,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 </span>
               </a>
 
-              <nav className="ml-4 hidden items-center gap-1 text-sm sm:flex">
-                <a
-                  href="/preview"
-                  className="rounded-md px-3 py-1.5 font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                >
-                  {t.header.navPreview}
-                </a>
-              </nav>
+              <MainNav />
 
               <div className="ml-auto flex items-center gap-2">
-                <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-muted md:inline-flex">
+                <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-muted lg:inline-flex">
                   <span className="h-1.5 w-1.5 rounded-full bg-down" />
                   {t.header.internalTool}
                 </span>

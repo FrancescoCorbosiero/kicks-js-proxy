@@ -1,4 +1,4 @@
-import type { StoreModel, StoreProductModel, StoreVariation } from "./model";
+import type { StoreProductModel, StoreVariation } from "./model";
 import {
   normSize,
   variationEuSize,
@@ -30,26 +30,12 @@ import {
  *     product carries a recognizable `pa_taglia` attribute, realign its option
  *     list to exactly the surviving sizes.
  *
- * Pure and non-mutating: it clones the model, keeps only the products it actually
- * changed (so the re-import touches nothing else), and preserves every other
- * field (SEO, GMC, images, stock, …).
+ * sanitizeProduct mutates the single product it is given; buildReimport
+ * (store-json/patch.ts) is the non-mutating whole-model entry point — it clones
+ * the snapshot, keeps only the products actually changed (so the re-import
+ * touches nothing else), and preserves every other field (SEO, GMC, images,
+ * stock, …).
  */
-
-export interface SanitizeReport {
-  productsScanned: number;
-  variationsScanned: number;
-  productsChanged: number;
-  ghostsRemoved: number; // zero-stock variations dropped (NOT on KicksDB)
-  stockSynthesized: number; // zero-stock variations kept + made available (on KicksDB)
-  duplicatesRemoved: number; // stale twin variations dropped (same size, corrupt row)
-  taglieRealigned: number; // variation pa_taglia values corrected
-  parentAttributesRealigned: number; // parent products whose pa_taglia options were realigned
-}
-
-export interface SanitizeOutcome {
-  output: StoreModel; // only changed products, everything else preserved
-  report: SanitizeReport;
-}
 
 /** Coerce a stock field (number or numeric string) to a number, else null. */
 function toNumber(x: unknown): number | null {
@@ -263,34 +249,3 @@ export function sanitizeProduct(
   };
 }
 
-export function sanitizeModel(model: StoreModel): SanitizeOutcome {
-  const clone: StoreModel = structuredClone(model);
-  const report: SanitizeReport = {
-    productsScanned: clone.products.length,
-    variationsScanned: 0,
-    productsChanged: 0,
-    ghostsRemoved: 0,
-    stockSynthesized: 0,
-    duplicatesRemoved: 0,
-    taglieRealigned: 0,
-    parentAttributesRealigned: 0,
-  };
-  const changed = new Set<number>();
-
-  for (const product of clone.products) {
-    report.variationsScanned += product.variations.length;
-    const r = sanitizeProduct(product);
-    report.ghostsRemoved += r.ghostsRemoved;
-    report.stockSynthesized += r.stockSynthesized;
-    report.duplicatesRemoved += r.duplicatesRemoved;
-    report.taglieRealigned += r.taglieRealigned;
-    if (r.parentRealigned) report.parentAttributesRealigned += 1;
-    if (r.changed) changed.add(product.id);
-  }
-
-  clone.products = clone.products.filter((p) => changed.has(p.id));
-  if (typeof clone.product_count === "number") clone.product_count = clone.products.length;
-  report.productsChanged = changed.size;
-
-  return { output: clone, report };
-}
