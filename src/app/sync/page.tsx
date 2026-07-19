@@ -1,4 +1,5 @@
 import { SyncWorkspace } from "@/components/sync/SyncWorkspace";
+import { DbUnavailable } from "@/components/DbUnavailable";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSnapshotInfo } from "@/server/store-json/repo";
 import { getSyncState } from "@/server/actions/sync";
@@ -19,9 +20,15 @@ export default async function SyncPage({
 }) {
   const sp = await searchParams;
   const { t } = await getServerDictionary();
-  const config = await getActiveConfig();
-  const snapshotInfo = await getSnapshotInfo().catch(() => null);
-  const syncState = await getSyncState();
+
+  let config, snapshotInfo, syncState;
+  try {
+    config = await getActiveConfig();
+    snapshotInfo = await getSnapshotInfo().catch(() => null);
+    syncState = await getSyncState();
+  } catch (e) {
+    return <DbUnavailable error={e} />;
+  }
   const seedSkus = sp.skus ? parseSkus(sp.skus) : [];
 
   return (

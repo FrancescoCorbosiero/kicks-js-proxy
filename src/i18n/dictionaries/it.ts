@@ -308,6 +308,16 @@ export const it = {
       line: (updated: number, requested: number) => `${updated}/${requested} varianti`,
     },
   },
+  dbError: {
+    title: "Database non raggiungibile",
+    unreachable:
+      "Postgres non risponde: il container Docker è spento o DATABASE_URL punta all'host sbagliato.",
+    unmigrated: "Il database risponde ma mancano le tabelle: le migrazioni non sono state applicate.",
+    unknown: "Errore inatteso del database.",
+    remedyTitle: "Come risolvere",
+    envHint: "Verifica anche DATABASE_URL nel file .env (vedi .env.example).",
+    details: "Dettagli tecnici",
+  },
   feeds: {
     title: "Feed",
     desc: "Le sorgenti che alimentano il catalogo. Ogni feed passa dalla stessa pipeline verificata e lascia traccia nello storico ingestioni.",

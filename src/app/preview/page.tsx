@@ -1,4 +1,5 @@
 import { PreviewWorkspace } from "@/components/preview/PreviewWorkspace";
+import { DbUnavailable } from "@/components/DbUnavailable";
 import { getActiveConfig } from "@/server/config/repo";
 import { pricingSummary } from "@/server/config/summary";
 import { getSnapshotInfo } from "@/server/store-json/repo";
@@ -10,10 +11,16 @@ export const dynamic = "force-dynamic";
 
 export default async function PreviewPage() {
   const { t } = await getServerDictionary();
-  const config = await getActiveConfig();
+
+  let config, snapshotInfo, overrides;
+  try {
+    config = await getActiveConfig();
+    snapshotInfo = await getSnapshotInfo().catch(() => null);
+    overrides = await getOverrides().catch(() => null);
+  } catch (e) {
+    return <DbUnavailable error={e} />;
+  }
   const pricing = pricingSummary(config);
-  const snapshotInfo = await getSnapshotInfo().catch(() => null);
-  const overrides = await getOverrides().catch(() => null);
   const followSaleRule = overrides ? globalFollowSaleRule(overrides) : true;
 
   return (

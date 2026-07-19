@@ -1,4 +1,5 @@
 import { FeedsWorkspace } from "@/components/feeds/FeedsWorkspace";
+import { DbUnavailable } from "@/components/DbUnavailable";
 import { getFeedsState } from "@/server/actions/feeds";
 import { getServerDictionary } from "@/i18n/server";
 
@@ -11,7 +12,13 @@ export const dynamic = "force-dynamic";
  */
 export default async function FeedsPage() {
   const { t } = await getServerDictionary();
-  const state = await getFeedsState();
+
+  let state;
+  try {
+    state = await getFeedsState();
+  } catch (e) {
+    return <DbUnavailable error={e} />;
+  }
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
