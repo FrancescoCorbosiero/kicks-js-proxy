@@ -1,12 +1,27 @@
 "use client";
 
 import * as React from "react";
-import { rebuildStoreProducts } from "@/server/actions/sync";
+import { listRebuildableSkus, rebuildStoreProducts } from "@/server/actions/sync";
 import type { RebuildOutcome } from "@/server/woo/rebuild";
 import { parseSkus } from "@/lib/skus";
+import { chunkArray } from "@/lib/chunk";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+
+/** Products per bulk chunk — each product costs ~4 REST calls. */
+const BULK_CHUNK = 10;
+
+interface BulkProgress {
+  done: number;
+  total: number;
+  created: number;
+  deleted: number;
+  failedProducts: number;
+  errors: { sku: string; error: string }[];
+  finished: boolean;
+}
 
 /**
  * The destructive standardization tool: obliterate + re-create the variation
@@ -32,10 +47,75 @@ export function RebuildPanel({
   const [dry, setDry] = React.useState<{ outcome: RebuildOutcome; signature: string } | null>(null);
   const [applied, setApplied] = React.useState<RebuildOutcome | null>(null);
 
+  // Bulk mode: the whole rebuildable catalog, chunked, one audit row.
+  const [bulk, setBulk] = React.useState<{ skus: string[]; catalogOnly: number } | null>(null);
+  const [bulkLoading, setBulkLoading] = React.useState(false);
+  const [confirmText, setConfirmText] = React.useState("");
+  const [bulkProgress, setBulkProgress] = React.useState<BulkProgress | null>(null);
+  const bulkCancelRef = React.useRef(false);
+
   const skus = React.useMemo(() => parseSkus(text), [text]);
   const signature = [...skus].sort().join(",");
   const dryValid = dry != null && dry.signature === signature;
   const rebuildable = dryValid ? dry.outcome.products.filter((p) => p.error == null).length : 0;
+
+  async function loadBulk() {
+    setBulkLoading(true);
+    setError(null);
+    try {
+      const res = await listRebuildableSkus();
+      if (!res.ok) setError(res.error ?? t.sync.rebuild.failed);
+      else setBulk({ skus: res.skus, catalogOnly: res.catalogOnly });
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  /** The whole-catalog run: chunked live rebuilds accumulated into one audit row. */
+  async function runBulk() {
+    if (!bulk || bulk.skus.length === 0 || running) return;
+    setError(null);
+    setRunning("live");
+    bulkCancelRef.current = false;
+    const progress: BulkProgress = {
+      done: 0,
+      total: bulk.skus.length,
+      created: 0,
+      deleted: 0,
+      failedProducts: 0,
+      errors: [],
+      finished: false,
+    };
+    setBulkProgress({ ...progress });
+    try {
+      let auditId: string | undefined;
+      for (const chunk of chunkArray(bulk.skus, BULK_CHUNK)) {
+        if (bulkCancelRef.current) break;
+        const res = await rebuildStoreProducts({ skus: chunk, dryRun: false, auditId });
+        if (!res.ok || !res.outcome) {
+          setError(res.error ?? t.sync.rebuild.failed);
+          break;
+        }
+        auditId = res.outcome.auditId;
+        progress.done += chunk.length;
+        progress.created += res.outcome.created;
+        progress.deleted += res.outcome.deleted;
+        progress.failedProducts += res.outcome.failedProducts;
+        for (const p of res.outcome.products) {
+          if (p.error && progress.errors.length < 20) {
+            progress.errors.push({ sku: p.sku, error: p.error });
+          }
+        }
+        setBulkProgress({ ...progress });
+      }
+      progress.finished = true;
+      setBulkProgress({ ...progress });
+      setConfirmText("");
+      onDone();
+    } finally {
+      setRunning(null);
+    }
+  }
 
   function run(dryRun: boolean) {
     if (skus.length === 0 || running) return;
@@ -132,6 +212,98 @@ export function RebuildPanel({
         )}
 
         {error && <p className="text-sm text-skip">{error}</p>}
+
+        {/* Bulk: the whole rebuildable catalog */}
+        <div className="space-y-2 rounded-lg border border-dashed border-skip/40 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-skip">{t.sync.rebuild.bulkTitle}</span>
+            {bulk ? (
+              <span className="text-xs text-muted tnum">
+                {t.sync.rebuild.bulkLoaded(bulk.skus.length, bulk.catalogOnly)}
+              </span>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={loadBulk} disabled={bulkLoading || running != null}>
+                {bulkLoading ? t.catalog.loading : t.sync.rebuild.bulkLoad}
+              </Button>
+            )}
+          </div>
+
+          {bulk && bulk.skus.length > 0 && !bulkProgress?.finished && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="w-44 font-mono text-xs"
+                placeholder={t.sync.rebuild.confirmWord}
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                aria-label={t.sync.rebuild.bulkConfirmLabel}
+              />
+              <span className="text-[11px] text-faint">{t.sync.rebuild.bulkConfirmLabel}</span>
+              <div className="ml-auto flex items-center gap-2">
+                {running === "live" && bulkProgress ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => (bulkCancelRef.current = true)}>
+                    {t.sync.pull.cancel}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="accent"
+                    className="bg-skip text-white hover:bg-skip/90"
+                    onClick={runBulk}
+                    disabled={
+                      disabled ||
+                      running != null ||
+                      confirmText.trim() !== t.sync.rebuild.confirmWord
+                    }
+                  >
+                    {t.sync.rebuild.bulkStart(bulk.skus.length)}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {bulkProgress && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3 text-xs text-muted tnum">
+                {!bulkProgress.finished && (
+                  <span className="spin h-3.5 w-3.5 rounded-full border-2 border-skip/30 border-t-skip" />
+                )}
+                <span className="font-semibold">
+                  {t.sync.rebuild.bulkProgress(bulkProgress.done, bulkProgress.total)}
+                </span>
+                <span>
+                  {t.sync.rebuild.doneTitle(
+                    bulkProgress.created,
+                    bulkProgress.deleted,
+                    bulkProgress.failedProducts,
+                  )}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+                <div
+                  className="h-full rounded-full bg-skip transition-all"
+                  style={{
+                    width: `${Math.round((bulkProgress.done / Math.max(1, bulkProgress.total)) * 100)}%`,
+                  }}
+                />
+              </div>
+              {bulkProgress.errors.length > 0 && (
+                <details className="text-xs text-muted">
+                  <summary className="cursor-pointer font-medium text-skip">
+                    {t.sync.rebuild.bulkErrors(bulkProgress.failedProducts)}
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 font-mono">
+                    {bulkProgress.errors.map((e) => (
+                      <li key={e.sku}>
+                        {e.sku}: {e.error}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
 
         {report && (
           <div className="space-y-1 rounded-lg border border-line bg-surface-2 p-3 text-xs animate-fade-up">

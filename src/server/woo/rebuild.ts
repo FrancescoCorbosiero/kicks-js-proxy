@@ -85,7 +85,16 @@ async function resolveTagliaId(
   return cache.id;
 }
 
-export async function rebuildProducts(skus: string[], dryRun: boolean): Promise<RebuildOutcome> {
+/**
+ * Rebuild a set of products. `auditId` accumulates a chunked bulk run into one
+ * history row: the first chunk creates it, later chunks add their counts —
+ * the whole-catalog rebuild is one line in the log, not hundreds.
+ */
+export async function rebuildProducts(
+  skus: string[],
+  dryRun: boolean,
+  auditId?: string,
+): Promise<RebuildOutcome> {
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();
@@ -241,33 +250,73 @@ export async function rebuildProducts(skus: string[], dryRun: boolean): Promise<
   }
 
   const failedProducts = reports.filter((r) => r.error != null).length;
-  const status: ApplyAuditRow["status"] = dryRun
-    ? "dry_run"
-    : failedProducts === 0
-      ? "applied"
-      : failedProducts < reports.length
-        ? "partial"
-        : "failed";
+  const failures = reports
+    .filter((r) => r.error != null)
+    .map((r) => ({ stockxVariantId: `rebuild:${r.sku}`, error: r.error! }));
 
-  const [audit] = await db
-    .insert(applyAudit)
-    .values({
-      status,
-      dryRun,
-      updatedCount: created,
-      failed: reports
-        .filter((r) => r.error != null)
-        .map((r) => ({ stockxVariantId: `rebuild:${r.sku}`, error: r.error! })),
-      result: {
-        kind: "rebuild",
-        products: reports.length,
-        created,
-        deleted,
-        failedProducts,
-      },
-      finishedAt: new Date(),
-    })
-    .returning({ id: applyAudit.id });
+  let finalAuditId: string;
+  let status: ApplyAuditRow["status"];
 
-  return { auditId: audit.id, dryRun, status, products: reports, created, deleted, failedProducts };
+  if (auditId) {
+    // Accumulate this chunk into the bulk run's single row.
+    const prevRows = await db.select().from(applyAudit).where(eq(applyAudit.id, auditId)).limit(1);
+    const prev = prevRows[0];
+    const prevResult = (prev?.result ?? {}) as Record<string, number>;
+    const prevFailed = Array.isArray(prev?.failed) ? prev.failed : [];
+    const totals = {
+      kind: "rebuild",
+      products: (prevResult.products ?? 0) + reports.length,
+      created: (prevResult.created ?? 0) + created,
+      deleted: (prevResult.deleted ?? 0) + deleted,
+      failedProducts: (prevResult.failedProducts ?? 0) + failedProducts,
+    };
+    status = dryRun
+      ? "dry_run"
+      : totals.failedProducts === 0
+        ? "applied"
+        : totals.failedProducts < totals.products
+          ? "partial"
+          : "failed";
+    await db
+      .update(applyAudit)
+      .set({
+        status,
+        updatedCount: (prev?.updatedCount ?? 0) + created,
+        failed: [...prevFailed, ...failures],
+        result: totals,
+        finishedAt: new Date(),
+      })
+      .where(eq(applyAudit.id, auditId));
+    finalAuditId = auditId;
+  } else {
+    status = dryRun
+      ? "dry_run"
+      : failedProducts === 0
+        ? "applied"
+        : failedProducts < reports.length
+          ? "partial"
+          : "failed";
+    const [audit] = await db
+      .insert(applyAudit)
+      .values({
+        status,
+        dryRun,
+        updatedCount: created,
+        failed: failures,
+        result: { kind: "rebuild", products: reports.length, created, deleted, failedProducts },
+        finishedAt: new Date(),
+      })
+      .returning({ id: applyAudit.id });
+    finalAuditId = audit.id;
+  }
+
+  return {
+    auditId: finalAuditId,
+    dryRun,
+    status,
+    products: reports,
+    created,
+    deleted,
+    failedProducts,
+  };
 }

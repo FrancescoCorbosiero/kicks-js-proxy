@@ -45,7 +45,9 @@ export async function updatePricing(
     mode: d.roundingMode,
     ...(d.increment != null ? { increment: d.increment } : {}),
   };
-  rule.tax = { priceIncludesVat: true, vatRatePercent: d.vatRatePercent };
+  // VAT is added on top ONLY when the operator sets a rate here; 0 means the
+  // markup is the total uplift (VAT inside the price) — the banded default.
+  rule.tax = { priceIncludesVat: d.vatRatePercent > 0, vatRatePercent: d.vatRatePercent };
   if (cfg.pricingRules.length === 0) cfg.pricingRules.push(rule);
 
   try {

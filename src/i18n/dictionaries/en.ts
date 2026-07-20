@@ -34,7 +34,7 @@ export const en: Dictionary = {
     noMarkup: "no markup",
     dynamicBadge: "dynamic markup",
     dynamicHint:
-      "The markup depends on the KicksDB ask price (before markup and VAT): higher bands for cheap items, lower for expensive ones.",
+      "The markup depends on the raw KicksDB ask and is the TOTAL shelf uplift (VAT inside the price, never added on top): higher bands for cheap items, lower for expensive ones.",
     bandUpTo: (limit, pct) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct) => `above → +${pct}%`,
     bandsEditHint:
@@ -306,6 +306,15 @@ export const en: Dictionary = {
       carried: (n) => `${n} meta carried`,
       dropped: (n) => `${n} orphan sizes lost`,
       unpriced: (n) => `${n} unpriced`,
+      bulkTitle: "Full rebuild (whole catalog)",
+      bulkLoad: "Compute rebuildable products",
+      bulkLoaded: (n, catalogOnly) =>
+        `${n} rebuildable products (in the catalog AND on the store)${catalogOnly > 0 ? ` · ${catalogOnly} catalog-only, excluded` : ""}`,
+      confirmWord: "RICOSTRUISCI",
+      bulkConfirmLabel: "Type RICOSTRUISCI to unlock — irreversible, store-wide.",
+      bulkStart: (n) => `Rebuild all (${n})`,
+      bulkProgress: (done, total) => `${done}/${total} products`,
+      bulkErrors: (n) => `${n} products failed — show`,
     },
     history: {
       title: "Sync history",

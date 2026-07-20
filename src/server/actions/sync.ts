@@ -137,6 +137,8 @@ export interface ApplyActionResult {
 const RebuildSchema = z.object({
   skus: z.array(z.string().min(1)).min(1).max(100),
   dryRun: z.boolean(),
+  // Bulk mode: accumulate chunked calls into one audit row.
+  auditId: z.uuid().optional(),
 });
 
 export interface RebuildActionResult {
@@ -156,10 +158,39 @@ export async function rebuildStoreProducts(
   const parsed = RebuildSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const outcome = await rebuildProducts(parsed.data.skus, parsed.data.dryRun);
+    const outcome = await rebuildProducts(parsed.data.skus, parsed.data.dryRun, parsed.data.auditId);
     return { ok: true, outcome };
   } catch (e) {
     return { ok: false, error: errMessage(e) };
+  }
+}
+
+/**
+ * Every SKU the bulk rebuild can cover: in the KicksDB catalog AND present in
+ * the pulled store snapshot (a rebuild needs both the truth and the target).
+ */
+export async function listRebuildableSkus(): Promise<{
+  ok: boolean;
+  error?: string;
+  skus: string[];
+  catalogOnly: number; // in the catalog but not on the store — not rebuildable
+}> {
+  try {
+    const { getActiveConfig } = await import("@/server/config/repo");
+    const { listCatalogEntries } = await import("@/server/catalog/repo");
+    const { getActiveSnapshot } = await import("@/server/store-json/repo");
+    const { skuKey } = await import("@/lib/skus");
+
+    const config = await getActiveConfig();
+    const entries = await listCatalogEntries(config.source.market);
+    const snapshot = await getActiveSnapshot();
+    const storeSkus = new Set(
+      (snapshot?.products ?? []).map((p) => (p.sku ? skuKey(p.sku) : "")).filter(Boolean),
+    );
+    const skus = entries.map((e) => e.sku).filter((s) => storeSkus.has(skuKey(s)));
+    return { ok: true, skus, catalogOnly: entries.length - skus.length };
+  } catch (e) {
+    return { ok: false, error: errMessage(e), skus: [], catalogOnly: 0 };
   }
 }
 

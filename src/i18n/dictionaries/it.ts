@@ -41,7 +41,7 @@ export const it = {
     noMarkup: "nessun ricarico",
     dynamicBadge: "ricarico dinamico",
     dynamicHint:
-      "Il ricarico dipende dal prezzo ask KicksDB (prima di ricarico e IVA): fasce più alte per gli articoli economici, più basse per quelli costosi.",
+      "Il ricarico dipende dall'ask KicksDB grezzo ed è l'AUMENTO TOTALE del prezzo a scaffale (IVA inclusa nel prezzo, mai aggiunta sopra): fasce più alte per gli articoli economici, più basse per quelli costosi.",
     bandUpTo: (limit: number, pct: number) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct: number) => `oltre → +${pct}%`,
     bandsEditHint:
@@ -315,6 +315,15 @@ export const it = {
       carried: (n: number) => `${n} meta riportati`,
       dropped: (n: number) => `${n} taglie orfane perse`,
       unpriced: (n: number) => `${n} senza prezzo`,
+      bulkTitle: "Ricostruzione totale (tutto il catalogo)",
+      bulkLoad: "Calcola i prodotti ricostruibili",
+      bulkLoaded: (n: number, catalogOnly: number) =>
+        `${n} prodotti ricostruibili (in catalogo E sullo store)${catalogOnly > 0 ? ` · ${catalogOnly} solo in catalogo, esclusi` : ""}`,
+      confirmWord: "RICOSTRUISCI",
+      bulkConfirmLabel: "Scrivi RICOSTRUISCI per sbloccare — operazione irreversibile su tutto lo store.",
+      bulkStart: (n: number) => `Ricostruisci tutti (${n})`,
+      bulkProgress: (done: number, total: number) => `${done}/${total} prodotti`,
+      bulkErrors: (n: number) => `${n} prodotti falliti — mostra`,
     },
     history: {
       title: "Storico sincronizzazioni",
