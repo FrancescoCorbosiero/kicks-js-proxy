@@ -32,6 +32,7 @@ export interface SourceConfig {
 /* ------------------------------------------------------------------ */
 export interface RuleScope {
     // any subset; omitted field = "matches anything". More fields set = more specific.
+    source?: string;                      // "kicksdb" (default) | a feed name, e.g. "goldensneakers"
     brand?: string;
     model?: string;
     sku?: string;
@@ -151,6 +152,7 @@ function sizeToNumber(size: string): number {
 }
 
 function scopeMatches(scope: RuleScope, p: SourceProduct, v: SourceVariant): boolean {
+    if (scope.source && scope.source !== (p.source ?? "kicksdb")) return false;
     if (scope.brand && scope.brand !== p.brand) return false;
     if (scope.sku && scope.sku !== p.sku) return false;
     if (scope.model && !p.title.includes(scope.model)) return false;

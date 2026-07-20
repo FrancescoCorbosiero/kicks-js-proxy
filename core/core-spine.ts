@@ -51,6 +51,9 @@ export interface SourceProduct {
     image: string;
     market: string;           // "IT"
     currency: string;         // "EUR"
+    /** Which source produced this product: absent = "kicksdb"; feeds set their
+     *  name (e.g. "goldensneakers") so source-scoped pricing rules apply. */
+    source?: string;
     variants: SourceVariant[];
 }
 

@@ -22,24 +22,94 @@ import {
 // Not exported: "use server" modules may only export async functions.
 const KICKSDB_FEED_SOURCE = "feed:kicksdb";
 
+export interface GsFeedState {
+  configured: boolean; // GS_FEED_URL + GS_FEED_TOKEN present
+  activeSkus: number;
+  activeRows: number;
+  lastRuns: IngestionHistoryEntry[];
+}
+
 export interface FeedsState {
   market: string;
   catalogTotal: number;
   staleCount: number;
   ttlSeconds: number;
   lastRuns: IngestionHistoryEntry[];
+  gs: GsFeedState;
 }
 
 export async function getFeedsState(): Promise<FeedsState> {
+  const { gsConfigured, GS_INGESTION_SOURCE } = await import("@/server/feeds/goldensneakers");
+  const { feedStats, GS_FEED } = await import("@/server/feeds/repo");
+
   const config = await getActiveConfig();
   const market = config.source.market;
   const ttl = config.source.cacheTtlSeconds;
-  const [catalogTotal, staleCount, lastRuns] = await Promise.all([
+  const [catalogTotal, staleCount, lastRuns, gsStats, gsRuns] = await Promise.all([
     countCatalog(market),
     countStale(market, ttl),
     listIngestionRunsBySource(KICKSDB_FEED_SOURCE),
+    feedStats(GS_FEED),
+    listIngestionRunsBySource(GS_INGESTION_SOURCE),
   ]);
-  return { market, catalogTotal, staleCount, ttlSeconds: ttl, lastRuns };
+  return {
+    market,
+    catalogTotal,
+    staleCount,
+    ttlSeconds: ttl,
+    lastRuns,
+    gs: {
+      configured: gsConfigured(),
+      activeSkus: gsStats.activeSkus,
+      activeRows: gsStats.activeRows,
+      lastRuns: gsRuns,
+    },
+  };
+}
+
+export interface GsSyncActionResult {
+  ok: boolean;
+  error?: string;
+  report?: {
+    rows: number;
+    skus: number;
+    added: number;
+    updated: number;
+    deactivated: number;
+    rejected: number;
+  };
+}
+
+/** Pull the whole GS flat assortment from their API and sync it. */
+export async function runGsSyncFromApi(): Promise<GsSyncActionResult> {
+  try {
+    const { syncGoldenSneakersFromApi } = await import("@/server/feeds/goldensneakers");
+    return { ok: true, report: await syncGoldenSneakersFromApi() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+const GsUploadSchema = z.object({ text: z.string().min(2) });
+
+/** Sync from a manually uploaded/pasted GS JSON (API-less fallback). */
+export async function uploadGsFeed(
+  input: z.infer<typeof GsUploadSchema>,
+): Promise<GsSyncActionResult> {
+  const parsed = GsUploadSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const { syncGoldenSneakers } = await import("@/server/feeds/goldensneakers");
+    let payload: unknown;
+    try {
+      payload = JSON.parse(parsed.data.text);
+    } catch {
+      return { ok: false, error: "Not valid JSON." };
+    }
+    return { ok: true, report: await syncGoldenSneakers(payload) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 const RunSchema = z.object({

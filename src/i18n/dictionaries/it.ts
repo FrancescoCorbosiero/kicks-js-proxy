@@ -245,6 +245,9 @@ export const it = {
     fetchedAgo: (days: number) =>
       days === 0 ? "Prezzi aggiornati oggi" : `Prezzi aggiornati ${days} ${days === 1 ? "giorno" : "giorni"} fa`,
     addedOn: (date: string) => `In catalogo dal ${date}`,
+    gsOwned: "GoldenSneakers",
+    gsOwnedHint:
+      "Prodotto posseduto dal feed GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal feed, non da KicksDB.",
   },
   sync: {
     title: "Sync Woo",
@@ -368,9 +371,21 @@ export const it = {
         `Ri-prezza le voci del catalogo più vecchie di ${Math.round(ttl / 60)} minuti tramite l'endpoint bulk (50 SKU per chiamata).`,
       stale: (stale: number, total: number) => `${stale} di ${total} da aggiornare`,
     },
-    externalTitle: "Feed esterni",
-    externalDesc:
-      "I feed dei fornitori esterni si collegheranno qui: stessa pipeline (verifica → upsert), stesso storico. Dettagli e formati in una sessione dedicata.",
+    gs: {
+      name: "GoldenSneakers",
+      tag: "fornitore",
+      desc: "Assortimento flat del fornitore: i prodotti coperti dal feed sono POSSEDUTI da GoldenSneakers — taglie, prezzi finali (presented_price) e stock reale arrivano dal feed. Le righe scomparse vengono disattivate, mai eliminate.",
+      stats: (skus: number, rows: number) => `${skus} prodotti · ${rows} taglie attive`,
+      syncApi: "Sincronizza dall'API",
+      upload: "Carica JSON…",
+      notConfigured:
+        "API non configurata — imposta GS_FEED_URL (con i parametri IVA/ricarico) e GS_FEED_TOKEN, oppure carica il JSON manualmente.",
+      reportRows: (rows: number, skus: number) => `${rows} righe valide su ${skus} prodotti`,
+      reportUpdated: (n: number) => `${n} aggiornate`,
+      reportDeactivated: (n: number) => `${n} disattivate`,
+      runLine: (added: number, updated: number, rejected: number) =>
+        `+${added} · ${updated} aggiornate · ${rejected} rifiutate`,
+    },
   },
   importPage: {
     title: "Importa",

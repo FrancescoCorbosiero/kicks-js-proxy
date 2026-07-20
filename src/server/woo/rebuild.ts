@@ -7,6 +7,7 @@ import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store
 import { getAnyBySkus } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { manualPriceFor } from "@/server/overrides/model";
+import { gsOwnedProducts } from "@/server/feeds/owner";
 import {
   planRebuild,
   rebuildParentAttributes,
@@ -101,6 +102,9 @@ export async function rebuildProducts(
   const snapshot = await getActiveSnapshot();
   const overrides = await getOverrides().catch(() => null);
   const catalogEntries = await getAnyBySkus(market, skus);
+  // Product-level ownership: GS-owned SKUs rebuild from the feed's variant
+  // set (real stock, presented prices) instead of the KicksDB catalog.
+  const gsOwned = await gsOwnedProducts(skus, market, overrides);
 
   // Store product ids come from the snapshot (the pull) — SKU-matched.
   const productIdBySku = new Map<string, number>();
@@ -130,9 +134,10 @@ export async function rebuildProducts(
     reports.push(report);
 
     try {
-      const catalog = catalogEntries.get(sku);
+      const gs = gsOwned.get(sku);
+      const catalog = gs?.product ?? catalogEntries.get(sku);
       if (!catalog) {
-        report.error = "not in the KicksDB catalog — import/verify it first";
+        report.error = "not in the KicksDB catalog nor the GoldenSneakers feed";
         return;
       }
       const productId = productIdBySku.get(sku);
@@ -170,6 +175,7 @@ export async function rebuildProducts(
         config,
         manualPrices,
         tagliaAttributeId,
+        stockBySize: gs?.stockBySize,
       });
 
       report.newSizes = plan.create.map((c) => c.sizeLabel);

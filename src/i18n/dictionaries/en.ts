@@ -237,6 +237,9 @@ export const en: Dictionary = {
     fetchedAgo: (days) =>
       days === 0 ? "Prices refreshed today" : `Prices refreshed ${days} ${days === 1 ? "day" : "days"} ago`,
     addedOn: (date) => `In catalog since ${date}`,
+    gsOwned: "GoldenSneakers",
+    gsOwnedHint:
+      "Product owned by the GoldenSneakers feed: sizes, final prices and real stock come from the feed, not KicksDB.",
   },
   sync: {
     title: "Woo Sync",
@@ -358,9 +361,20 @@ export const en: Dictionary = {
         `Re-prices catalog entries older than ${Math.round(ttl / 60)} minutes via the bulk endpoint (50 SKUs per call).`,
       stale: (stale, total) => `${stale} of ${total} stale`,
     },
-    externalTitle: "External feeds",
-    externalDesc:
-      "External supplier feeds will plug in here: same pipeline (verify → upsert), same history. Formats and details in a dedicated session.",
+    gs: {
+      name: "GoldenSneakers",
+      tag: "supplier",
+      desc: "The supplier's flat assortment: products the feed covers are OWNED by GoldenSneakers — sizes, final prices (presented_price) and real stock come from the feed. Vanished rows are deactivated, never deleted.",
+      stats: (skus, rows) => `${skus} products · ${rows} active sizes`,
+      syncApi: "Sync from API",
+      upload: "Upload JSON…",
+      notConfigured:
+        "API not configured — set GS_FEED_URL (with the VAT/markup params) and GS_FEED_TOKEN, or upload the JSON manually.",
+      reportRows: (rows, skus) => `${rows} valid rows across ${skus} products`,
+      reportUpdated: (n) => `${n} updated`,
+      reportDeactivated: (n) => `${n} deactivated`,
+      runLine: (added, updated, rejected) => `+${added} · ${updated} updated · ${rejected} rejected`,
+    },
   },
   importPage: {
     title: "Import",

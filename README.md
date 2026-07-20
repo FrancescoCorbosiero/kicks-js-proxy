@@ -70,8 +70,17 @@ filters/sorts/paginates in SQL.
   each operator action is one `ingestion_runs` row (added / known / rejected).
 - **Feeds** (`/feeds`) — the ingestion-source registry. Built-in feed:
   **KicksDB refresh**, which re-prices the stalest entries via the bulk
-  endpoint (50 SKUs/call), merging fresh offers onto stored products. External
-  supplier feeds plug in beside it (same pipeline, same history) — planned.
+  endpoint (50 SKUs/call), merging fresh offers onto stored products. And
+  **GoldenSneakers**: the supplier's flat assortment (API pull with bearer
+  token + DRF pagination, or manual JSON upload), stored in `feed_items`
+  with scs-b2b semantics — validate everything first, abort on empty,
+  deactivate-never-delete. **Product-level ownership**: a SKU covered by the
+  feed is *owned* by GoldenSneakers — its variant set, final prices
+  (`presented_price`, VAT/markup applied upstream via the feed URL params —
+  a source-scoped passthrough rule pipes it through the engine unchanged)
+  and real stock quantities all come from the feed; KicksDB sizes are
+  dropped by design. A manual per-product pin (`store_overrides`) can hand
+  a product back to KicksDB. The catalog stays KicksDB-pure.
 - *(hidden)* `/preview` — the legacy **file round-trip** flow (upload a Woo
   export, preview, download a patched re-import JSON with sanitize folded in).
   Fully functional, just unlinked — the fallback if REST must be reversed. It

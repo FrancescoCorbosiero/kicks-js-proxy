@@ -120,6 +120,12 @@ export function planRebuild(input: {
   manualPrices?: Record<string, number>;
   /** Global pa_taglia attribute id, when known — makes create bindings exact. */
   tagliaAttributeId?: number;
+  /**
+   * Real per-size stock (euNorm → quantity), for feed-owned products.
+   * Present: managed stock with the real count (0 → outofstock, kept).
+   * Absent: KicksDB sell-on-demand (instock, unmanaged).
+   */
+  stockBySize?: Record<string, number>;
 }): RebuildPlan {
   const { parentSku, storeProductId, catalog, oldVariations, config } = input;
   const manual = input.manualPrices ?? {};
@@ -178,9 +184,17 @@ export function planRebuild(input: {
         : { name: "pa_taglia", option: label },
     ];
     if (price != null) payload.regular_price = price.toFixed(2);
-    // Sell on demand: available without a fake count (KicksDB carries no stock).
-    payload.stock_status = "instock";
-    payload.manage_stock = false;
+    const realStock = input.stockBySize?.[euNorm];
+    if (realStock != null) {
+      // Feed-owned: the supplier reports true availability.
+      payload.manage_stock = true;
+      payload.stock_quantity = realStock;
+      payload.stock_status = realStock > 0 ? "instock" : "outofstock";
+    } else {
+      // Sell on demand: available without a fake count (KicksDB carries no stock).
+      payload.stock_status = "instock";
+      payload.manage_stock = false;
+    }
     if (upc) payload.global_unique_id = upc; // else a carried GTIN survives
 
     create.push({

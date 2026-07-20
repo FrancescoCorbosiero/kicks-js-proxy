@@ -11,6 +11,7 @@ import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
+import { overlayGsOwnership } from "@/server/feeds/owner";
 import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
@@ -142,6 +143,13 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
         ? await resolveSkusViaCatalog(source, dbCatalogStore, parsed.data.skus!, market, ttl)
         : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
+    // Ownership: GS-owned SKUs swap their variant set + pricing to the feed.
+    const overlayScope =
+      parsed.data.mode === "skus" ? parsed.data.skus! : result.products.map((p) => p.sku);
+    const overlaid = await overlayGsOwnership(result.products, overlayScope, market, overrides);
+    result.products = overlaid.products;
+    result.notFound = result.notFound.filter((s) => !overlaid.gsSkus.has(skuKey(s)));
+
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
     const plans = await assemblePlans(result.products, config, snapshot, market, term, overrides);
 
@@ -209,25 +217,31 @@ export async function previewFromStore(
     // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
     // 50 SKUs -> a 1000-SKU file is ~20 calls, cold or warm. Product names come
     // from the snapshot (the bulk response carries no title/brand).
-    const products = await source.getPricesBatch(skus, market);
+    const fetched = await source.getPricesBatch(skus, market);
     const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
-    for (const p of products) {
+    for (const p of fetched) {
       const name = nameBySku.get(skuKey(p.sku));
       if (name) p.title = name;
     }
+
+    // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
+    // carry is covered by the feed, not missing.
+    const overlaid = await overlayGsOwnership(fetched, skus, market, overrides);
+    const products = overlaid.products;
 
     const returned = new Set(products.map((p) => skuKey(p.sku)));
     const notFound = skus.filter((s) => !returned.has(skuKey(s)));
 
     // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
-    // call returned and add only those fetchable on KicksDB. Best-effort — a
+    // call returned and add only those fetchable on KicksDB (feed-owned
+    // products are excluded — the catalog stays KicksDB-pure). Best-effort — a
     // catalog failure must never break the preview.
     let catalog: CatalogStats | undefined;
     try {
       const growth = await growCatalogFromSkus(
         source,
         dbCatalogStore,
-        products.map((p) => p.sku),
+        products.filter((p) => (p.source ?? "kicksdb") === "kicksdb").map((p) => p.sku),
         market,
       );
       catalog = { total: growth.total, added: growth.added, rejected: growth.rejected.length };

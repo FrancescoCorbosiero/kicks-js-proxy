@@ -116,6 +116,14 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
                   {data.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}
                 </span>
                 <span className="text-faint">{data.market}</span>
+                {data.owner === "goldensneakers" && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn"
+                    title={t.drawer.gsOwnedHint}
+                  >
+                    {t.drawer.gsOwned}
+                  </span>
+                )}
               </div>
               <div>{t.drawer.fetchedAgo(fetchedAgo)}</div>
               <div>{t.drawer.addedOn(new Date(data.addedAt).toLocaleDateString())}</div>

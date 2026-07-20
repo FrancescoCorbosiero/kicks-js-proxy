@@ -4,7 +4,7 @@ import type { AppConfig } from "@core/config";
 import { db } from "@/server/db/client";
 import { config as configTable } from "@/server/db/schema";
 import { connectionFromEnv } from "@/lib/env";
-import { buildDefaultConfig } from "./defaults";
+import { buildDefaultConfig, goldenSneakersPassthroughRule } from "./defaults";
 
 /**
  * Returns the active AppConfig with its ConnectionConfig (secrets) always taken
@@ -21,8 +21,15 @@ export async function getActiveConfig(): Promise<AppConfig> {
     return fresh;
   }
 
-  // Overlay env secrets onto the stored (secret-free) config.
-  return { ...rows[0].data, connection };
+  // Overlay env secrets onto the stored (secret-free) config. The GS
+  // passthrough rule is ensured at read time so configs stored before the
+  // feed existed keep working without a manual Reset.
+  return { ...rows[0].data, pricingRules: ensureGsRule(rows[0].data.pricingRules), connection };
+}
+
+function ensureGsRule(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
+  const hasGs = rules.some((r) => r.scope.source === "goldensneakers");
+  return hasGs ? rules : [...rules, goldenSneakersPassthroughRule()];
 }
 
 /** Never persist secrets: blank out the ConnectionConfig before writing to DB. */
