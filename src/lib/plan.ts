@@ -25,6 +25,8 @@ export interface PreviewPlan {
   sku: string; // parent SKU — the stable key for product/variation overrides
   title: string;
   brand: string;
+  /** Who owns this product: "kicksdb" or a feed name (e.g. "goldensneakers"). */
+  source: string;
   plan: Plan;
   summary: PlanSummary;
   euSizes: Record<string, string>; // stockxVariantId -> EU size, when known

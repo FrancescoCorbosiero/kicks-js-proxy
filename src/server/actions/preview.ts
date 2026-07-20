@@ -92,7 +92,13 @@ async function assemblePlans(
     }
 
     const followSaleRule = followSaleRuleFor(overrides, product.sku);
-    const plan = buildPlan(product, config, mappings, { followSaleRule });
+    const source = product.source ?? "kicksdb";
+    const plan = buildPlan(product, config, mappings, {
+      followSaleRule,
+      // Feeds carry FINITE stock truth: quantities join the diff and are
+      // written to the store. KicksDB never touches stock.
+      manageStockFromSource: source !== "kicksdb",
+    });
     const { id, summary } = await savePlan(plan, market);
 
     out.push({
@@ -101,6 +107,7 @@ async function assemblePlans(
       sku: product.sku,
       title: product.title,
       brand: product.brand,
+      source,
       plan,
       summary,
       euSizes,

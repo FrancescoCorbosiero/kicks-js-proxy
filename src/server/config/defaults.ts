@@ -15,6 +15,9 @@ export function goldenSneakersPassthroughRule(): ScopedPricingRule {
     sourceDeliveryType: "standard",
     markupPercent: 0,
     markupBands: [],
+    // Finite supply: a size with zero quantity must never be priced/sold.
+    // (Explicit — do not rely on inheriting the general rule's minAsks.)
+    minAsks: 1,
     rounding: { mode: "none" },
     tax: { priceIncludesVat: false, vatRatePercent: 0 },
   };

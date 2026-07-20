@@ -123,6 +123,8 @@ const ApplySchema = z
     sanitize: z.boolean().default(true),
     kicksdbVariationIds: z.array(z.number()).default([]),
     previewedProductIds: z.array(z.number()).default([]),
+    // Feed-owned products (finite stock) — excluded from KicksDB-style cleanup.
+    feedProductIds: z.array(z.number()).default([]),
   })
   .refine((v) => v.selections.length > 0 || v.sanitize, {
     message: "Nothing to do: no price selection and cleanup is off.",
@@ -214,6 +216,7 @@ export async function applySyncPrices(
       sanitize: parsed.data.sanitize,
       kicksdbVariationIds: parsed.data.kicksdbVariationIds,
       previewedProductIds: parsed.data.previewedProductIds,
+      feedProductIds: parsed.data.feedProductIds,
     });
     return { ok: true, outcome };
   } catch (e) {

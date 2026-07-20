@@ -54,6 +54,19 @@ function hasActiveSale(s?: string | null): boolean {
   return n != null && n > 0;
 }
 
+/** The store's MANAGED stock quantity, or null when stock is unmanaged. */
+function managedStock(vrt: StoreVariation): number | null {
+  const managed = vrt.manage_stock;
+  if (managed !== true && managed !== "true" && managed !== 1) return null;
+  const q = vrt.stock_quantity;
+  if (typeof q === "number" && Number.isFinite(q)) return q;
+  if (typeof q === "string" && q.trim() !== "") {
+    const n = Number.parseFloat(q);
+    return Number.isNaN(n) ? null : n;
+  }
+  return null;
+}
+
 /** EU size of a StockX variant: from the size conversions, or the label if the
  *  variant's own system is already EU. */
 export function sourceEuSize(v: SourceVariant): string | null {
@@ -228,6 +241,7 @@ export function resolveFromModel(
       storeProductId: prod.id,
       storeVariationId: vrt.id,
       currentPrice: parsePrice(vrt.regular_price),
+      currentStock: managedStock(vrt),
       saleActive: hasActiveSale(vrt.sale_price),
     });
   }

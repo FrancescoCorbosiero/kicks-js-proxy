@@ -42,6 +42,14 @@ export interface ApplyOptions {
   kicksdbVariationIds: number[];
   /** Store product ids in the preview — cleanup never touches products outside it. */
   previewedProductIds: number[];
+  /**
+   * Store product ids owned by a finite-stock FEED (e.g. GoldenSneakers).
+   * The KicksDB-semantics cleanup must NOT touch them: its ghost rule would
+   * delete legitimately sold-out sizes and its make-available rule would turn
+   * 1-pair sizes into unmanaged sell-on-demand. Their standardization path is
+   * the rebuild, which writes real managed stock.
+   */
+  feedProductIds?: number[];
 }
 
 export interface ApplyChange {
@@ -51,7 +59,10 @@ export interface ApplyChange {
   storeProductId: number;
   storeVariationId: number;
   currentPrice: number | null;
-  newPrice: number;
+  /** null = stock-only write (e.g. a sold-out feed size zeroing its qty). */
+  newPrice: number | null;
+  /** Managed quantity to write; null = leave the store's stock untouched. */
+  newStock: number | null;
 }
 
 /** Per-product cleanup, compact for the dry-run panel. */
@@ -106,7 +117,7 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
       if (!wanted.has(item.stockxVariantId)) continue;
       if (item.action !== "update") continue; // "create" needs upsertProduct — out of scope
       if (item.storeProductId == null || item.storeVariationId == null) continue;
-      if (item.proposedPrice == null) continue;
+      if (item.proposedPrice == null && item.stockQuantity == null) continue;
       changes.push({
         sku: plan.sku,
         sizeLabel: item.sizeLabel,
@@ -115,6 +126,7 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
         storeVariationId: item.storeVariationId,
         currentPrice: item.currentPrice,
         newPrice: item.proposedPrice,
+        newStock: item.stockQuantity ?? null,
       });
     }
   }
@@ -148,13 +160,17 @@ export async function applySync(
 ): Promise<ApplyOutcome> {
   const snapshot = options.sanitize ? await getActiveSnapshot() : null;
 
-  // 1. Plan the cleanup over the previewed products.
+  // 1. Plan the cleanup over the previewed products — feed-owned ones are
+  //    excluded: their stock semantics (finite, managed) don't fit the
+  //    KicksDB ghost/make-available rules; the rebuild standardizes them.
   const previewed = new Set(options.previewedProductIds);
+  const feedOwned = new Set(options.feedProductIds ?? []);
   const keepAvailable = new Set(options.kicksdbVariationIds);
   const cleanupOps: ProductSanitizeOps[] = [];
   if (options.sanitize && snapshot) {
     for (const product of snapshot.products) {
       if (previewed.size > 0 && !previewed.has(product.id)) continue;
+      if (feedOwned.has(product.id)) continue;
       const ops = planProductSanitize(product, keepAvailable);
       if (ops) cleanupOps.push(ops);
     }
@@ -233,12 +249,19 @@ export async function applySync(
         await client.updateProduct(productId, { attributes: ops.parentAttributes });
       }
 
-      // Merge cleanup rewrites and price writes into one update row per variation.
+      // Merge cleanup rewrites, price writes and stock writes into one update
+      // row per variation.
       const merged = new Map<number, Record<string, unknown>>();
       for (const w of ops?.variationWrites ?? []) merged.set(w.id, { ...w });
       for (const c of prices) {
         const row = merged.get(c.storeVariationId) ?? { id: c.storeVariationId };
-        row.regular_price = c.newPrice.toFixed(2);
+        if (c.newPrice != null) row.regular_price = c.newPrice.toFixed(2);
+        if (c.newStock != null) {
+          // Finite feed supply: managed count, sold-out stays visible as such.
+          row.manage_stock = true;
+          row.stock_quantity = c.newStock;
+          row.stock_status = c.newStock > 0 ? "instock" : "outofstock";
+        }
         merged.set(c.storeVariationId, row);
       }
 
@@ -314,7 +337,13 @@ function patchSnapshot(
     const next = opsByProduct.get(p.id)?.sanitized ?? p;
     for (const c of priceByProduct.get(p.id) ?? []) {
       const vrt = next.variations.find((v) => v.id === c.storeVariationId);
-      if (vrt) vrt.regular_price = c.newPrice.toFixed(2);
+      if (!vrt) continue;
+      if (c.newPrice != null) vrt.regular_price = c.newPrice.toFixed(2);
+      if (c.newStock != null) {
+        vrt.manage_stock = true;
+        vrt.stock_quantity = c.newStock;
+        vrt.stock_status = c.newStock > 0 ? "instock" : "outofstock";
+      }
     }
     return next;
   });

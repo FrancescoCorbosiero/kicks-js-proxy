@@ -287,7 +287,8 @@ export const en: Dictionary = {
         `${n} price writes targeted variations the cleanup deletes and were dropped`,
       cleanupApplied: (del, taglie, parents) =>
         `Cleanup: ${del} variations deleted · ${taglie} pa_taglia realigned · ${parents} product attributes realigned`,
-      dryTitle: (n) => `The dry run would write ${n} prices:`,
+      stockWrite: (n) => (n === 0 ? "sold out (qty 0)" : `qty → ${n}`),
+      dryTitle: (n) => `The dry run would write ${n} variations:`,
       dryMore: (n) => `…and ${n} more`,
       applied: (n) => `${n} variations updated on the store ✓`,
       partial: (ok, ko) => `${ok} updated, ${ko} failed`,

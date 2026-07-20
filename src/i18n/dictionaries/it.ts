@@ -296,7 +296,8 @@ export const it = {
         `${n} prezzi puntavano a varianti eliminate dalla pulizia e sono stati scartati`,
       cleanupApplied: (del: number, taglie: number, parents: number) =>
         `Pulizia: ${del} varianti eliminate · ${taglie} pa_taglia riallineati · ${parents} attributi prodotto riallineati`,
-      dryTitle: (n: number) => `La prova scriverebbe ${n} prezzi:`,
+      stockWrite: (n: number) => (n === 0 ? "esaurito (qty 0)" : `qty → ${n}`),
+      dryTitle: (n: number) => `La prova scriverebbe ${n} varianti:`,
       dryMore: (n: number) => `…e altre ${n}`,
       applied: (n: number) => `${n} varianti aggiornate sullo store ✓`,
       partial: (ok: number, ko: number) => `${ok} aggiornate, ${ko} fallite`,
