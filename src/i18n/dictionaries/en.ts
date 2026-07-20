@@ -306,6 +306,15 @@ export const en: Dictionary = {
       carried: (n) => `${n} meta carried`,
       dropped: (n) => `${n} orphan sizes lost`,
       unpriced: (n) => `${n} unpriced`,
+      bulkTitle: "Full rebuild (whole catalog)",
+      bulkLoad: "Compute rebuildable products",
+      bulkLoaded: (n, catalogOnly) =>
+        `${n} rebuildable products (in the catalog AND on the store)${catalogOnly > 0 ? ` · ${catalogOnly} catalog-only, excluded` : ""}`,
+      confirmWord: "RICOSTRUISCI",
+      bulkConfirmLabel: "Type RICOSTRUISCI to unlock — irreversible, store-wide.",
+      bulkStart: (n) => `Rebuild all (${n})`,
+      bulkProgress: (done, total) => `${done}/${total} products`,
+      bulkErrors: (n) => `${n} products failed — show`,
     },
     history: {
       title: "Sync history",
