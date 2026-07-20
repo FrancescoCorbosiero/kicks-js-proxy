@@ -6,8 +6,12 @@ import { getPlanById } from "@/server/plans/repo";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
 import { planProductSanitize, type ProductSanitizeOps } from "@/server/store-json/sanitize-plan";
+import { planFeedTakeover } from "@/server/store-json/takeover-plan";
+import { gsOwnedProducts } from "@/server/feeds/owner";
+import { getOverrides } from "@/server/overrides/repo";
 import type { StoreModel } from "@/server/store-json/model";
 import { chunk } from "@/server/adapters/http";
+import { skuKey } from "@/lib/skus";
 import { getWooClient } from "./client";
 
 /**
@@ -76,12 +80,14 @@ export interface CleanupDetail {
 
 export interface CleanupSummary {
   products: number; // products needing cleanup
-  deletions: number; // variations removed (ghosts + duplicates)
+  deletions: number; // variations removed (ghosts + duplicates + takeover trims)
   ghostsRemoved: number;
   duplicatesRemoved: number;
   stockSynthesized: number;
   taglieRealigned: number;
   parentsRealigned: number;
+  /** Out-of-feed variants removed by feed takeovers (subset of deletions). */
+  feedTrimmed: number;
 }
 
 export interface ApplyOutcome {
@@ -142,14 +148,18 @@ function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
     stockSynthesized: 0,
     taglieRealigned: 0,
     parentsRealigned: 0,
+    feedTrimmed: 0,
   };
   for (const o of ops) {
     s.deletions += o.deleteVariationIds.length;
-    s.ghostsRemoved += o.counts.ghostsRemoved;
     s.duplicatesRemoved += o.counts.duplicatesRemoved;
     s.stockSynthesized += o.counts.stockSynthesized;
     s.taglieRealigned += o.counts.taglieRealigned;
     if (o.counts.parentRealigned) s.parentsRealigned += 1;
+    // Takeover planners report out-of-feed trims via ghostsRemoved — split
+    // them out so the dry-run never mislabels a takeover as a ghost purge.
+    if (o.takeover) s.feedTrimmed += o.counts.ghostsRemoved;
+    else s.ghostsRemoved += o.counts.ghostsRemoved;
   }
   return s;
 }
@@ -160,17 +170,34 @@ export async function applySync(
 ): Promise<ApplyOutcome> {
   const snapshot = options.sanitize ? await getActiveSnapshot() : null;
 
-  // 1. Plan the cleanup over the previewed products — feed-owned ones are
-  //    excluded: their stock semantics (finite, managed) don't fit the
-  //    KicksDB ghost/make-available rules; the rebuild standardizes them.
+  // 1. Plan the cleanup over the previewed products. Two regimes:
+  //    - KicksDB-owned: the classic sanitize (ghosts, duplicates, pa_taglia).
+  //    - Feed-owned: the TAKEOVER — delete variants whose size the feed has
+  //      never listed (KicksDB-era leftovers keep selling otherwise), keep
+  //      feed-known sizes (their qty is written by the stock sync), realign
+  //      pa_taglia. The KicksDB ghost/make-available rules never apply here.
   const previewed = new Set(options.previewedProductIds);
   const feedOwned = new Set(options.feedProductIds ?? []);
   const keepAvailable = new Set(options.kicksdbVariationIds);
   const cleanupOps: ProductSanitizeOps[] = [];
   if (options.sanitize && snapshot) {
+    const feedSkus = snapshot.products
+      .filter((p) => feedOwned.has(p.id) && p.sku)
+      .map((p) => p.sku);
+    const owned =
+      feedSkus.length > 0
+        ? await gsOwnedProducts(feedSkus, "", await getOverrides().catch(() => null))
+        : new Map<string, never>();
+
     for (const product of snapshot.products) {
       if (previewed.size > 0 && !previewed.has(product.id)) continue;
-      if (feedOwned.has(product.id)) continue;
+      if (feedOwned.has(product.id)) {
+        const gs = product.sku ? owned.get(skuKey(product.sku)) : undefined;
+        if (!gs) continue; // ownership lapsed between preview and apply — skip
+        const ops = planFeedTakeover(product, gs.knownSizes);
+        if (ops) cleanupOps.push(ops);
+        continue;
+      }
       const ops = planProductSanitize(product, keepAvailable);
       if (ops) cleanupOps.push(ops);
     }

@@ -595,6 +595,11 @@ export function SyncWorkspace({
                         <span className="font-medium text-skip">
                           {t.sync.apply.deletions(dry.outcome.cleanup.deletions)}
                         </span>
+                        {dry.outcome.cleanup.feedTrimmed > 0 && (
+                          <span className="font-medium text-warn">
+                            {t.sync.apply.feedTrimmed(dry.outcome.cleanup.feedTrimmed)}
+                          </span>
+                        )}
                         <span>{t.sanitize.ghostsRemoved(dry.outcome.cleanup.ghostsRemoved)}</span>
                         <span>{t.sanitize.duplicatesRemoved(dry.outcome.cleanup.duplicatesRemoved)}</span>
                         <span>{t.sanitize.stockSynthesized(dry.outcome.cleanup.stockSynthesized)}</span>

@@ -3,7 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import { ownerPinFor, type StoreOverrides } from "@/server/overrides/model";
 import { skuKey } from "@/lib/skus";
 import { gsOffersToSource, type GsOffer } from "./goldensneakers-model";
-import { GS_FEED, activeOffersBySku } from "./repo";
+import { GS_FEED, knownOffersBySku } from "./repo";
 import type { FeedItemRow } from "@/server/db/schema";
 
 /**
@@ -16,6 +16,7 @@ import type { FeedItemRow } from "@/server/db/schema";
  * per-variant conflict).
  */
 
+/** A deactivated row contributes its size at qty 0 — zeroed, never forgotten. */
 function rowToOffer(r: FeedItemRow): GsOffer {
   return {
     sku: r.sku,
@@ -25,7 +26,7 @@ function rowToOffer(r: FeedItemRow): GsOffer {
     barcode: r.barcode,
     offerPrice: r.offerPrice,
     presentedPrice: r.presentedPrice,
-    quantity: r.quantity,
+    quantity: r.active ? r.quantity : 0,
     productName: r.productName,
     brandName: r.brandName,
     image: r.image,
@@ -37,11 +38,14 @@ export interface GsOwnedProduct {
   product: SourceProduct;
   /** euNorm → available quantity (real stock, unlike KicksDB's sell-on-demand). */
   stockBySize: Record<string, number>;
+  /** Every size GS has EVER listed for this SKU — the takeover keep-set. */
+  knownSizes: Set<string>;
 }
 
 /**
- * The GS-owned products among `skus`, honoring manual pins. Best-effort: with
- * no feed data everything stays kicksdb-owned.
+ * The GS-owned products among `skus`, honoring manual pins. Ownership requires
+ * at least one ACTIVE row; the variant set then includes deactivated sizes at
+ * qty 0. Best-effort: with no feed data everything stays kicksdb-owned.
  */
 export async function gsOwnedProducts(
   skus: string[],
@@ -49,15 +53,20 @@ export async function gsOwnedProducts(
   overrides: StoreOverrides | null,
 ): Promise<Map<string, GsOwnedProduct>> {
   const out = new Map<string, GsOwnedProduct>();
-  const bySku = await activeOffersBySku(GS_FEED, skus);
+  const bySku = await knownOffersBySku(GS_FEED, skus);
   for (const [sku, rows] of bySku) {
+    if (!rows.some((r) => r.active)) continue; // fully delisted → back to kicksdb
     if (overrides && ownerPinFor(overrides, sku) === "kicksdb") continue; // pinned back
     const offers = rows.map(rowToOffer);
     const product = gsOffersToSource(sku, offers, market);
     if (product.variants.length === 0) continue; // nothing sellable
     const stockBySize: Record<string, number> = {};
     for (const o of offers) stockBySize[o.euNorm] = o.quantity;
-    out.set(skuKey(sku), { product, stockBySize });
+    out.set(skuKey(sku), {
+      product,
+      stockBySize,
+      knownSizes: new Set(offers.map((o) => o.euNorm)),
+    });
   }
   return out;
 }

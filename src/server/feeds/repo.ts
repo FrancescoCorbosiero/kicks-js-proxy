@@ -101,8 +101,13 @@ export async function activeFeedSkus(feed: string): Promise<Set<string>> {
   }
 }
 
-/** Active offers for a set of SKUs, grouped by canonical SKU. */
-export async function activeOffersBySku(
+/**
+ * ALL known offers for a set of SKUs (active AND deactivated), grouped by
+ * canonical SKU. Ownership is decided by active rows, but a GS-owned product's
+ * variant set includes deactivated sizes at qty 0 — a size that vanished from
+ * the feed must be zeroed on the store, not forgotten while it keeps selling.
+ */
+export async function knownOffersBySku(
   feed: string,
   skus: string[],
 ): Promise<Map<string, FeedItemRow[]>> {
@@ -112,13 +117,7 @@ export async function activeOffersBySku(
     const rows = await db
       .select()
       .from(feedItems)
-      .where(
-        and(
-          eq(feedItems.feed, feed),
-          eq(feedItems.active, true),
-          inArray(feedItems.sku, skus.map(skuKey)),
-        ),
-      )
+      .where(and(eq(feedItems.feed, feed), inArray(feedItems.sku, skus.map(skuKey))))
       .orderBy(feedItems.euNorm);
     for (const r of rows) {
       const list = out.get(r.sku) ?? [];

@@ -283,6 +283,7 @@ export const en: Dictionary = {
       cleanupNone: "No cleanup needed — sizes already aligned.",
       cleanupLine: (del, rw) => `−${del} variations · ${rw} realigned`,
       deletions: (n) => `${n} variations to delete`,
+      feedTrimmed: (n) => `${n} outside the GS feed (takeover)`,
       droppedByCleanup: (n) =>
         `${n} price writes targeted variations the cleanup deletes and were dropped`,
       cleanupApplied: (del, taglie, parents) =>

@@ -292,6 +292,7 @@ export const it = {
       cleanupNone: "Nessuna pulizia necessaria — taglie già allineate.",
       cleanupLine: (del: number, rw: number) => `−${del} varianti · ${rw} riallineate`,
       deletions: (n: number) => `${n} varianti da eliminare`,
+      feedTrimmed: (n: number) => `${n} fuori dal feed GS (takeover)`,
       droppedByCleanup: (n: number) =>
         `${n} prezzi puntavano a varianti eliminate dalla pulizia e sono stati scartati`,
       cleanupApplied: (del: number, taglie: number, parents: number) =>

@@ -35,6 +35,8 @@ export interface ProductSanitizeOps {
   counts: ProductSanitizeResult;
   /** The desired post-cleanup product (before any price writes). */
   sanitized: StoreProductModel;
+  /** Set by the feed-takeover planner: deletions are out-of-feed variants. */
+  takeover?: boolean;
 }
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
