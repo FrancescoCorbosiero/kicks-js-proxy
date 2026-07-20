@@ -41,7 +41,7 @@ export const it = {
     noMarkup: "nessun ricarico",
     dynamicBadge: "ricarico dinamico",
     dynamicHint:
-      "Il ricarico dipende dal prezzo ask KicksDB (prima di ricarico e IVA): fasce più alte per gli articoli economici, più basse per quelli costosi.",
+      "Il ricarico dipende dall'ask KicksDB grezzo ed è l'AUMENTO TOTALE del prezzo a scaffale (IVA inclusa nel prezzo, mai aggiunta sopra): fasce più alte per gli articoli economici, più basse per quelli costosi.",
     bandUpTo: (limit: number, pct: number) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct: number) => `oltre → +${pct}%`,
     bandsEditHint:

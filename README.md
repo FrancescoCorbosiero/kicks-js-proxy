@@ -102,11 +102,14 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refre
 ## Pricing config
 
 KicksDB returns **raw lowest asks** — every markup is applied by this app
-(`computePrice`: ask → markup → floor → VAT → rounding). The default rule
-(`src/server/config/defaults.ts`) uses a **dynamic, price-banded markup** on
-the raw ask: ≤150€ → 35%, ≤300€ → 30%, ≤500€ → 25%, above → 19% — plus 22%
-VAT on top and charm `.99` rounding. Band selection happens on the ask
-(pre-markup, pre-VAT), so the retail price never shifts its own band.
+(`computePrice`: ask → markup → floor → optional VAT → rounding). The default
+rule (`src/server/config/defaults.ts`) uses a **dynamic, price-banded markup**
+on the raw ask: ≤150€ → 35%, ≤300€ → 30%, ≤500€ → 25%, above → 19%, with
+charm `.99` rounding. The band is the **total shelf uplift**: VAT is
+considered included in the resulting price, never stacked on top (€100 ask →
+€135.99, not €135 × 1.22). Setting a VAT rate in the pricing editor
+re-enables the add-on-top behaviour explicitly. Band selection happens on the
+ask, so the retail price never shifts its own band.
 
 The **Pricing** bar (on `/sync` and `/preview`) shows the live bands and the
 store-wide **Reprice discounted** switch, and hosts the editor: saving a flat

@@ -34,7 +34,7 @@ export const en: Dictionary = {
     noMarkup: "no markup",
     dynamicBadge: "dynamic markup",
     dynamicHint:
-      "The markup depends on the KicksDB ask price (before markup and VAT): higher bands for cheap items, lower for expensive ones.",
+      "The markup depends on the raw KicksDB ask and is the TOTAL shelf uplift (VAT inside the price, never added on top): higher bands for cheap items, lower for expensive ones.",
     bandUpTo: (limit, pct) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct) => `above → +${pct}%`,
     bandsEditHint:

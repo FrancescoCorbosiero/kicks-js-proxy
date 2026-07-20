@@ -3,10 +3,11 @@ import type { AppConfig, ConnectionConfig } from "@core/config";
 /**
  * A sensible starting AppConfig: one general pricing rule with a DYNAMIC,
  * price-banded markup on the raw KicksDB ask (≤150€ → 35%, ≤300€ → 30%,
- * ≤500€ → 25%, above → 19% — competitive at the top, real margin at the
- * bottom), VAT 22% on top, charm .99 rounding, UPC-first matching,
- * dry-run-by-default apply. Operators refine this in the config UI — new
- * pricing behaviour is just more rows, never code.
+ * ≤500€ → 25%, above → 19%). The band IS the total shelf uplift: VAT is
+ * considered included in the resulting price, never added on top (an ask of
+ * €100 prices at €135.99 with charm rounding, not €135 × 1.22). Charm .99
+ * rounding, UPC-first matching, dry-run-by-default apply. Operators refine
+ * this in the config UI — new pricing behaviour is just more rows, never code.
  */
 export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
   return {
@@ -38,7 +39,9 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         ],
         minAsks: 1,
         rounding: { mode: "charm", increment: 0.99 },
-        tax: { priceIncludesVat: true, vatRatePercent: 22 },
+        // The band is the TOTAL uplift over the ask — VAT is inside the shelf
+        // price, not stacked on top of the markup.
+        tax: { priceIncludesVat: false, vatRatePercent: 0 },
         // No maxDeltaPercent by default: the KicksDB price always wins, regardless
         // of how far it is from the current store price. Add one per rule if you
         // want a guardrail against big jumps.

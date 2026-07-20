@@ -20,7 +20,9 @@ export function pricingSummary(cfg: AppConfig): PricingSummary {
   return {
     markupPercent: r?.markupPercent ?? null,
     markupBands: r?.markupBands?.length ? sortMarkupBands(r.markupBands) : null,
-    vatRatePercent: r?.tax?.vatRatePercent ?? null,
+    // Only report VAT when it is actually ADDED on top — a rate that sits
+    // inside the price would make the chip lie about the math.
+    vatRatePercent: r?.tax?.priceIncludesVat ? (r.tax.vatRatePercent ?? null) : null,
     roundingMode: r?.rounding?.mode ?? null,
     increment: r?.rounding?.increment ?? null,
     minAsks: r?.minAsks ?? null,
