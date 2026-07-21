@@ -5,6 +5,7 @@ import { computePrice } from "@core/core-spine";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor } from "@/server/overrides/model";
+import { gsOwnedProducts } from "@/server/feeds/owner";
 import { sourceEuSize } from "@/server/store-json/match";
 
 /** One drawer row: a size variant with its ask, computed price and override state. */
@@ -32,6 +33,8 @@ export interface DrawerData {
   fetchedAt: string;
   fresh: boolean;
   followSaleRule: boolean;
+  /** Who owns this product: the feed's variant set replaces KicksDB's when GS. */
+  owner: "kicksdb" | "goldensneakers";
   variants: DrawerVariant[];
 }
 
@@ -49,7 +52,10 @@ export async function loadDrawerData(
   if (!entry) return null;
 
   const overrides = await getOverrides().catch(() => null);
-  const product = entry.product;
+  // Product-level ownership: a GS-owned product shows the FEED's sizes,
+  // presented prices (passthrough rule) and real quantities.
+  const gs = (await gsOwnedProducts([entry.sku], market, overrides)).get(entry.sku);
+  const product = gs?.product ?? entry.product;
   const deliveryType = config.source.defaultDeliveryType;
 
   const variants = product.variants.map<DrawerVariant>((v) => {
@@ -72,16 +78,18 @@ export async function loadDrawerData(
   return {
     market,
     sku: entry.sku,
-    title: entry.title,
-    brand: entry.brand,
-    image: entry.image,
+    title: entry.title || product.title,
+    brand: entry.brand || product.brand,
+    image: entry.image || product.image,
     stockxId: product.stockxId,
     currency: product.currency,
     addedAt: entry.addedAt,
     fetchedAt: entry.fetchedAt,
     fresh:
+      gs != null ||
       new Date(entry.fetchedAt).getTime() >= Date.now() - config.source.cacheTtlSeconds * 1000,
     followSaleRule: overrides ? followSaleRuleFor(overrides, product.sku) : true,
+    owner: gs ? "goldensneakers" : "kicksdb",
     variants,
   };
 }

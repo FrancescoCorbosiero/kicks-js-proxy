@@ -82,11 +82,17 @@ export const applyAudit = pgTable("apply_audit", {
 });
 
 /**
- * The core domain table: every StockX product successfully looked up on KicksDB
- * is upserted here, keyed by (market, sku). Ever-increasing (SKUs never leave);
- * freshness is decided by fetchedAt + the config TTL. The image/minAsk/
- * variantCount columns are denormalized from `data` at upsert time so the
- * discovery grid can filter/sort/paginate in SQL without unpacking jsonb.
+ * The core domain table: every product known to a source of truth, keyed by
+ * (market, sku), with provenance. `source` says who registered the entry:
+ *  - "kicksdb" (default): GET-verified fetchable on KicksDB — the original
+ *    invariant, still guaranteed per-row;
+ *  - a feed name ("goldensneakers"): present in that feed — products KicksDB
+ *    doesn't carry are first-class in discovery too.
+ * A KicksDB verification always wins the row (source flips to kicksdb);
+ * feed syncs never overwrite a kicksdb row. Ever-increasing (SKUs never
+ * leave); freshness is decided by fetchedAt + the config TTL. The image/
+ * minAsk/variantCount columns are denormalized from `data` at upsert time so
+ * the discovery grid can filter/sort/paginate in SQL without unpacking jsonb.
  * addedAt is the first-insert time (fetchedAt means "last refreshed").
  */
 export const catalogProducts = pgTable(
@@ -94,6 +100,7 @@ export const catalogProducts = pgTable(
   {
     market: text("market").notNull(),
     sku: text("sku").notNull(),
+    source: text("source").notNull().default("kicksdb"),
     stockxId: text("stockx_id").notNull(),
     title: text("title").notNull().default(""),
     brand: text("brand").notNull().default(""),
@@ -197,6 +204,41 @@ export const storePullRuns = pgTable("store_pull_runs", {
 });
 
 export type StorePullRunRow = typeof storePullRuns.$inferSelect;
+
+/**
+ * External-feed offers: one row per (feed, sku, size). The KicksDB catalog
+ * stays pure — feed data lives here and a product-level ownership switch
+ * decides which source drives a product. Rows are deactivated (never deleted)
+ * when they vanish from a sync, so history survives and nothing churns.
+ */
+export const feedItems = pgTable(
+  "feed_items",
+  {
+    feed: text("feed").notNull(), // "goldensneakers"
+    sku: text("sku").notNull(), // canonical style code (skuKey)
+    euNorm: text("eu_norm").notNull(), // canonical numeric size key ("36.67")
+    sizeLabel: text("size_label").notNull().default(""), // human ("36 2/3")
+    sizeUs: text("size_us").notNull().default(""),
+    barcode: text("barcode").notNull().default(""), // EAN → Woo global_unique_id
+    offerPrice: numeric("offer_price", { mode: "number" }), // supplier cost — internal only
+    presentedPrice: numeric("presented_price", { mode: "number" }), // FINAL retail (VAT+markup upstream)
+    quantity: integer("quantity").notNull().default(0),
+    productName: text("product_name").notNull().default(""),
+    brandName: text("brand_name").notNull().default(""),
+    image: text("image").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    raw: jsonb("raw").$type<unknown>(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.feed, t.sku, t.euNorm] }),
+    index("feed_items_feed_active_idx").on(t.feed, t.active),
+    index("feed_items_feed_sku_idx").on(t.feed, t.sku),
+  ],
+);
+
+export type FeedItemRow = typeof feedItems.$inferSelect;
 
 /** Staging area for an in-flight pull: one row per pulled parent product. */
 export const storePullProducts = pgTable(

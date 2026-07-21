@@ -143,6 +143,34 @@ describe("planRebuild", () => {
   });
 });
 
+describe("planRebuild with real feed stock (GS-owned products)", () => {
+  it("writes managed quantities instead of sell-on-demand", () => {
+    const plan = planRebuild({
+      parentSku: "U906023D",
+      storeProductId: 334617,
+      catalog: catalog(),
+      oldVariations: [],
+      config: config(),
+      stockBySize: { "36": 2, "42.5": 0 },
+    });
+    const bySize = new Map(plan.create.map((c) => [c.sizeLabel, c.payload]));
+
+    expect(bySize.get("36")).toMatchObject({
+      manage_stock: true,
+      stock_quantity: 2,
+      stock_status: "instock",
+    });
+    // Zero stock: kept as outofstock — deactivate-not-delete, never a ghost.
+    expect(bySize.get("42.5")).toMatchObject({
+      manage_stock: true,
+      stock_quantity: 0,
+      stock_status: "outofstock",
+    });
+    // Sizes without feed stock keep the KicksDB sell-on-demand posture.
+    expect(bySize.get("45.5")).toMatchObject({ manage_stock: false, stock_status: "instock" });
+  });
+});
+
 describe("rebuildParentAttributes", () => {
   it("replaces an existing pa_taglia entry, preserving the other attributes", () => {
     const attrs = rebuildParentAttributes(

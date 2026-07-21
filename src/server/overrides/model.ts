@@ -12,8 +12,12 @@ import { skuKey } from "@/lib/skus";
  * re-imported. Stored whole as a single jsonb blob (one active operator).
  */
 
+export type ProductOwner = "kicksdb" | "goldensneakers";
+
 export interface ProductOverride {
   followSaleRule?: boolean;
+  /** Manual ownership pin — the business owner outranks the automation. */
+  owner?: ProductOwner;
 }
 
 export interface VariationOverride {
@@ -112,6 +116,32 @@ export function globalFollowSaleRule(overrides: StoreOverrides): boolean {
  */
 export function followSaleRuleFor(overrides: StoreOverrides, sku: string): boolean {
   return overrides.products[productKey(sku)]?.followSaleRule ?? globalFollowSaleRule(overrides);
+}
+
+/**
+ * Set (or clear with null) a product's manual ownership pin. Returns a new
+ * blob — never mutates the input.
+ */
+export function withProductOwner(
+  overrides: StoreOverrides,
+  sku: string,
+  owner: ProductOwner | null,
+): StoreOverrides {
+  const products = { ...overrides.products };
+  const key = productKey(sku);
+  if (owner == null) {
+    const { owner: _drop, ...rest } = products[key] ?? {};
+    if (Object.keys(rest).length === 0) delete products[key];
+    else products[key] = rest;
+  } else {
+    products[key] = { ...products[key], owner };
+  }
+  return { ...overrides, products };
+}
+
+/** The manual ownership pin for a product, or null when automation decides. */
+export function ownerPinFor(overrides: StoreOverrides, sku: string): ProductOwner | null {
+  return overrides.products[productKey(sku)]?.owner ?? null;
 }
 
 /** The manual locked price for a variation, or null when none is set. */

@@ -168,6 +168,7 @@ describe("resolveFromModel", () => {
       storeProductId: 334121,
       storeVariationId: 334133,
       currentPrice: 566.03,
+      currentStock: null, // stock_quantity present but manage_stock is not set
       saleActive: false,
     });
     expect(map.get("v-42")?.storeVariationId).toBe(334132);

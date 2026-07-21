@@ -183,6 +183,14 @@ export default async function CatalogPage({
                       <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-faint">
                         {item.brand || "—"}
                       </span>
+                      {item.source !== "kicksdb" && (
+                        <span
+                          className="shrink-0 rounded-full bg-warn/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-warn"
+                          title={t.discovery.gsBadgeHint}
+                        >
+                          GS
+                        </span>
+                      )}
                       <span
                         className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${item.fresh ? "bg-up" : "bg-skip"}`}
                         title={item.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}

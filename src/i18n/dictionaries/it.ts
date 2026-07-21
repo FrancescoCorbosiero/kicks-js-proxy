@@ -226,6 +226,7 @@ export const it = {
     sizes: (n: number) => `${n} taglie`,
     freshBadge: "prezzi freschi",
     staleBadge: "da aggiornare",
+    gsBadgeHint: "Registrato dal feed GoldenSneakers — non presente su KicksDB.",
     empty: "Nessun prodotto con questi filtri.",
     emptyCatalog: "Il catalogo è vuoto — aggiungi SKU dalla scheda Importa o esegui una sincronizzazione.",
     page: (p: number, n: number) => `Pagina ${p} di ${n}`,
@@ -245,6 +246,9 @@ export const it = {
     fetchedAgo: (days: number) =>
       days === 0 ? "Prezzi aggiornati oggi" : `Prezzi aggiornati ${days} ${days === 1 ? "giorno" : "giorni"} fa`,
     addedOn: (date: string) => `In catalogo dal ${date}`,
+    gsOwned: "GoldenSneakers",
+    gsOwnedHint:
+      "Prodotto posseduto dal feed GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal feed, non da KicksDB.",
   },
   sync: {
     title: "Sync Woo",
@@ -289,11 +293,13 @@ export const it = {
       cleanupNone: "Nessuna pulizia necessaria — taglie già allineate.",
       cleanupLine: (del: number, rw: number) => `−${del} varianti · ${rw} riallineate`,
       deletions: (n: number) => `${n} varianti da eliminare`,
+      feedTrimmed: (n: number) => `${n} fuori dal feed GS (takeover)`,
       droppedByCleanup: (n: number) =>
         `${n} prezzi puntavano a varianti eliminate dalla pulizia e sono stati scartati`,
       cleanupApplied: (del: number, taglie: number, parents: number) =>
         `Pulizia: ${del} varianti eliminate · ${taglie} pa_taglia riallineati · ${parents} attributi prodotto riallineati`,
-      dryTitle: (n: number) => `La prova scriverebbe ${n} prezzi:`,
+      stockWrite: (n: number) => (n === 0 ? "esaurito (qty 0)" : `qty → ${n}`),
+      dryTitle: (n: number) => `La prova scriverebbe ${n} varianti:`,
       dryMore: (n: number) => `…e altre ${n}`,
       applied: (n: number) => `${n} varianti aggiornate sullo store ✓`,
       partial: (ok: number, ko: number) => `${ok} aggiornate, ${ko} fallite`,
@@ -368,9 +374,22 @@ export const it = {
         `Ri-prezza le voci del catalogo più vecchie di ${Math.round(ttl / 60)} minuti tramite l'endpoint bulk (50 SKU per chiamata).`,
       stale: (stale: number, total: number) => `${stale} di ${total} da aggiornare`,
     },
-    externalTitle: "Feed esterni",
-    externalDesc:
-      "I feed dei fornitori esterni si collegheranno qui: stessa pipeline (verifica → upsert), stesso storico. Dettagli e formati in una sessione dedicata.",
+    gs: {
+      name: "GoldenSneakers",
+      tag: "fornitore",
+      desc: "Assortimento flat del fornitore: i prodotti coperti dal feed sono POSSEDUTI da GoldenSneakers — taglie, prezzi finali (presented_price) e stock reale arrivano dal feed. Le righe scomparse vengono disattivate, mai eliminate.",
+      stats: (skus: number, rows: number) => `${skus} prodotti · ${rows} taglie attive`,
+      syncApi: "Sincronizza dall'API",
+      upload: "Carica JSON…",
+      notConfigured:
+        "API non configurata — imposta GS_FEED_URL (con i parametri IVA/ricarico) e GS_FEED_TOKEN, oppure carica il JSON manualmente.",
+      reportRows: (rows: number, skus: number) => `${rows} righe valide su ${skus} prodotti`,
+      reportUpdated: (n: number) => `${n} aggiornate`,
+      reportDeactivated: (n: number) => `${n} disattivate`,
+      reportRegistered: (n: number) => `${n} prodotti nel catalogo (fonte GS)`,
+      runLine: (added: number, updated: number, rejected: number) =>
+        `+${added} · ${updated} aggiornate · ${rejected} rifiutate`,
+    },
   },
   importPage: {
     title: "Importa",

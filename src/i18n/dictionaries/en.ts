@@ -218,6 +218,7 @@ export const en: Dictionary = {
     sizes: (n) => `${n} sizes`,
     freshBadge: "fresh prices",
     staleBadge: "needs refresh",
+    gsBadgeHint: "Registered by the GoldenSneakers feed — not on KicksDB.",
     empty: "No products match these filters.",
     emptyCatalog: "The catalog is empty — add SKUs from the Import tab or run a sync.",
     page: (p, n) => `Page ${p} of ${n}`,
@@ -237,6 +238,9 @@ export const en: Dictionary = {
     fetchedAgo: (days) =>
       days === 0 ? "Prices refreshed today" : `Prices refreshed ${days} ${days === 1 ? "day" : "days"} ago`,
     addedOn: (date) => `In catalog since ${date}`,
+    gsOwned: "GoldenSneakers",
+    gsOwnedHint:
+      "Product owned by the GoldenSneakers feed: sizes, final prices and real stock come from the feed, not KicksDB.",
   },
   sync: {
     title: "Woo Sync",
@@ -280,11 +284,13 @@ export const en: Dictionary = {
       cleanupNone: "No cleanup needed — sizes already aligned.",
       cleanupLine: (del, rw) => `−${del} variations · ${rw} realigned`,
       deletions: (n) => `${n} variations to delete`,
+      feedTrimmed: (n) => `${n} outside the GS feed (takeover)`,
       droppedByCleanup: (n) =>
         `${n} price writes targeted variations the cleanup deletes and were dropped`,
       cleanupApplied: (del, taglie, parents) =>
         `Cleanup: ${del} variations deleted · ${taglie} pa_taglia realigned · ${parents} product attributes realigned`,
-      dryTitle: (n) => `The dry run would write ${n} prices:`,
+      stockWrite: (n) => (n === 0 ? "sold out (qty 0)" : `qty → ${n}`),
+      dryTitle: (n) => `The dry run would write ${n} variations:`,
       dryMore: (n) => `…and ${n} more`,
       applied: (n) => `${n} variations updated on the store ✓`,
       partial: (ok, ko) => `${ok} updated, ${ko} failed`,
@@ -358,9 +364,21 @@ export const en: Dictionary = {
         `Re-prices catalog entries older than ${Math.round(ttl / 60)} minutes via the bulk endpoint (50 SKUs per call).`,
       stale: (stale, total) => `${stale} of ${total} stale`,
     },
-    externalTitle: "External feeds",
-    externalDesc:
-      "External supplier feeds will plug in here: same pipeline (verify → upsert), same history. Formats and details in a dedicated session.",
+    gs: {
+      name: "GoldenSneakers",
+      tag: "supplier",
+      desc: "The supplier's flat assortment: products the feed covers are OWNED by GoldenSneakers — sizes, final prices (presented_price) and real stock come from the feed. Vanished rows are deactivated, never deleted.",
+      stats: (skus, rows) => `${skus} products · ${rows} active sizes`,
+      syncApi: "Sync from API",
+      upload: "Upload JSON…",
+      notConfigured:
+        "API not configured — set GS_FEED_URL (with the VAT/markup params) and GS_FEED_TOKEN, or upload the JSON manually.",
+      reportRows: (rows, skus) => `${rows} valid rows across ${skus} products`,
+      reportUpdated: (n) => `${n} updated`,
+      reportDeactivated: (n) => `${n} deactivated`,
+      reportRegistered: (n) => `${n} products in the catalog (GS source)`,
+      runLine: (added, updated, rejected) => `+${added} · ${updated} updated · ${rejected} rejected`,
+    },
   },
   importPage: {
     title: "Import",

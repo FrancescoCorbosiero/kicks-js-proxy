@@ -51,6 +51,9 @@ export interface SourceProduct {
     image: string;
     market: string;           // "IT"
     currency: string;         // "EUR"
+    /** Which source produced this product: absent = "kicksdb"; feeds set their
+     *  name (e.g. "goldensneakers") so source-scoped pricing rules apply. */
+    source?: string;
     variants: SourceVariant[];
 }
 
@@ -269,6 +272,13 @@ export interface PlanItem {
     storeVariationId: number | null;
     currentPrice: number | null;
     proposedPrice: number | null;
+    /**
+     * Desired MANAGED stock quantity — set only for stock-managed sources
+     * (feeds with finite supply, e.g. GoldenSneakers). undefined = the source
+     * carries no stock truth (KicksDB): never touch the store's stock fields.
+     * An "update" may be stock-only (proposedPrice null, stockQuantity set).
+     */
+    stockQuantity?: number;
     action: PlanAction;
     reason?: string; // e.g. "no offer for chosen delivery type", "below minAsks"
     locked?: boolean; // operator-set manual price wins over the computed price
@@ -287,6 +297,8 @@ export interface VariantMapping {
     storeProductId: number;
     storeVariationId: number;
     currentPrice: number | null;
+    /** The store's MANAGED stock quantity; null = unmanaged (sell on demand). */
+    currentStock?: number | null;
     saleActive?: boolean; // store variation has a manual discount (sale_price) -> preserve it
     manualPrice?: number | null; // operator-locked price: wins over the computed price
 }
@@ -297,6 +309,13 @@ export interface BuildPlanOptions {
     // the historical behaviour. Set false, per product, to reprice discounted
     // variations too.
     followSaleRule?: boolean;
+    /**
+     * The source carries FINITE stock truth (a supplier feed, not KicksDB):
+     * the variant's offer depth is a real quantity, stock drift alone makes a
+     * row actionable (stock-only updates), and quantities are written to the
+     * store. Default false — KicksDB behaviour, stock never touched.
+     */
+    manageStockFromSource?: boolean;
 }
 
 export function buildPlan(
@@ -306,52 +325,84 @@ export function buildPlan(
     options: BuildPlanOptions = {},
 ): Plan {
     const followSaleRule = options.followSaleRule ?? true;
+    const manageStock = options.manageStockFromSource ?? false;
+
+    /** Real quantity at the source (offer depth of the primary offer). */
+    const qtyOf = (v: SourceVariant): number => {
+        const offer =
+            v.offers.find((o) => o.deliveryType === config.source.defaultDeliveryType) ?? v.offers[0];
+        return offer?.asks ?? 0;
+    };
+
     const items = product.variants.map<PlanItem>((v) => {
         const m = mappings.get(v.stockxVariantId);
+        const qty = manageStock ? qtyOf(v) : undefined;
+        // Unmanaged store stock counts as drift: finite supply must be managed.
+        const stockChanged =
+            manageStock && m != null && (m.currentStock == null || m.currentStock !== qty);
+        const stock = (item: PlanItem): PlanItem =>
+            qty !== undefined ? { ...item, stockQuantity: qty } : item;
 
         // Highest precedence: an operator-locked manual price. It wins over the
         // sale rule and the computed price, and never drifts on re-runs. Only
         // meaningful for a variation that exists on the store (has a mapping).
         if (m && m.manualPrice != null) {
-            const action = m.currentPrice === m.manualPrice ? "noop" : "update";
-            return { ...baseItem(v, m, m.manualPrice, action, "manual price (locked)"), locked: true };
+            const action = m.currentPrice === m.manualPrice && !stockChanged ? "noop" : "update";
+            return {
+                ...stock(baseItem(v, m, m.manualPrice, action, "manual price (locked)")),
+                locked: true,
+            };
         }
 
         const rule = resolveEffectiveRule(product, v, config);
-        if (!rule) {
-            return baseItem(v, m, null, "skip", "no pricing rule matches");
-        }
+        const proposed = rule ? computePrice(v, rule) : null;
 
-        const proposed = computePrice(v, rule);
         if (proposed == null) {
-            return baseItem(v, m, null, "skip", "no priceable offer");
+            const reason = rule ? "no priceable offer" : "no pricing rule matches";
+            // Finite supply: an unpriceable size (typically qty 0) must still
+            // sync its quantity — otherwise the store keeps selling it.
+            if (m && stockChanged) {
+                return stock(baseItem(v, m, null, "update", `stock only — ${reason}`));
+            }
+            return baseItem(v, m, null, "skip", reason);
         }
         if (!m) {
             // Not on the store yet -> upsert path would create it.
-            return baseItem(v, undefined, proposed, "create");
+            return stock(baseItem(v, undefined, proposed, "create"));
         }
         if (m.saleActive && followSaleRule) {
-            // Owner-set discount wins: leave the variation untouched entirely.
+            // Owner-set discount wins on PRICE — but finite stock still syncs.
+            if (stockChanged) {
+                return stock(baseItem(v, m, null, "update", "stock only — sale price preserved"));
+            }
             return baseItem(v, m, proposed, "skip", "discounted — sale price preserved");
         }
         if (m.currentPrice === proposed) {
-            return baseItem(v, m, proposed, "noop");
+            if (stockChanged) {
+                return stock(baseItem(v, m, proposed, "update", "stock change"));
+            }
+            return stock(baseItem(v, m, proposed, "noop"));
         }
         // Plan-time guardrail: reject a change larger than maxDeltaPercent.
         if (
-            rule.maxDeltaPercent != null &&
+            rule!.maxDeltaPercent != null &&
             m.currentPrice != null &&
-            exceedsDelta(m.currentPrice, proposed, rule.maxDeltaPercent)
+            exceedsDelta(m.currentPrice, proposed, rule!.maxDeltaPercent)
         ) {
+            if (stockChanged) {
+                return stock(
+                    baseItem(v, m, null, "update", `stock only — price exceeds maxDeltaPercent`),
+                );
+            }
             return baseItem(
                 v,
                 m,
                 proposed,
                 "skip",
-                `change exceeds maxDeltaPercent (${rule.maxDeltaPercent}%)`,
+                `change exceeds maxDeltaPercent (${rule!.maxDeltaPercent}%)`,
             );
         }
-        return baseItem(v, m, proposed, "update");
+        return stock(baseItem(v, m, proposed, "update"));
     });
 
     return {

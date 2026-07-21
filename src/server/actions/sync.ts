@@ -123,6 +123,8 @@ const ApplySchema = z
     sanitize: z.boolean().default(true),
     kicksdbVariationIds: z.array(z.number()).default([]),
     previewedProductIds: z.array(z.number()).default([]),
+    // Feed-owned products (finite stock) — excluded from KicksDB-style cleanup.
+    feedProductIds: z.array(z.number()).default([]),
   })
   .refine((v) => v.selections.length > 0 || v.sanitize, {
     message: "Nothing to do: no price selection and cleanup is off.",
@@ -166,29 +168,33 @@ export async function rebuildStoreProducts(
 }
 
 /**
- * Every SKU the bulk rebuild can cover: in the KicksDB catalog AND present in
- * the pulled store snapshot (a rebuild needs both the truth and the target).
+ * Every SKU the bulk rebuild can cover: known to a source of truth — the
+ * KicksDB catalog OR the GoldenSneakers feed — AND present in the pulled
+ * store snapshot (a rebuild needs both the truth and the target).
  */
 export async function listRebuildableSkus(): Promise<{
   ok: boolean;
   error?: string;
   skus: string[];
-  catalogOnly: number; // in the catalog but not on the store — not rebuildable
+  catalogOnly: number; // known to a source but not on the store — not rebuildable
 }> {
   try {
     const { getActiveConfig } = await import("@/server/config/repo");
     const { listCatalogEntries } = await import("@/server/catalog/repo");
     const { getActiveSnapshot } = await import("@/server/store-json/repo");
+    const { activeFeedSkus, GS_FEED } = await import("@/server/feeds/repo");
     const { skuKey } = await import("@/lib/skus");
 
     const config = await getActiveConfig();
     const entries = await listCatalogEntries(config.source.market);
+    const gsSkus = await activeFeedSkus(GS_FEED);
+    const known = new Set<string>([...entries.map((e) => skuKey(e.sku)), ...gsSkus]);
     const snapshot = await getActiveSnapshot();
     const storeSkus = new Set(
       (snapshot?.products ?? []).map((p) => (p.sku ? skuKey(p.sku) : "")).filter(Boolean),
     );
-    const skus = entries.map((e) => e.sku).filter((s) => storeSkus.has(skuKey(s)));
-    return { ok: true, skus, catalogOnly: entries.length - skus.length };
+    const skus = [...known].filter((s) => storeSkus.has(s));
+    return { ok: true, skus, catalogOnly: known.size - skus.length };
   } catch (e) {
     return { ok: false, error: errMessage(e), skus: [], catalogOnly: 0 };
   }
@@ -210,6 +216,7 @@ export async function applySyncPrices(
       sanitize: parsed.data.sanitize,
       kicksdbVariationIds: parsed.data.kicksdbVariationIds,
       previewedProductIds: parsed.data.previewedProductIds,
+      feedProductIds: parsed.data.feedProductIds,
     });
     return { ok: true, outcome };
   } catch (e) {

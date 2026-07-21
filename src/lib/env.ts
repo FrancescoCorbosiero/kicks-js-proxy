@@ -21,6 +21,12 @@ const EnvSchema = z.object({
   // Shared secret for the scheduled endpoints (/api/cron/*). Unset = disabled.
   CRON_SECRET: z.string().optional(),
 
+  // GoldenSneakers feed — the flat-assortment endpoint (include VAT/markup
+  // query params there: presented_price arrives FINAL) and its bearer token.
+  // Optional: without them the Feeds tab falls back to manual JSON upload.
+  GS_FEED_URL: z.url().optional(),
+  GS_FEED_TOKEN: z.string().optional(),
+
   // Persistence
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),

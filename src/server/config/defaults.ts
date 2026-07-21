@@ -1,4 +1,27 @@
-import type { AppConfig, ConnectionConfig } from "@core/config";
+import type { AppConfig, ConnectionConfig, ScopedPricingRule } from "@core/config";
+
+/**
+ * GoldenSneakers pricing is decided UPSTREAM: VAT and markup are set as query
+ * params on their API and `presented_price` arrives final. This source-scoped
+ * rule makes the engine a passthrough for GS products — zero markup, bands
+ * explicitly cleared (an empty array overrides the general rule's bands), no
+ * rounding, no VAT. Manual locks and the sale rule still apply on top.
+ */
+export function goldenSneakersPassthroughRule(): ScopedPricingRule {
+  return {
+    id: "goldensneakers-passthrough",
+    scope: { source: "goldensneakers" },
+    enabled: true,
+    sourceDeliveryType: "standard",
+    markupPercent: 0,
+    markupBands: [],
+    // Finite supply: a size with zero quantity must never be priced/sold.
+    // (Explicit — do not rely on inheriting the general rule's minAsks.)
+    minAsks: 1,
+    rounding: { mode: "none" },
+    tax: { priceIncludesVat: false, vatRatePercent: 0 },
+  };
+}
 
 /**
  * A sensible starting AppConfig: one general pricing rule with a DYNAMIC,
@@ -46,6 +69,7 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         // of how far it is from the current store price. Add one per rule if you
         // want a guardrail against big jumps.
       },
+      goldenSneakersPassthroughRule(),
     ],
     matching: {
       strategyOrder: ["upc", "skuPattern", "manual"],

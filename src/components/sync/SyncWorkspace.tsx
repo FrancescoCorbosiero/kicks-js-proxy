@@ -263,6 +263,15 @@ export function SyncWorkspace({
       for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
     return [...ids];
   }, [plans]);
+  // Feed-owned products (finite stock): excluded from the KicksDB-style cleanup.
+  const feedProductIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of plans) {
+      if (p.source === "kicksdb") continue;
+      for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
+    }
+    return [...ids];
+  }, [plans]);
 
   // A dry run is only valid for the exact same work: selection + cleanup scope.
   const signature = `${sanitize ? "s" : "-"}|${plans.map((p) => p.planId).join(",")}|${selectionSignature(applySelections)}`;
@@ -289,6 +298,7 @@ export function SyncWorkspace({
           sanitize,
           kicksdbVariationIds,
           previewedProductIds,
+          feedProductIds,
         });
         if (!res.ok || !res.outcome) setApplyError(res.error ?? t.sync.apply.failed);
         else setDry({ outcome: res.outcome, signature });
@@ -311,6 +321,7 @@ export function SyncWorkspace({
           sanitize,
           kicksdbVariationIds,
           previewedProductIds,
+          feedProductIds,
         });
         if (!res.ok || !res.outcome) {
           setApplyError(res.error ?? t.sync.apply.failed);
@@ -584,6 +595,11 @@ export function SyncWorkspace({
                         <span className="font-medium text-skip">
                           {t.sync.apply.deletions(dry.outcome.cleanup.deletions)}
                         </span>
+                        {dry.outcome.cleanup.feedTrimmed > 0 && (
+                          <span className="font-medium text-warn">
+                            {t.sync.apply.feedTrimmed(dry.outcome.cleanup.feedTrimmed)}
+                          </span>
+                        )}
                         <span>{t.sanitize.ghostsRemoved(dry.outcome.cleanup.ghostsRemoved)}</span>
                         <span>{t.sanitize.duplicatesRemoved(dry.outcome.cleanup.duplicatesRemoved)}</span>
                         <span>{t.sanitize.stockSynthesized(dry.outcome.cleanup.stockSynthesized)}</span>
@@ -624,8 +640,18 @@ export function SyncWorkspace({
                       <span className="font-mono text-faint">{c.sku}</span>
                       <span>{c.sizeLabel}</span>
                       <span className="ml-auto text-muted">
-                        {c.currentPrice != null ? eur.format(c.currentPrice) : "—"} →{" "}
-                        <span className="font-semibold text-ink">{eur.format(c.newPrice)}</span>
+                        {c.newPrice != null ? (
+                          <>
+                            {c.currentPrice != null ? eur.format(c.currentPrice) : "—"} →{" "}
+                            <span className="font-semibold text-ink">{eur.format(c.newPrice)}</span>
+                          </>
+                        ) : null}
+                        {c.newStock != null && (
+                          <span className={c.newStock === 0 ? "font-semibold text-skip" : "text-warn"}>
+                            {c.newPrice != null ? " · " : ""}
+                            {t.sync.apply.stockWrite(c.newStock)}
+                          </span>
+                        )}
                       </span>
                     </li>
                   ))}

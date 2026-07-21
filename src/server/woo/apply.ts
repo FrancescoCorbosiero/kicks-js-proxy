@@ -6,8 +6,12 @@ import { getPlanById } from "@/server/plans/repo";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
 import { planProductSanitize, type ProductSanitizeOps } from "@/server/store-json/sanitize-plan";
+import { planFeedTakeover } from "@/server/store-json/takeover-plan";
+import { gsOwnedProducts } from "@/server/feeds/owner";
+import { getOverrides } from "@/server/overrides/repo";
 import type { StoreModel } from "@/server/store-json/model";
 import { chunk } from "@/server/adapters/http";
+import { skuKey } from "@/lib/skus";
 import { getWooClient } from "./client";
 
 /**
@@ -42,6 +46,14 @@ export interface ApplyOptions {
   kicksdbVariationIds: number[];
   /** Store product ids in the preview — cleanup never touches products outside it. */
   previewedProductIds: number[];
+  /**
+   * Store product ids owned by a finite-stock FEED (e.g. GoldenSneakers).
+   * The KicksDB-semantics cleanup must NOT touch them: its ghost rule would
+   * delete legitimately sold-out sizes and its make-available rule would turn
+   * 1-pair sizes into unmanaged sell-on-demand. Their standardization path is
+   * the rebuild, which writes real managed stock.
+   */
+  feedProductIds?: number[];
 }
 
 export interface ApplyChange {
@@ -51,7 +63,10 @@ export interface ApplyChange {
   storeProductId: number;
   storeVariationId: number;
   currentPrice: number | null;
-  newPrice: number;
+  /** null = stock-only write (e.g. a sold-out feed size zeroing its qty). */
+  newPrice: number | null;
+  /** Managed quantity to write; null = leave the store's stock untouched. */
+  newStock: number | null;
 }
 
 /** Per-product cleanup, compact for the dry-run panel. */
@@ -65,12 +80,14 @@ export interface CleanupDetail {
 
 export interface CleanupSummary {
   products: number; // products needing cleanup
-  deletions: number; // variations removed (ghosts + duplicates)
+  deletions: number; // variations removed (ghosts + duplicates + takeover trims)
   ghostsRemoved: number;
   duplicatesRemoved: number;
   stockSynthesized: number;
   taglieRealigned: number;
   parentsRealigned: number;
+  /** Out-of-feed variants removed by feed takeovers (subset of deletions). */
+  feedTrimmed: number;
 }
 
 export interface ApplyOutcome {
@@ -106,7 +123,7 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
       if (!wanted.has(item.stockxVariantId)) continue;
       if (item.action !== "update") continue; // "create" needs upsertProduct — out of scope
       if (item.storeProductId == null || item.storeVariationId == null) continue;
-      if (item.proposedPrice == null) continue;
+      if (item.proposedPrice == null && item.stockQuantity == null) continue;
       changes.push({
         sku: plan.sku,
         sizeLabel: item.sizeLabel,
@@ -115,6 +132,7 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
         storeVariationId: item.storeVariationId,
         currentPrice: item.currentPrice,
         newPrice: item.proposedPrice,
+        newStock: item.stockQuantity ?? null,
       });
     }
   }
@@ -130,14 +148,18 @@ function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
     stockSynthesized: 0,
     taglieRealigned: 0,
     parentsRealigned: 0,
+    feedTrimmed: 0,
   };
   for (const o of ops) {
     s.deletions += o.deleteVariationIds.length;
-    s.ghostsRemoved += o.counts.ghostsRemoved;
     s.duplicatesRemoved += o.counts.duplicatesRemoved;
     s.stockSynthesized += o.counts.stockSynthesized;
     s.taglieRealigned += o.counts.taglieRealigned;
     if (o.counts.parentRealigned) s.parentsRealigned += 1;
+    // Takeover planners report out-of-feed trims via ghostsRemoved — split
+    // them out so the dry-run never mislabels a takeover as a ghost purge.
+    if (o.takeover) s.feedTrimmed += o.counts.ghostsRemoved;
+    else s.ghostsRemoved += o.counts.ghostsRemoved;
   }
   return s;
 }
@@ -148,13 +170,34 @@ export async function applySync(
 ): Promise<ApplyOutcome> {
   const snapshot = options.sanitize ? await getActiveSnapshot() : null;
 
-  // 1. Plan the cleanup over the previewed products.
+  // 1. Plan the cleanup over the previewed products. Two regimes:
+  //    - KicksDB-owned: the classic sanitize (ghosts, duplicates, pa_taglia).
+  //    - Feed-owned: the TAKEOVER — delete variants whose size the feed has
+  //      never listed (KicksDB-era leftovers keep selling otherwise), keep
+  //      feed-known sizes (their qty is written by the stock sync), realign
+  //      pa_taglia. The KicksDB ghost/make-available rules never apply here.
   const previewed = new Set(options.previewedProductIds);
+  const feedOwned = new Set(options.feedProductIds ?? []);
   const keepAvailable = new Set(options.kicksdbVariationIds);
   const cleanupOps: ProductSanitizeOps[] = [];
   if (options.sanitize && snapshot) {
+    const feedSkus = snapshot.products
+      .filter((p) => feedOwned.has(p.id) && p.sku)
+      .map((p) => p.sku);
+    const owned =
+      feedSkus.length > 0
+        ? await gsOwnedProducts(feedSkus, "", await getOverrides().catch(() => null))
+        : new Map<string, never>();
+
     for (const product of snapshot.products) {
       if (previewed.size > 0 && !previewed.has(product.id)) continue;
+      if (feedOwned.has(product.id)) {
+        const gs = product.sku ? owned.get(skuKey(product.sku)) : undefined;
+        if (!gs) continue; // ownership lapsed between preview and apply — skip
+        const ops = planFeedTakeover(product, gs.knownSizes);
+        if (ops) cleanupOps.push(ops);
+        continue;
+      }
       const ops = planProductSanitize(product, keepAvailable);
       if (ops) cleanupOps.push(ops);
     }
@@ -233,12 +276,19 @@ export async function applySync(
         await client.updateProduct(productId, { attributes: ops.parentAttributes });
       }
 
-      // Merge cleanup rewrites and price writes into one update row per variation.
+      // Merge cleanup rewrites, price writes and stock writes into one update
+      // row per variation.
       const merged = new Map<number, Record<string, unknown>>();
       for (const w of ops?.variationWrites ?? []) merged.set(w.id, { ...w });
       for (const c of prices) {
         const row = merged.get(c.storeVariationId) ?? { id: c.storeVariationId };
-        row.regular_price = c.newPrice.toFixed(2);
+        if (c.newPrice != null) row.regular_price = c.newPrice.toFixed(2);
+        if (c.newStock != null) {
+          // Finite feed supply: managed count, sold-out stays visible as such.
+          row.manage_stock = true;
+          row.stock_quantity = c.newStock;
+          row.stock_status = c.newStock > 0 ? "instock" : "outofstock";
+        }
         merged.set(c.storeVariationId, row);
       }
 
@@ -314,7 +364,13 @@ function patchSnapshot(
     const next = opsByProduct.get(p.id)?.sanitized ?? p;
     for (const c of priceByProduct.get(p.id) ?? []) {
       const vrt = next.variations.find((v) => v.id === c.storeVariationId);
-      if (vrt) vrt.regular_price = c.newPrice.toFixed(2);
+      if (!vrt) continue;
+      if (c.newPrice != null) vrt.regular_price = c.newPrice.toFixed(2);
+      if (c.newStock != null) {
+        vrt.manage_stock = true;
+        vrt.stock_quantity = c.newStock;
+        vrt.stock_status = c.newStock > 0 ? "instock" : "outofstock";
+      }
     }
     return next;
   });

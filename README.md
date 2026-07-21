@@ -23,11 +23,19 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 
 ## The catalog (core domain)
 
-`catalog_products` (`src/server/catalog/`) is unique by `(market, sku)` and
-**append-only**: a SKU is added only after a `GET /stockx/products` lookup
-returns a matching product (HTTP 200), so every entry is guaranteed fetchable
-on KicksDB — and it never leaves. Stale entries are re-priced (TTL), never
-removed. Every route feeds it: syncs, imports, previews.
+`catalog_products` (`src/server/catalog/`) is unique by `(market, sku)`,
+**append-only**, and **multi-source with provenance** (`source` column):
+
+- `kicksdb` (default): added only after a `GET /stockx/products` lookup
+  returns a matching product (HTTP 200) — guaranteed fetchable, re-priced by
+  TTL via the refresh feed.
+- `goldensneakers`: registered automatically by every feed sync for SKUs
+  KicksDB doesn't carry, so supplier-only products are first-class in
+  discovery (card with a GS badge, drawer, filters). Refreshed by the feed's
+  own sync; a later KicksDB verification wins the row (source flips), while
+  feed syncs never overwrite a `kicksdb` row.
+
+Entries never leave. Every route feeds it: syncs, imports, previews.
 
 Discovery columns (`image`, `min_ask`, `variant_count`, `added_at`) are
 denormalized from the stored product at upsert time, so the grid
@@ -70,8 +78,17 @@ filters/sorts/paginates in SQL.
   each operator action is one `ingestion_runs` row (added / known / rejected).
 - **Feeds** (`/feeds`) — the ingestion-source registry. Built-in feed:
   **KicksDB refresh**, which re-prices the stalest entries via the bulk
-  endpoint (50 SKUs/call), merging fresh offers onto stored products. External
-  supplier feeds plug in beside it (same pipeline, same history) — planned.
+  endpoint (50 SKUs/call), merging fresh offers onto stored products. And
+  **GoldenSneakers**: the supplier's flat assortment (API pull with bearer
+  token + DRF pagination, or manual JSON upload), stored in `feed_items`
+  with scs-b2b semantics — validate everything first, abort on empty,
+  deactivate-never-delete. **Product-level ownership**: a SKU covered by the
+  feed is *owned* by GoldenSneakers — its variant set, final prices
+  (`presented_price`, VAT/markup applied upstream via the feed URL params —
+  a source-scoped passthrough rule pipes it through the engine unchanged)
+  and real stock quantities all come from the feed; KicksDB sizes are
+  dropped by design. A manual per-product pin (`store_overrides`) can hand
+  a product back to KicksDB. The catalog stays KicksDB-pure.
 - *(hidden)* `/preview` — the legacy **file round-trip** flow (upload a Woo
   export, preview, download a patched re-import JSON with sanitize folded in).
   Fully functional, just unlinked — the fallback if REST must be reversed. It
