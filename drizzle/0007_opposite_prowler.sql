@@ -1,0 +1,1 @@
+ALTER TABLE "catalog_products" ADD COLUMN "source" text DEFAULT 'kicksdb' NOT NULL;

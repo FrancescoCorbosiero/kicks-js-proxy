@@ -226,6 +226,7 @@ export const it = {
     sizes: (n: number) => `${n} taglie`,
     freshBadge: "prezzi freschi",
     staleBadge: "da aggiornare",
+    gsBadgeHint: "Registrato dal feed GoldenSneakers — non presente su KicksDB.",
     empty: "Nessun prodotto con questi filtri.",
     emptyCatalog: "Il catalogo è vuoto — aggiungi SKU dalla scheda Importa o esegui una sincronizzazione.",
     page: (p: number, n: number) => `Pagina ${p} di ${n}`,
@@ -385,6 +386,7 @@ export const it = {
       reportRows: (rows: number, skus: number) => `${rows} righe valide su ${skus} prodotti`,
       reportUpdated: (n: number) => `${n} aggiornate`,
       reportDeactivated: (n: number) => `${n} disattivate`,
+      reportRegistered: (n: number) => `${n} prodotti nel catalogo (fonte GS)`,
       runLine: (added: number, updated: number, rejected: number) =>
         `+${added} · ${updated} aggiornate · ${rejected} rifiutate`,
     },

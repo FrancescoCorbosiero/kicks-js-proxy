@@ -23,11 +23,19 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 
 ## The catalog (core domain)
 
-`catalog_products` (`src/server/catalog/`) is unique by `(market, sku)` and
-**append-only**: a SKU is added only after a `GET /stockx/products` lookup
-returns a matching product (HTTP 200), so every entry is guaranteed fetchable
-on KicksDB — and it never leaves. Stale entries are re-priced (TTL), never
-removed. Every route feeds it: syncs, imports, previews.
+`catalog_products` (`src/server/catalog/`) is unique by `(market, sku)`,
+**append-only**, and **multi-source with provenance** (`source` column):
+
+- `kicksdb` (default): added only after a `GET /stockx/products` lookup
+  returns a matching product (HTTP 200) — guaranteed fetchable, re-priced by
+  TTL via the refresh feed.
+- `goldensneakers`: registered automatically by every feed sync for SKUs
+  KicksDB doesn't carry, so supplier-only products are first-class in
+  discovery (card with a GS badge, drawer, filters). Refreshed by the feed's
+  own sync; a later KicksDB verification wins the row (source flips), while
+  feed syncs never overwrite a `kicksdb` row.
+
+Entries never leave. Every route feeds it: syncs, imports, previews.
 
 Discovery columns (`image`, `min_ask`, `variant_count`, `added_at`) are
 denormalized from the stored product at upsert time, so the grid

@@ -8,9 +8,11 @@ import {
 import { getActiveConfig } from "@/server/config/repo";
 import {
   extractRows,
+  gsOffersToSource,
   parseGsPayload,
   type GsOffer,
 } from "./goldensneakers-model";
+import { getCatalogSources, upsertCatalog } from "@/server/catalog/repo";
 import { GS_FEED, deactivateMissing, existingFeedKeys, upsertFeedItems, feedStats } from "./repo";
 
 /**
@@ -55,6 +57,29 @@ export interface GsSyncReport {
   updated: number; // refreshed rows
   deactivated: number; // rows that vanished from the feed
   rejected: number; // invalid rows (bad size, bad shape)
+  catalogRegistered: number; // GS entries upserted into the multi-source catalog
+}
+
+/**
+ * Register GS products in the discovery catalog (source "goldensneakers") so
+ * products KicksDB doesn't carry are first-class: card, drawer, filters.
+ * A SKU already registered by KicksDB is left alone — KicksDB owns the row,
+ * ownership at plan time is a separate (feed-driven) concern. Best-effort.
+ */
+async function registerGsCatalogEntries(offers: GsOffer[], market: string): Promise<number> {
+  const bySku = new Map<string, GsOffer[]>();
+  for (const o of offers) {
+    const list = bySku.get(o.sku) ?? [];
+    list.push(o);
+    bySku.set(o.sku, list);
+  }
+  const sources = await getCatalogSources(market, [...bySku.keys()]);
+  const products = [...bySku.entries()]
+    .filter(([sku]) => sources.get(sku) !== "kicksdb")
+    .map(([sku, skuOffers]) => gsOffersToSource(sku, skuOffers, market))
+    .filter((p) => p.variants.length > 0);
+  await upsertCatalog(market, products);
+  return products.length;
 }
 
 /** Run a sync from an already-downloaded payload (API rows or an uploaded file). */
@@ -85,6 +110,12 @@ export async function syncGoldenSneakers(payload: unknown): Promise<GsSyncReport
     const syncedAt = new Date();
     await upsertFeedItems(GS_FEED, offers, syncedAt);
     const deactivated = await deactivateMissing(GS_FEED, syncedAt);
+    let catalogRegistered = 0;
+    try {
+      catalogRegistered = await registerGsCatalogEntries(offers, market);
+    } catch (e) {
+      console.warn("[gs] catalog registration skipped:", e instanceof Error ? e.message : String(e));
+    }
 
     const report: GsSyncReport = {
       rows: offers.length,
@@ -93,6 +124,7 @@ export async function syncGoldenSneakers(payload: unknown): Promise<GsSyncReport
       updated: offers.length - added,
       deactivated,
       rejected: rejected.length,
+      catalogRegistered,
     };
     if (runId) {
       await accumulateIngestionRun(runId, {

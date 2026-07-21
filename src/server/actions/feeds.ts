@@ -77,6 +77,7 @@ export interface GsSyncActionResult {
     updated: number;
     deactivated: number;
     rejected: number;
+    catalogRegistered: number;
   };
 }
 

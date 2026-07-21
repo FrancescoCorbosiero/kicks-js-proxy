@@ -234,6 +234,11 @@ function GsFeedCard({ state, onSynced }: { state: FeedsState; onSynced: () => Pr
           <span className={report.rejected > 0 ? "text-skip" : undefined}>
             {t.importPage.rejected(report.rejected)}
           </span>
+          {report.catalogRegistered > 0 && (
+            <span className="text-accent-text">
+              {t.feeds.gs.reportRegistered(report.catalogRegistered)}
+            </span>
+          )}
         </div>
       )}
 

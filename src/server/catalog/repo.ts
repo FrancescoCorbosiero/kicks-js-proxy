@@ -121,6 +121,7 @@ export interface CatalogPageItem {
   sku: string;
   title: string;
   brand: string;
+  source: string; // "kicksdb" | feed name — provenance badge in the grid
   image: string;
   minAsk: number | null;
   variantCount: number;
@@ -192,6 +193,7 @@ export async function listCatalogPage(
           sku: catalogProducts.sku,
           title: catalogProducts.title,
           brand: catalogProducts.brand,
+          source: catalogProducts.source,
           image: catalogProducts.image,
           minAsk: catalogProducts.minAsk,
           variantCount: catalogProducts.variantCount,
@@ -211,6 +213,7 @@ export async function listCatalogPage(
         sku: r.sku,
         title: r.title,
         brand: r.brand,
+        source: r.source,
         image: r.image,
         minAsk: r.minAsk,
         variantCount: r.variantCount,
@@ -284,7 +287,11 @@ export async function getCatalogEntry(market: string, sku: string): Promise<Cata
   }
 }
 
-/** SKUs whose prices are past the TTL, oldest first (the refresh feed's queue). */
+/**
+ * KicksDB-sourced SKUs whose prices are past the TTL, oldest first (the
+ * refresh feed's queue). Feed-sourced entries are refreshed by their own
+ * feed's sync, never by KicksDB lookups that would just miss.
+ */
 export async function listStaleSkus(
   market: string,
   ttlSeconds: number,
@@ -295,7 +302,13 @@ export async function listStaleSkus(
     const rows = await db
       .select({ sku: catalogProducts.sku })
       .from(catalogProducts)
-      .where(and(eq(catalogProducts.market, market), lt(catalogProducts.fetchedAt, threshold)))
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          eq(catalogProducts.source, "kicksdb"),
+          lt(catalogProducts.fetchedAt, threshold),
+        ),
+      )
       .orderBy(catalogProducts.fetchedAt)
       .limit(limit);
     return rows.map((r) => r.sku);
@@ -305,14 +318,20 @@ export async function listStaleSkus(
   }
 }
 
-/** How many catalog entries are past the TTL for a market. */
+/** How many KicksDB-sourced entries are past the TTL for a market. */
 export async function countStale(market: string, ttlSeconds: number): Promise<number> {
   const threshold = new Date(Date.now() - ttlSeconds * 1000);
   try {
     const rows = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(catalogProducts)
-      .where(and(eq(catalogProducts.market, market), lt(catalogProducts.fetchedAt, threshold)));
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          eq(catalogProducts.source, "kicksdb"),
+          lt(catalogProducts.fetchedAt, threshold),
+        ),
+      );
     return rows[0]?.n ?? 0;
   } catch (e) {
     console.warn("[catalog] stale count skipped (cache unavailable):", describeDbError(e));
@@ -344,6 +363,7 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
   const values = products.map((p) => ({
     market,
     sku: skuKey(p.sku),
+    source: p.source ?? "kicksdb",
     stockxId: p.stockxId,
     title: p.title,
     brand: p.brand,
@@ -363,6 +383,7 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
       .onConflictDoUpdate({
         target: [catalogProducts.market, catalogProducts.sku],
         set: {
+          source: sql`excluded.source`,
           stockxId: sql`excluded.stockx_id`,
           title: sql`excluded.title`,
           brand: sql`excluded.brand`,
@@ -378,6 +399,25 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
   } catch (e) {
     console.warn("[catalog] write skipped (cache unavailable):", describeDbError(e));
   }
+}
+
+/** Provenance of existing entries — feed syncs must never overwrite kicksdb rows. */
+export async function getCatalogSources(
+  market: string,
+  skus: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (skus.length === 0) return out;
+  try {
+    const rows = await db
+      .select({ sku: catalogProducts.sku, source: catalogProducts.source })
+      .from(catalogProducts)
+      .where(and(eq(catalogProducts.market, market), inArray(catalogProducts.sku, skus.map(skuKey))));
+    for (const r of rows) out.set(r.sku, r.source);
+  } catch (e) {
+    console.warn("[catalog] sources skipped (cache unavailable):", describeDbError(e));
+  }
+  return out;
 }
 
 /** Surface the underlying pg message (drizzle wraps it) for actionable logs. */
