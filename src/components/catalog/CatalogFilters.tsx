@@ -48,7 +48,14 @@ export function CatalogFilters({
     timer.current = setTimeout(() => push(updates), DEBOUNCE_MS);
   }
 
-  const hasFilters = !!(params.q || params.fresh || params.min || params.max || params.brand);
+  const hasFilters = !!(
+    params.q ||
+    params.fresh ||
+    params.owner ||
+    params.min ||
+    params.max ||
+    params.brand
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -72,6 +79,17 @@ export function CatalogFilters({
         <option value="all">{t.discovery.freshness.all}</option>
         <option value="fresh">{t.discovery.freshness.fresh}</option>
         <option value="stale">{t.discovery.freshness.stale}</option>
+      </select>
+
+      <select
+        aria-label={t.discovery.ownerLabel}
+        className={SELECT_CLASSES}
+        value={String(params.owner ?? "all")}
+        onChange={(e) => push({ owner: e.target.value === "all" ? undefined : e.target.value })}
+      >
+        <option value="all">{t.discovery.owners.all}</option>
+        <option value="kicksdb">{t.discovery.owners.kicksdb}</option>
+        <option value="goldensneakers">{t.discovery.owners.goldensneakers}</option>
       </select>
 
       <Input

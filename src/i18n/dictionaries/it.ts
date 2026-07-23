@@ -226,7 +226,10 @@ export const it = {
     sizes: (n: number) => `${n} taglie`,
     freshBadge: "prezzi freschi",
     staleBadge: "da aggiornare",
-    gsBadgeHint: "Registrato dal feed GoldenSneakers — non presente su KicksDB.",
+    gsBadgeHint:
+      "Prodotto posseduto dal feed GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal feed.",
+    ownerLabel: "Fonte",
+    owners: { all: "Tutte le fonti", kicksdb: "KicksDB", goldensneakers: "GoldenSneakers" },
     empty: "Nessun prodotto con questi filtri.",
     emptyCatalog: "Il catalogo è vuoto — aggiungi SKU dalla scheda Importa o esegui una sincronizzazione.",
     page: (p: number, n: number) => `Pagina ${p} di ${n}`,
@@ -243,6 +246,7 @@ export const it = {
     syncThis: "Sincronizza su Woo",
     headerAsk: "Ask",
     asks: (n: number) => `${n} ask`,
+    qty: (n: number) => (n === 0 ? "esaurito" : `${n} ${n === 1 ? "pezzo" : "pezzi"}`),
     fetchedAgo: (days: number) =>
       days === 0 ? "Prezzi aggiornati oggi" : `Prezzi aggiornati ${days} ${days === 1 ? "giorno" : "giorni"} fa`,
     addedOn: (date: string) => `In catalogo dal ${date}`,
@@ -387,6 +391,11 @@ export const it = {
       reportUpdated: (n: number) => `${n} aggiornate`,
       reportDeactivated: (n: number) => `${n} disattivate`,
       reportRegistered: (n: number) => `${n} prodotti nel catalogo (fonte GS)`,
+      browseTitle: "Esplora il feed",
+      browsePlaceholder: "Cerca per SKU, nome o brand…",
+      browseEmpty: "Nessun prodotto nel feed con questa ricerca.",
+      browseInactive: "non più nel feed",
+      browseQty: (n: number) => `${n} pz`,
       runLine: (added: number, updated: number, rejected: number) =>
         `+${added} · ${updated} aggiornate · ${rejected} rifiutate`,
     },

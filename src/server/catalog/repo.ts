@@ -105,11 +105,14 @@ export async function listCatalogEntries(
 
 export type CatalogSort = "brand" | "title" | "added" | "fetched" | "priceAsc" | "priceDesc";
 export type CatalogFreshness = "all" | "fresh" | "stale";
+/** Ownership lens: who currently DRIVES the product (feed coverage, not row provenance). */
+export type CatalogOwnerFilter = "all" | "kicksdb" | "goldensneakers";
 
 export interface CatalogPageFilters {
   brand?: string;
   q?: string; // substring on SKU / title
   freshness?: CatalogFreshness;
+  owner?: CatalogOwnerFilter;
   priceMin?: number;
   priceMax?: number;
   sort?: CatalogSort;
@@ -117,11 +120,18 @@ export interface CatalogPageFilters {
   perPage?: number;
 }
 
+/** True when an active GoldenSneakers row covers this catalog SKU (→ GS owns it). */
+const GS_OWNED_SQL = sql<boolean>`exists (
+  select 1 from "feed_items" fi
+  where fi."feed" = 'goldensneakers' and fi."active" = true and fi."sku" = ${catalogProducts.sku}
+)`;
+
 export interface CatalogPageItem {
   sku: string;
   title: string;
   brand: string;
-  source: string; // "kicksdb" | feed name — provenance badge in the grid
+  source: string; // row provenance: "kicksdb" | feed name
+  gsOwned: boolean; // the feed currently DRIVES this product (grid badge)
   image: string;
   minAsk: number | null;
   variantCount: number;
@@ -147,6 +157,8 @@ function pageConditions(market: string, f: CatalogPageFilters, threshold: Date):
   }
   if (f.freshness === "fresh") conds.push(gte(catalogProducts.fetchedAt, threshold));
   if (f.freshness === "stale") conds.push(lt(catalogProducts.fetchedAt, threshold));
+  if (f.owner === "goldensneakers") conds.push(sql`${GS_OWNED_SQL}`);
+  if (f.owner === "kicksdb") conds.push(sql`not ${GS_OWNED_SQL}`);
   if (f.priceMin != null) conds.push(gte(catalogProducts.minAsk, f.priceMin));
   if (f.priceMax != null) conds.push(lte(catalogProducts.minAsk, f.priceMax));
   return conds;
@@ -194,6 +206,7 @@ export async function listCatalogPage(
           title: catalogProducts.title,
           brand: catalogProducts.brand,
           source: catalogProducts.source,
+          gsOwned: GS_OWNED_SQL,
           image: catalogProducts.image,
           minAsk: catalogProducts.minAsk,
           variantCount: catalogProducts.variantCount,
@@ -214,6 +227,7 @@ export async function listCatalogPage(
         title: r.title,
         brand: r.brand,
         source: r.source,
+        gsOwned: r.gsOwned === true,
         image: r.image,
         minAsk: r.minAsk,
         variantCount: r.variantCount,
