@@ -259,6 +259,12 @@ export const it = {
     desc: "Recupera lo stato dello store via REST, calcola il piano di rivalutazione per variante e applica le modifiche selezionate — prima in prova, poi live.",
     notConfigured:
       "REST WooCommerce non configurato — imposta WOO_BASE_URL, WOO_CONSUMER_KEY e WOO_CONSUMER_SECRET nell'ambiente.",
+    oneClick: {
+      title: "Sincronizza catalogo",
+      button: "Sincronizza",
+      hint: "Ogni prodotto viene confrontato con la SUA fonte (KicksDB o GoldenSneakers) dalle cache locali: prezzi, stock e taglie. Vengono calcolate solo le differenze e ti viene mostrata la prova completa — non viene scritto NULLA sullo store finché non premi Applica. SEO, media, descrizioni e categorie non vengono mai toccati.",
+      ready: "Prova pronta qui sotto — controlla il riepilogo e premi Applica.",
+    },
     pull: {
       title: "Stato dello store",
       none: "Nessuno stato dello store — esegui un pull per iniziare.",

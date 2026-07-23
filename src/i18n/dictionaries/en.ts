@@ -251,6 +251,12 @@ export const en: Dictionary = {
     desc: "Pull live store state over REST, compute the per-variant repricing plan, and apply the selected changes — dry run first, then live.",
     notConfigured:
       "WooCommerce REST is not configured — set WOO_BASE_URL, WOO_CONSUMER_KEY and WOO_CONSUMER_SECRET in the environment.",
+    oneClick: {
+      title: "Sync the catalog",
+      button: "Sync",
+      hint: "Every product is compared against ITS source (KicksDB or GoldenSneakers) from the local caches: prices, stock and sizes. Only the differences are computed and the full dry run is shown — NOTHING is written to the store until you press Apply. SEO, media, descriptions and categories are never touched.",
+      ready: "Dry run ready below — review the summary and press Apply.",
+    },
     pull: {
       title: "Store state",
       none: "No store state yet — run a pull to get started.",
