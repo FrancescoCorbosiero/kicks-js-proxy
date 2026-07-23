@@ -91,6 +91,30 @@ export async function runGsSyncFromApi(): Promise<GsSyncActionResult> {
   }
 }
 
+const GsBrowseSchema = z.object({
+  q: z.string().optional(),
+  page: z.number().int().min(1).default(1),
+});
+
+/** Browse the GS feed as products (the "what did the sync import?" table). */
+export async function listGsFeed(input: z.infer<typeof GsBrowseSchema>): Promise<{
+  ok: boolean;
+  error?: string;
+  page?: import("@/server/feeds/repo").FeedProductsPage;
+}> {
+  const parsed = GsBrowseSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const { listFeedProductsPage, GS_FEED } = await import("@/server/feeds/repo");
+    return {
+      ok: true,
+      page: await listFeedProductsPage(GS_FEED, { q: parsed.data.q, page: parsed.data.page }),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 const GsUploadSchema = z.object({ text: z.string().min(2) });
 
 /** Sync from a manually uploaded/pasted GS JSON (API-less fallback). */

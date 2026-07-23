@@ -234,7 +234,9 @@ function VariantRow({
         {variant.ask != null ? (
           <>
             <div>{eur.format(variant.ask)}</div>
-            <div className="text-[10px] text-faint">{t.drawer.asks(variant.asks)}</div>
+            <div className={`text-[10px] ${data.owner === "goldensneakers" && variant.asks === 0 ? "text-skip" : "text-faint"}`}>
+              {data.owner === "goldensneakers" ? t.drawer.qty(variant.asks) : t.drawer.asks(variant.asks)}
+            </div>
           </>
         ) : (
           <span className="text-faint">—</span>

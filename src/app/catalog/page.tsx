@@ -4,6 +4,7 @@ import {
   listBrandCounts,
   listCatalogPage,
   type CatalogFreshness,
+  type CatalogOwnerFilter,
   type CatalogSort,
 } from "@/server/catalog/repo";
 import { getServerDictionary } from "@/i18n/server";
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 
 const SORTS: CatalogSort[] = ["brand", "title", "added", "fetched", "priceAsc", "priceDesc"];
 const FRESHNESS: CatalogFreshness[] = ["all", "fresh", "stale"];
+const OWNERS: CatalogOwnerFilter[] = ["all", "kicksdb", "goldensneakers"];
 
 function toNumber(x: string | undefined): number | undefined {
   if (!x) return undefined;
@@ -45,6 +47,9 @@ async function loadPageData(sp: Search) {
   const freshness = FRESHNESS.includes(sp.fresh as CatalogFreshness)
     ? (sp.fresh as CatalogFreshness)
     : "all";
+  const owner = OWNERS.includes(sp.owner as CatalogOwnerFilter)
+    ? (sp.owner as CatalogOwnerFilter)
+    : "all";
 
   // The current URL params — the base every filter/brand/page link merges over.
   const params: QueryParams = {
@@ -52,6 +57,7 @@ async function loadPageData(sp: Search) {
     brand: sp.brand,
     q: sp.q,
     fresh: sp.fresh,
+    owner: sp.owner,
     min: sp.min,
     max: sp.max,
     sort: sp.sort,
@@ -63,6 +69,7 @@ async function loadPageData(sp: Search) {
       brand: sp.brand,
       q: sp.q,
       freshness,
+      owner,
       priceMin: toNumber(sp.min),
       priceMax: toNumber(sp.max),
       sort,
@@ -183,7 +190,7 @@ export default async function CatalogPage({
                       <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-faint">
                         {item.brand || "—"}
                       </span>
-                      {item.source !== "kicksdb" && (
+                      {item.gsOwned && (
                         <span
                           className="shrink-0 rounded-full bg-warn/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-warn"
                           title={t.discovery.gsBadgeHint}

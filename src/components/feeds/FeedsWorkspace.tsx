@@ -1,16 +1,20 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   getFeedsState,
+  listGsFeed,
   runGsSyncFromApi,
   runKicksdbRefresh,
   uploadGsFeed,
   type FeedsState,
   type GsSyncActionResult,
 } from "@/server/actions/feeds";
+import type { FeedProductsPage } from "@/server/feeds/repo";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /** Safety cap on refresh rounds per click (100 SKUs/round). */
 const MAX_ROUNDS = 50;
@@ -255,6 +259,126 @@ function GsFeedCard({ state, onSynced }: { state: FeedsState; onSynced: () => Pr
           ))}
         </ul>
       )}
+
+      {state.gs.activeRows > 0 && <GsFeedBrowser />}
     </section>
+  );
+}
+
+/** The feed explorer: browse exactly what the sync imported, product by product. */
+function GsFeedBrowser() {
+  const { t } = useI18n();
+  const [q, setQ] = React.useState("");
+  const [page, setPage] = React.useState<FeedProductsPage | null>(null);
+  const [pending, startTransition] = React.useTransition();
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = React.useCallback((query: string, pageNo: number) => {
+    startTransition(async () => {
+      const res = await listGsFeed({ q: query.trim() || undefined, page: pageNo });
+      if (res.ok && res.page) setPage(res.page);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    load("", 1);
+  }, [load]);
+
+  function onSearch(value: string) {
+    setQ(value);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => load(value, 1), 350);
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-faint">
+          {t.feeds.gs.browseTitle}
+        </span>
+        <Input
+          className="w-full sm:w-64"
+          placeholder={t.feeds.gs.browsePlaceholder}
+          value={q}
+          onChange={(e) => onSearch(e.target.value)}
+        />
+        {pending && <span className="spin h-3.5 w-3.5 rounded-full border-2 border-accent/30 border-t-accent" />}
+        {page && (
+          <span className="ml-auto text-xs text-faint tnum">
+            {t.discovery.total(page.total)}
+          </span>
+        )}
+      </div>
+
+      {page && page.items.length === 0 && (
+        <p className="text-sm text-muted">{t.feeds.gs.browseEmpty}</p>
+      )}
+
+      {page && page.items.length > 0 && (
+        <ul className="divide-y divide-line/60 rounded-lg border border-line bg-surface-2">
+          {page.items.map((p) => (
+            <li key={p.sku} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+              <Link
+                href={`/catalog?product=${encodeURIComponent(p.sku)}`}
+                className="font-mono text-xs font-semibold text-accent-text underline-offset-2 hover:underline"
+              >
+                {p.sku}
+              </Link>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted">
+                {[p.brand, p.name].filter(Boolean).join(" · ")}
+              </span>
+              {!p.active && (
+                <span className="rounded-full bg-skip/12 px-2 py-0.5 text-[10px] font-semibold text-skip">
+                  {t.feeds.gs.browseInactive}
+                </span>
+              )}
+              <span className="text-xs font-medium text-muted tnum">
+                {t.feeds.gs.browseQty(p.totalQty)}
+              </span>
+              <span className="flex w-full flex-wrap gap-1 pl-0.5 pt-0.5">
+                {p.sizes.map((s) => (
+                  <span
+                    key={s.label}
+                    className={`rounded-md border px-1.5 py-px text-[10px] font-medium tnum ${
+                      s.active && s.qty > 0
+                        ? "border-line bg-surface text-ink"
+                        : "border-line/60 text-faint line-through"
+                    }`}
+                    title={s.active ? `${s.qty} pz` : t.feeds.gs.browseInactive}
+                  >
+                    {s.label}
+                    {s.active && s.qty > 0 ? ` ×${s.qty}` : ""}
+                  </span>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {page && page.pageCount > 1 && (
+        <div className="flex items-center justify-between text-xs">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={page.page <= 1 || pending}
+            onClick={() => load(q, page.page - 1)}
+          >
+            ← {t.discovery.prev}
+          </Button>
+          <span className="text-faint tnum">{t.discovery.page(page.page, page.pageCount)}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={page.page >= page.pageCount || pending}
+            onClick={() => load(q, page.page + 1)}
+          >
+            {t.discovery.next} →
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

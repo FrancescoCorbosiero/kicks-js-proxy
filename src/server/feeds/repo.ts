@@ -130,6 +130,98 @@ export async function knownOffersBySku(
   return out;
 }
 
+export interface FeedProductRow {
+  sku: string;
+  name: string;
+  brand: string;
+  image: string;
+  active: boolean; // any active size left
+  totalQty: number; // sum over active sizes
+  sizes: { label: string; qty: number; active: boolean }[];
+}
+
+export interface FeedProductsPage {
+  items: FeedProductRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+}
+
+/**
+ * Browse the feed as products: one row per SKU with its size run — the
+ * operator-facing answer to "what exactly did the sync import?".
+ */
+export async function listFeedProductsPage(
+  feed: string,
+  opts: { q?: string; page?: number; perPage?: number } = {},
+): Promise<FeedProductsPage> {
+  const perPage = Math.min(Math.max(opts.perPage ?? 20, 1), 50);
+  const page = Math.max(opts.page ?? 1, 1);
+  const like = opts.q?.trim() ? `%${opts.q.trim()}%` : null;
+  const conds = [eq(feedItems.feed, feed)];
+  if (like) {
+    conds.push(
+      sql`(${feedItems.sku} ilike ${like} or ${feedItems.productName} ilike ${like} or ${feedItems.brandName} ilike ${like})`,
+    );
+  }
+  const where = and(...conds);
+
+  try {
+    const [countRows, skuRows] = await Promise.all([
+      db
+        .select({ n: sql<number>`count(distinct ${feedItems.sku})::int` })
+        .from(feedItems)
+        .where(where),
+      db
+        .select({ sku: feedItems.sku })
+        .from(feedItems)
+        .where(where)
+        .groupBy(feedItems.sku)
+        .orderBy(feedItems.sku)
+        .limit(perPage)
+        .offset((page - 1) * perPage),
+    ]);
+    const skus = skuRows.map((r) => r.sku);
+    const total = countRows[0]?.n ?? 0;
+
+    const rows = skus.length
+      ? await db
+          .select()
+          .from(feedItems)
+          .where(and(eq(feedItems.feed, feed), inArray(feedItems.sku, skus)))
+          .orderBy(feedItems.sku, feedItems.euNorm)
+      : [];
+
+    const bySku = new Map<string, FeedItemRow[]>();
+    for (const r of rows) {
+      const list = bySku.get(r.sku) ?? [];
+      list.push(r);
+      bySku.set(r.sku, list);
+    }
+
+    return {
+      items: skus.map((sku) => {
+        const list = bySku.get(sku) ?? [];
+        const first = list[0];
+        return {
+          sku,
+          name: first?.productName ?? "",
+          brand: first?.brandName ?? "",
+          image: first?.image ?? "",
+          active: list.some((r) => r.active),
+          totalQty: list.reduce((n, r) => n + (r.active ? r.quantity : 0), 0),
+          sizes: list.map((r) => ({ label: r.sizeLabel, qty: r.quantity, active: r.active })),
+        };
+      }),
+      total,
+      page,
+      pageCount: Math.max(1, Math.ceil(total / perPage)),
+    };
+  } catch {
+    return { items: [], total: 0, page: 1, pageCount: 1 };
+  }
+}
+
 export interface FeedStats {
   activeSkus: number;
   activeRows: number;
