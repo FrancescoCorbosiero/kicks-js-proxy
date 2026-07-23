@@ -190,6 +190,20 @@ export class WooClient {
       this.retry,
     );
   }
+
+  /**
+   * Create a parent product and return its new id. Woo enforces SKU uniqueness,
+   * so a duplicate SKU throws (product_invalid_sku) — the caller reports it
+   * instead of ever making a second product for the same style code.
+   */
+  async createProduct(body: Record<string, unknown>): Promise<{ id: number }> {
+    const raw = await requestJson(
+      this.apiUrl("products"),
+      { method: "POST", headers: this.headers(), body: JSON.stringify(body) },
+      this.retry,
+    );
+    return z.looseObject({ id: z.number() }).parse(raw);
+  }
 }
 
 /** True when the Woo REST credentials are present in env. */

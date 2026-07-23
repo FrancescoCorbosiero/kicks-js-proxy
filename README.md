@@ -73,6 +73,16 @@ filters/sorts/paginates in SQL.
      Every run lands in `apply_audit`; after a live run the stored snapshot is
      patched to the post-apply state, so the next preview reflects reality
      without a re-pull.
+  - **Create missing products** (`src/server/woo/create.ts`): the apply only
+    *updates* existing products, so a source SKU with no Woo parent (most of
+    the GoldenSneakers assortment) is otherwise unreachable. This dedicated
+    panel finds every SKU a source of truth carries but the store lacks and
+    creates the whole product — parent (`type: variable`, `pa_taglia`) +
+    variations — from its owner's data, reusing the rebuild's variation
+    planner so identity matches. Minimal by design: no media (WP sideload is
+    slow — a separate phase), draft by default. Dry-run + chunked bulk.
+  - **Rebuild** (`src/server/woo/rebuild.ts`): obliterate + re-create the
+    variation set of existing products too broken to patch.
 - **Import** (`/import`) — manual textarea or CSV/TXT/TSV upload. SKUs are
   extracted, chunked, GET-verified and upserted through the same pipeline;
   each operator action is one `ingestion_runs` row (added / known / rejected).

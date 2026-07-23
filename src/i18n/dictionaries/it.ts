@@ -341,6 +341,28 @@ export const it = {
       bulkProgress: (done: number, total: number) => `${done}/${total} prodotti`,
       bulkErrors: (n: number) => `${n} prodotti falliti — mostra`,
     },
+    create: {
+      title: "Crea prodotti mancanti",
+      tag: "nuovi prodotti dai feed",
+      desc: "Crea sullo store i prodotti che le fonti conoscono ma il tuo Woo non ha ancora (soprattutto GoldenSneakers). Ogni prodotto nasce dai dati del suo proprietario con la stessa identità pulita: taglie EU, SKU standard, GTIN, prezzi, stock reale (GS). Il prodotto padre è minimale — nome, SKU, pa_taglia — SENZA immagini di default (WP le scarica lentamente) e in bozza, così un run non riversa prodotti spogli sullo storefront.",
+      compute: "Calcola i prodotti mancanti",
+      scope: (gs: number, kx: number) =>
+        `${gs} da GoldenSneakers${kx > 0 ? ` · ${kx} da KicksDB (esclusi)` : ""}`,
+      includeKicksdb: (n: number) => `Includi anche ${n} da KicksDB`,
+      statusLabel: "Stato",
+      draft: "Bozza (consigliato)",
+      publish: "Pubblicato (subito in vendita)",
+      images: "Includi immagini",
+      imagesHint: "WordPress scarica ogni immagine al momento della creazione — lento su molti prodotti. Meglio la fase media dedicata.",
+      create: (n: number) => `Crea ${n} prodotti`,
+      dryTitle: (n: number, publish: boolean) =>
+        `Verrebbero creati ${n} prodotti${publish ? " (PUBBLICATI)" : " (in bozza)"}:`,
+      sizesCount: (n: number) => `${n} taglie`,
+      progress: (done: number, total: number) => `${done}/${total} prodotti`,
+      doneLine: (created: number, variations: number, failed: number) =>
+        `${created} creati · ${variations} varianti${failed > 0 ? ` · ${failed} falliti` : ""}`,
+      failed: "Creazione fallita",
+    },
     history: {
       title: "Storico sincronizzazioni",
       empty: "Nessuna esecuzione registrata.",

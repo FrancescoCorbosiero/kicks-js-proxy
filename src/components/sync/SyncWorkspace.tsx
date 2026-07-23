@@ -26,6 +26,7 @@ import { PricingBar } from "@/components/pricing/PricingBar";
 import { ProductGroup } from "@/components/preview/ProductGroup";
 import { NotFoundCard } from "@/components/preview/NotFoundCard";
 import { RebuildPanel } from "./RebuildPanel";
+import { CreatePanel } from "./CreatePanel";
 
 const selKey = (planId: string, variantId: string) => `${planId}:${variantId}`;
 
@@ -756,6 +757,17 @@ export function SyncWorkspace({
             )}
           </div>
         </div>
+      )}
+
+      {/* Create the products the feeds carry but the store doesn't have yet */}
+      {hasSnapshot && (
+        <CreatePanel
+          disabled={!initialState.wooConfigured || pulling || applying != null}
+          onDone={() => {
+            void refreshHistory();
+            router.refresh();
+          }}
+        />
       )}
 
       {/* Destructive standardization: obliterate + re-create variation sets */}

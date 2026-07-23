@@ -16,6 +16,13 @@ import {
 } from "@/server/woo/apply";
 import { wooConfigured } from "@/server/woo/client";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
+import {
+  createProducts,
+  listCreatableProducts,
+  type CreatableEntry,
+  type CreateOutcome,
+  type CreateStatus,
+} from "@/server/woo/create";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -164,6 +171,63 @@ export async function rebuildStoreProducts(
     return { ok: true, outcome };
   } catch (e) {
     return { ok: false, error: errMessage(e) };
+  }
+}
+
+const CreateSchema = z.object({
+  skus: z.array(z.string().min(1)).min(1).max(100),
+  dryRun: z.boolean(),
+  status: z.enum(["draft", "publish"]).default("draft"),
+  withImages: z.boolean().default(false),
+  auditId: z.uuid().optional(),
+});
+
+export interface CreateActionResult {
+  ok: boolean;
+  error?: string;
+  outcome?: CreateOutcome;
+}
+
+/**
+ * Create whole new products on the store from their owner's data (GS feed or
+ * KicksDB catalog) — the products the feeds carry but the store doesn't.
+ * Parent + variations; dry-run first.
+ */
+export async function createStoreProducts(
+  input: z.infer<typeof CreateSchema>,
+): Promise<CreateActionResult> {
+  const parsed = CreateSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const outcome = await createProducts(parsed.data.skus, parsed.data.dryRun, {
+      status: parsed.data.status as CreateStatus,
+      withImages: parsed.data.withImages,
+      auditId: parsed.data.auditId,
+    });
+    return { ok: true, outcome };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
+  }
+}
+
+/** The products a source of truth carries that the store doesn't have yet. */
+export async function listCreatable(): Promise<{
+  ok: boolean;
+  error?: string;
+  items: CreatableEntry[];
+  gs: number;
+  kicksdb: number;
+}> {
+  try {
+    const items = await listCreatableProducts();
+    return {
+      ok: true,
+      items,
+      gs: items.filter((i) => i.owner === "goldensneakers").length,
+      kicksdb: items.filter((i) => i.owner === "kicksdb").length,
+    };
+  } catch (e) {
+    return { ok: false, error: errMessage(e), items: [], gs: 0, kicksdb: 0 };
   }
 }
 
