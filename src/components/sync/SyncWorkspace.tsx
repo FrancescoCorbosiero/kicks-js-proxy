@@ -85,6 +85,9 @@ export function SyncWorkspace({
   // Align sizes (delete orphan/duplicate variations, realign pa_taglia) before
   // pricing — the standardization pass. Default on.
   const [sanitize, setSanitize] = React.useState(true);
+  // Guided one-click sync: pull (if stale) → preview → dry run, then stop at
+  // the single Apply confirmation. State machine driven by the effect below.
+  const [guided, setGuided] = React.useState(false);
 
   const hasSnapshot = !!snapshotInfo;
 
@@ -160,6 +163,26 @@ export function SyncWorkspace({
   function loadPreview(skus?: string[]) {
     setError(null);
     startTransition(async () => applyResult(await previewFromStore(defaultMarket, skus)));
+  }
+
+  /**
+   * One click, whole flow: refresh the store state when it's old, compute the
+   * per-owner diff (each product from ITS source's local cache), run the dry
+   * run — then wait for the one Apply confirmation. Nothing is written before
+   * that confirmation.
+   */
+  const SNAPSHOT_FRESH_MS = 60 * 60 * 1000; // re-pull when older than an hour
+  function runGuidedSync() {
+    if (pulling || pending || applying) return;
+    setGuided(true);
+    setScope(undefined);
+    const age = snapshotInfo ? Date.now() - new Date(snapshotInfo.uploadedAt).getTime() : Infinity;
+    if (!hasSnapshot || age > SNAPSHOT_FRESH_MS) {
+      void runPull(pullProgress?.status === "running" ? pullProgress.runId : undefined);
+      // runPull chains loadPreview() on completion; the effect takes over after.
+    } else {
+      loadPreview();
+    }
   }
 
   // A drawer "Sync to Woo" link seeds ?skus= — auto-preview that subset once.
@@ -280,6 +303,24 @@ export function SyncWorkspace({
   const dryHasWork =
     dryValid && dry != null && (dry.outcome.variations > 0 || (dry.outcome.cleanup?.deletions ?? 0) > 0 || (dry.outcome.cleanup?.taglieRealigned ?? 0) > 0 || (dry.outcome.cleanup?.stockSynthesized ?? 0) > 0 || (dry.outcome.cleanup?.parentsRealigned ?? 0) > 0);
 
+  // Guided step 3: once the preview is in and idle, fire the dry run exactly once.
+  React.useEffect(() => {
+    if (!guided) return;
+    if (pulling || pending || applying != null) return;
+    if (error || applyError || pullError) {
+      setGuided(false); // something broke — surface it, stop driving
+      return;
+    }
+    if (plans.length === 0) return; // still waiting for the preview
+    if (dryValid) {
+      setGuided(false); // dry run done — the Apply button is the only step left
+      return;
+    }
+    if (canRun) runDry();
+    else setGuided(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guided, pulling, pending, applying, plans, dryValid, error, applyError, pullError]);
+
   async function refreshHistory() {
     const state = await getSyncState();
     setHistory(state.history);
@@ -345,6 +386,39 @@ export function SyncWorkspace({
 
   return (
     <div className="space-y-5">
+      {/* One-click sync: per-owner lookup, one summary, one confirmation */}
+      <div className="relative flex flex-wrap items-center gap-4 overflow-hidden rounded-xl border border-accent/40 bg-accent/5 p-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold">{t.sync.oneClick.title}</div>
+          <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted">
+            {t.sync.oneClick.hint}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="accent"
+          className="h-11 px-6 text-sm font-bold"
+          onClick={runGuidedSync}
+          disabled={!initialState.wooConfigured || pulling || pending || applying != null}
+        >
+          {guided || pulling || pending ? (
+            <>
+              <span className="spin h-4 w-4 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
+              {pulling
+                ? t.sync.pull.pulling
+                : pending
+                  ? t.sync.preview.loading
+                  : t.sync.apply.dryRunning}
+            </>
+          ) : (
+            t.sync.oneClick.button
+          )}
+        </Button>
+        {dryValid && !guided && (
+          <p className="w-full text-xs font-medium text-up">{t.sync.oneClick.ready}</p>
+        )}
+      </div>
+
       {/* Pricing rule + store-wide discount switch — changes recompute the plan */}
       <PricingBar
         initial={pricing}
