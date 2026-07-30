@@ -7,6 +7,7 @@ export const en: Dictionary = {
     description: "StockX → WooCommerce repricing & sync",
   },
   header: {
+    navDashboard: "Overview",
     navCatalog: "Catalog",
     navSync: "Sync",
     navImport: "Import",
@@ -15,12 +16,56 @@ export const en: Dictionary = {
     toggleTheme: "Toggle theme",
     language: "Language",
   },
-  home: {
-    badge: "StockX → WooCommerce",
-    titleLead: "Explore the catalog, ",
-    titleAccent: "own every price",
-    desc: "An ever-growing KicksDB catalog: browse it, lock manual prices, and sync your WooCommerce store over REST with a per-variant preview before anything is applied.",
-    cta: "Open the catalog",
+  dashboard: {
+    title: "Overview",
+    desc: "The state of your catalog and store at a glance — everything starts here.",
+    wooNotConfigured:
+      "The WooCommerce connection is not configured: syncing is unavailable. Ask whoever manages the server to set the store credentials.",
+    pullRunning: (progress) => `Downloading the store… ${progress} products`,
+    syncCardTitle: "Sync the store",
+    syncCardDesc:
+      "Compare the store's prices against their sources and apply the differences. Nothing is written without your confirmation.",
+    syncCardCta: "Go to sync",
+    catalogCardTitle: "Browse the catalog",
+    catalogCardDesc: "Find a product, check its price size by size, and lock the ones you decide.",
+    catalogCardCta: "Open the catalog",
+    importCardTitle: "Add products",
+    importCardDesc:
+      "Paste a list of SKU codes or upload a file: recognized products join the catalog.",
+    importCardCta: "Import products",
+    statCatalog: "Products in catalog",
+    statKicksdb: "with StockX prices",
+    statGs: "managed by the supplier",
+    statStale: "Prices to refresh",
+    statStaleHint:
+      "These products carry StockX prices older than the limit. Refresh them in one click from the Feeds tab.",
+    statStaleCta: "Refresh now",
+    statStaleOk: "All prices are up to date",
+    statStoreLine: (n) => `Store: ${n} products`,
+    statStoreNever: "Store state never downloaded — start from sync",
+    statFeed: "Supplier price list",
+    statFeedLine: (skus, rows) => `${skus} products · ${rows} active sizes`,
+    lastSync: (when) => `Last sync ${when}`,
+    lastSyncNever: "No sync has run yet",
+    snapshotUpdated: (when) => `updated ${when}`,
+    activityTitle: "Recent activity",
+    activityEmpty: "No activity yet — start by importing some products.",
+    act: {
+      manual: "Manual import",
+      file: "File import",
+      preview: "Catalog preview",
+      kicksdbRefresh: "StockX price refresh",
+      gsSync: "Supplier price list sync",
+      dryRun: "Sync dry run",
+      applied: "Store sync",
+      applyLine: (n) => `${n} ${n === 1 ? "price written" : "prices written"}`,
+    },
+    ago: {
+      now: "just now",
+      minutes: (n) => `${n} min ago`,
+      hours: (n) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
+      days: (n) => (n === 1 ? "yesterday" : `${n} days ago`),
+    },
   },
   preview: {
     crumbWorkspace: "Workspace",
@@ -141,7 +186,12 @@ export const en: Dictionary = {
     saleRuleHint: "When on, discounted variations are left unrepriced",
     manualPlaceholder: "Price",
     manualLock: "Lock price",
+    manualLockHint: "Choose this size's price yourself: sync will never overwrite it",
+    manualConfirm: "Lock",
+    manualCancel: "Cancel",
+    manualEditHint: "Hand-locked price — click to change it",
     manualClear: "Unlock",
+    manualClearHint: "Unlock: back to the automatic price",
     locked: "locked",
     saving: "…",
   },
@@ -219,9 +269,19 @@ export const en: Dictionary = {
     freshBadge: "fresh prices",
     staleBadge: "needs refresh",
     gsBadgeHint:
-      "Product owned by the GoldenSneakers feed: sizes, final prices and real stock come from the feed.",
-    ownerLabel: "Source",
-    owners: { all: "All sources", kicksdb: "KicksDB", goldensneakers: "GoldenSneakers" },
+      "Product managed by the GoldenSneakers supplier: sizes, final prices and real stock come from its price list.",
+    tabs: {
+      all: "All",
+      kicksdb: "StockX",
+      kicksdbHint: "Products with automatic StockX prices (via KicksDB)",
+      goldensneakers: "GoldenSneakers",
+      goldensneakersHint:
+        "Products managed by the GoldenSneakers supplier: real sizes, prices and stock from its price list",
+    },
+    lockedHint: (n) =>
+      n === 1
+        ? "1 hand-locked price — sync never touches it"
+        : `${n} hand-locked prices — sync never touches them`,
     empty: "No products match these filters.",
     emptyCatalog: "The catalog is empty — add SKUs from the Import tab or run a sync.",
     page: (p, n) => `Page ${p} of ${n}`,
@@ -244,7 +304,19 @@ export const en: Dictionary = {
     addedOn: (date) => `In catalog since ${date}`,
     gsOwned: "GoldenSneakers",
     gsOwnedHint:
-      "Product owned by the GoldenSneakers feed: sizes, final prices and real stock come from the feed, not KicksDB.",
+      "Product managed by the GoldenSneakers supplier: sizes, final prices and real stock come from its price list, not StockX.",
+    pricesTitle: "Prices by size",
+    lockExplain:
+      "Want to decide a price yourself? Lock it: a locked price is NEVER overwritten by sync. Unlock it whenever you want the automatic price back.",
+    lockAll: (n) => `Lock all (${n})`,
+    unlockAll: (n) => `Unlock all (${n})`,
+    sourceTitle: "Who decides this product's prices",
+    sourceGs: "Supplier",
+    sourceKicksdb: "StockX",
+    sourceGsHint:
+      "Sizes, prices and stock come from the GoldenSneakers supplier price list (automatic).",
+    sourceKicksdbHint:
+      "You forced StockX prices for this product: the supplier price list is ignored.",
   },
   sync: {
     title: "Woo Sync",

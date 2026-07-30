@@ -27,6 +27,7 @@ export function CatalogFilters({
   const { t } = useI18n();
   const router = useRouter();
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPending, startTransition] = React.useTransition();
 
   // Local echo of the text inputs so typing stays responsive between debounces.
   const [q, setQ] = React.useState(String(params.q ?? ""));
@@ -38,8 +39,12 @@ export function CatalogFilters({
   }, []);
 
   function push(updates: QueryParams) {
-    router.replace(`/catalog${mergeQuery(params, { ...updates, page: undefined })}`, {
-      scroll: false,
+    // Inside a transition so the current grid stays interactive and we can
+    // show a pending spinner instead of a frozen page.
+    startTransition(() => {
+      router.replace(`/catalog${mergeQuery(params, { ...updates, page: undefined })}`, {
+        scroll: false,
+      });
     });
   }
 
@@ -48,14 +53,8 @@ export function CatalogFilters({
     timer.current = setTimeout(() => push(updates), DEBOUNCE_MS);
   }
 
-  const hasFilters = !!(
-    params.q ||
-    params.fresh ||
-    params.owner ||
-    params.min ||
-    params.max ||
-    params.brand
-  );
+  // The provider tab (owner) is navigation, not a filter — clearing keeps it.
+  const hasFilters = !!(params.q || params.fresh || params.min || params.max || params.brand);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -79,17 +78,6 @@ export function CatalogFilters({
         <option value="all">{t.discovery.freshness.all}</option>
         <option value="fresh">{t.discovery.freshness.fresh}</option>
         <option value="stale">{t.discovery.freshness.stale}</option>
-      </select>
-
-      <select
-        aria-label={t.discovery.ownerLabel}
-        className={SELECT_CLASSES}
-        value={String(params.owner ?? "all")}
-        onChange={(e) => push({ owner: e.target.value === "all" ? undefined : e.target.value })}
-      >
-        <option value="all">{t.discovery.owners.all}</option>
-        <option value="kicksdb">{t.discovery.owners.kicksdb}</option>
-        <option value="goldensneakers">{t.discovery.owners.goldensneakers}</option>
       </select>
 
       <Input
@@ -116,6 +104,12 @@ export function CatalogFilters({
       />
 
       <div className="ml-auto flex items-center gap-2">
+        {isPending && (
+          <span
+            aria-hidden="true"
+            className="spin h-3.5 w-3.5 rounded-full border-2 border-line-strong border-t-accent-strong"
+          />
+        )}
         {hasFilters && (
           <button
             type="button"
@@ -124,7 +118,9 @@ export function CatalogFilters({
               setQ("");
               setMin("");
               setMax("");
-              router.replace("/catalog", { scroll: false });
+              router.replace(`/catalog${mergeQuery({}, { owner: params.owner })}`, {
+                scroll: false,
+              });
             }}
           >
             {t.discovery.clearFilters}

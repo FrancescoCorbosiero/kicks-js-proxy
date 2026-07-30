@@ -16,7 +16,7 @@ npm ci
 cp .env.example .env            # KicksDB key, Woo REST creds, DB/Redis URLs
 docker compose up -d            # local Postgres + Redis (dev only)
 npm run db:migrate              # apply migrations (creates all tables)
-npm run dev                     # http://localhost:3000/catalog
+npm run dev                     # http://localhost:3000 (operator dashboard)
 ```
 
 All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are persisted.
@@ -43,13 +43,23 @@ filters/sorts/paginates in SQL.
 
 ## Tabs
 
-- **Catalog** (`/catalog`) — discovery: brand sidebar with counts, debounced
-  search, freshness/price filters, six sorts, paged grid. All state in the URL.
-  Clicking a card opens the **product drawer** (`?product=<sku>`; full-screen
-  sheet on mobile): per-size asks + computed proposed prices, **re-sync from
-  KicksDB**, per-size **manual price locks** and the per-product **sale rule**
-  (both via `store_overrides`, keyed by SKU/EU size — snapshot-independent, so
-  the sync honors them automatically).
+- **Dashboard** (`/`) — the homepage is the operator dashboard: catalog size
+  split by price source, stale-price count with a one-click path to refresh,
+  store snapshot state, last sync outcome, and a recent-activity feed
+  (ingestion runs + apply runs merged). Big plain-language action cards deep-
+  link into `/sync`, `/catalog` and `/import`.
+- **Catalog** (`/catalog`) — discovery: **provider tabs** (All / StockX /
+  GoldenSneakers, counts included — ownership is feed coverage minus manual
+  KicksDB pins, matching exactly what the sync does), brand sidebar with
+  counts, debounced search, freshness/price filters, six sorts, paged grid.
+  All state in the URL. Cards show a lock chip when any size carries a manual
+  price. Clicking a card opens the **product drawer** (`?product=<sku>`;
+  full-screen sheet on mobile): per-size asks + computed proposed prices,
+  **re-sync from KicksDB**, prominent per-size **manual price locks** (with
+  lock-all / unlock-all), the per-product **sale rule**, and — when the GS
+  feed covers the SKU — a **price-source switch** that pins the product back
+  to StockX pricing (all via `store_overrides`, keyed by SKU/EU size —
+  snapshot-independent, so the sync honors them automatically).
 - **Sync** (`/sync`) — the main workflow: **align sizes, then patch prices**,
   all over REST:
   1. **Pull**: walk the Woo REST API (`products` incl. attributes + variations)

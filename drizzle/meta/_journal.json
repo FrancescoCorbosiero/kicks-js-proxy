@@ -57,6 +57,13 @@
       "when": 1784643865705,
       "tag": "0007_opposite_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785432975590,
+      "tag": "0008_next_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

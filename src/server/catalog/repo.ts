@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, ilike, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, lt, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
 import { catalogProducts } from "@/server/db/schema";
@@ -113,6 +113,8 @@ export interface CatalogPageFilters {
   q?: string; // substring on SKU / title
   freshness?: CatalogFreshness;
   owner?: CatalogOwnerFilter;
+  /** SKUs manually pinned back to KicksDB — excluded from GS ownership. */
+  pinnedToKicksdb?: string[];
   priceMin?: number;
   priceMax?: number;
   sort?: CatalogSort;
@@ -121,10 +123,21 @@ export interface CatalogPageFilters {
 }
 
 /** True when an active GoldenSneakers row covers this catalog SKU (→ GS owns it). */
-const GS_OWNED_SQL = sql<boolean>`exists (
+const GS_COVERED_SQL = sql<boolean>`exists (
   select 1 from "feed_items" fi
   where fi."feed" = 'goldensneakers' and fi."active" = true and fi."sku" = ${catalogProducts.sku}
 )`;
+
+/**
+ * Effective GS ownership for the grid: feed coverage MINUS the SKUs the
+ * operator pinned back to KicksDB — the same precedence the sync applies
+ * (see src/server/feeds/owner.ts), so the badge never lies about who prices
+ * a product.
+ */
+function gsOwnedSql(pinnedToKicksdb: string[]): SQL<boolean> {
+  if (pinnedToKicksdb.length === 0) return GS_COVERED_SQL;
+  return sql<boolean>`(${GS_COVERED_SQL} and ${notInArray(catalogProducts.sku, pinnedToKicksdb)})`;
+}
 
 export interface CatalogPageItem {
   sku: string;
@@ -150,6 +163,7 @@ export interface CatalogPage {
 
 function pageConditions(market: string, f: CatalogPageFilters, threshold: Date): SQL[] {
   const conds: SQL[] = [eq(catalogProducts.market, market)];
+  const gsOwned = gsOwnedSql(f.pinnedToKicksdb ?? []);
   if (f.brand) conds.push(eq(catalogProducts.brand, f.brand));
   if (f.q?.trim()) {
     const like = `%${f.q.trim()}%`;
@@ -157,8 +171,8 @@ function pageConditions(market: string, f: CatalogPageFilters, threshold: Date):
   }
   if (f.freshness === "fresh") conds.push(gte(catalogProducts.fetchedAt, threshold));
   if (f.freshness === "stale") conds.push(lt(catalogProducts.fetchedAt, threshold));
-  if (f.owner === "goldensneakers") conds.push(sql`${GS_OWNED_SQL}`);
-  if (f.owner === "kicksdb") conds.push(sql`not ${GS_OWNED_SQL}`);
+  if (f.owner === "goldensneakers") conds.push(sql`${gsOwned}`);
+  if (f.owner === "kicksdb") conds.push(sql`not ${gsOwned}`);
   if (f.priceMin != null) conds.push(gte(catalogProducts.minAsk, f.priceMin));
   if (f.priceMax != null) conds.push(lte(catalogProducts.minAsk, f.priceMax));
   return conds;
@@ -206,7 +220,7 @@ export async function listCatalogPage(
           title: catalogProducts.title,
           brand: catalogProducts.brand,
           source: catalogProducts.source,
-          gsOwned: GS_OWNED_SQL,
+          gsOwned: gsOwnedSql(filters.pinnedToKicksdb ?? []),
           image: catalogProducts.image,
           minAsk: catalogProducts.minAsk,
           variantCount: catalogProducts.variantCount,
@@ -243,6 +257,38 @@ export async function listCatalogPage(
   } catch (e) {
     console.warn("[catalog] page skipped (cache unavailable):", describeDbError(e));
     return { items: [], total: 0, page: 1, perPage, pageCount: 1 };
+  }
+}
+
+export interface CatalogOwnerCounts {
+  total: number;
+  kicksdb: number;
+  goldensneakers: number;
+}
+
+/**
+ * How many catalog products each source currently DRIVES (feed coverage minus
+ * manual KicksDB pins) — the numbers behind the catalog's provider tabs.
+ */
+export async function countByOwner(
+  market: string,
+  pinnedToKicksdb: string[] = [],
+): Promise<CatalogOwnerCounts> {
+  const gsOwned = gsOwnedSql(pinnedToKicksdb);
+  try {
+    const rows = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        goldensneakers: sql<number>`count(*) filter (where ${gsOwned})::int`,
+      })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market));
+    const total = rows[0]?.total ?? 0;
+    const goldensneakers = rows[0]?.goldensneakers ?? 0;
+    return { total, goldensneakers, kicksdb: total - goldensneakers };
+  } catch (e) {
+    console.warn("[catalog] owner counts skipped (cache unavailable):", describeDbError(e));
+    return { total: 0, kicksdb: 0, goldensneakers: 0 };
   }
 }
 
