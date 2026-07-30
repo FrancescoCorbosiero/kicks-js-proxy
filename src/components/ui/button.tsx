@@ -14,7 +14,7 @@ const buttonVariants = cva(
         outline: "border border-line bg-surface text-ink shadow-xs hover:border-line-strong hover:bg-surface-2",
         ghost: "text-muted hover:bg-surface-2 hover:text-ink",
         accent:
-          "bg-accent text-accent-fg shadow-[0_8px_22px_-10px] shadow-accent/60 hover:brightness-[1.04] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.25)]",
+          "bg-accent text-accent-fg shadow-[0_6px_16px_-10px] shadow-accent/40 hover:brightness-[1.04] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.25)]",
       },
       size: {
         default: "h-9 px-4 py-2",

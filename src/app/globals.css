@@ -61,10 +61,10 @@
   --muted: #5a655d;
   --faint: #8b958c;
 
-  --accent: #c4f000;        /* volt — used as fills, rings, highlights */
-  --accent-strong: #a9d600;
-  --accent-fg: #1a2200;     /* text on an accent fill */
-  --accent-text: #5f8a00;   /* accent used as text on light surfaces */
+  --accent: #e8c437;        /* warm gold — used as fills, rings, highlights */
+  --accent-strong: #d1a91a;
+  --accent-fg: #241b00;     /* text on an accent fill */
+  --accent-text: #8a6b00;   /* accent used as text on light surfaces */
 
   --up: #d8453f;            /* price increased */
   --down: #1f9d63;          /* price decreased */
@@ -91,10 +91,10 @@
   --muted: #a4aea6;
   --faint: #6d766f;
 
-  --accent: #c4f000;
-  --accent-strong: #d4ff2e;
-  --accent-fg: #15200a;
-  --accent-text: #b9ec4a;
+  --accent: #ddbe3f;
+  --accent-strong: #eccf67;
+  --accent-fg: #221a00;
+  --accent-text: #dfc668;
 
   --up: #ff6f64;
   --down: #4cd699;
@@ -146,6 +146,7 @@ body::before {
   -webkit-mask-image: radial-gradient(115% 80% at 80% -10%, #000 0%, transparent 60%);
   mask-image: radial-gradient(115% 80% at 80% -10%, #000 0%, transparent 60%);
   pointer-events: none;
+  transform: translateZ(0); /* own compositor layer — no re-raster on scroll */
 }
 body::after {
   content: "";
@@ -155,10 +156,10 @@ body::after {
   width: 48vw;
   height: 48vw;
   z-index: -2;
-  background: radial-gradient(circle, color-mix(in oklab, var(--accent) 26%, transparent) 0%, transparent 64%);
-  opacity: 0.5;
-  filter: blur(30px);
+  background: radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 64%);
+  opacity: 0.35;
   pointer-events: none;
+  transform: translateZ(0);
 }
 
 /* ----- Scrollbar ---------------------------------------------------------- */

@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { getActiveConfig } from "@/server/config/repo";
 import {
+  countByOwner,
   listBrandCounts,
   listCatalogPage,
   type CatalogFreshness,
   type CatalogOwnerFilter,
   type CatalogSort,
 } from "@/server/catalog/repo";
+import { getOverrides } from "@/server/overrides/repo";
+import { lockedPriceCounts, skusPinnedTo } from "@/server/overrides/model";
 import { getServerDictionary } from "@/i18n/server";
 import { buildQuery, type QueryParams } from "@/lib/qs";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters";
@@ -14,6 +17,7 @@ import { CardImage } from "@/components/catalog/CardImage";
 import { ProductDrawer } from "@/components/catalog/ProductDrawer";
 import { loadDrawerData } from "@/components/catalog/drawer-data";
 import { DbUnavailable } from "@/components/DbUnavailable";
+import { LockIcon } from "@/components/icons";
 import { assertSchemaCurrent } from "@/server/db/probe";
 
 export const dynamic = "force-dynamic";
@@ -64,23 +68,31 @@ async function loadPageData(sp: Search) {
     page: sp.page,
   };
 
-  const [page, brands] = await Promise.all([
+  // One overrides read serves the whole page: KicksDB pins (ownership must
+  // match what the sync does) and the per-product locked-price chips.
+  const overrides = await getOverrides().catch(() => null);
+  const pinnedToKicksdb = overrides ? skusPinnedTo(overrides, "kicksdb") : [];
+  const lockedCounts = overrides ? lockedPriceCounts(overrides) : new Map<string, number>();
+
+  const [page, brands, ownerCounts] = await Promise.all([
     listCatalogPage(market, ttl, {
       brand: sp.brand,
       q: sp.q,
       freshness,
       owner,
+      pinnedToKicksdb,
       priceMin: toNumber(sp.min),
       priceMax: toNumber(sp.max),
       sort,
       page: toNumber(sp.page) ?? 1,
     }),
     listBrandCounts(market),
+    countByOwner(market, pinnedToKicksdb),
   ]);
 
-  const catalogSize = brands.reduce((n, b) => n + b.count, 0);
+  const catalogSize = ownerCounts.total;
   const drawer = sp.product ? await loadDrawerData(market, sp.product, config) : null;
-  return { market, params, page, brands, catalogSize, drawer };
+  return { market, params, page, brands, catalogSize, ownerCounts, lockedCounts, drawer };
 }
 
 export default async function CatalogPage({
@@ -98,13 +110,17 @@ export default async function CatalogPage({
     // The landing tab must explain a dead/unmigrated DB, not crash-overlay it.
     return <DbUnavailable error={e} />;
   }
-  const { market, params, page, brands, catalogSize, drawer } = data;
+  const { market, params, page, brands, catalogSize, ownerCounts, lockedCounts, drawer } = data;
   const closeHref = `/catalog${buildQuery({ ...params, product: undefined })}`;
 
   const brandLink = (brand?: string) =>
     `/catalog${buildQuery({ ...params, brand, page: undefined })}`;
   const pageLink = (p: number) =>
     `/catalog${buildQuery({ ...params, page: p === 1 ? undefined : p })}`;
+  const ownerLink = (owner?: CatalogOwnerFilter) =>
+    `/catalog${buildQuery({ ...params, owner: owner === "all" ? undefined : owner, page: undefined })}`;
+  const activeOwner: CatalogOwnerFilter =
+    sp.owner === "kicksdb" || sp.owner === "goldensneakers" ? sp.owner : "all";
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -169,6 +185,32 @@ export default async function CatalogPage({
             </div>
           )}
 
+          {/* Provider tabs: one tap to see who drives each product's prices. */}
+          <div className="-mx-1 flex gap-1 overflow-x-auto px-1">
+            <div className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-xs">
+              <SourceTab
+                href={ownerLink("all")}
+                active={activeOwner === "all"}
+                label={t.discovery.tabs.all}
+                count={ownerCounts.total}
+              />
+              <SourceTab
+                href={ownerLink("kicksdb")}
+                active={activeOwner === "kicksdb"}
+                label={t.discovery.tabs.kicksdb}
+                count={ownerCounts.kicksdb}
+                hint={t.discovery.tabs.kicksdbHint}
+              />
+              <SourceTab
+                href={ownerLink("goldensneakers")}
+                active={activeOwner === "goldensneakers"}
+                label={t.discovery.tabs.goldensneakers}
+                count={ownerCounts.goldensneakers}
+                hint={t.discovery.tabs.goldensneakersHint}
+              />
+            </div>
+          </div>
+
           <CatalogFilters params={params} />
 
           {page.items.length === 0 ? (
@@ -177,25 +219,34 @@ export default async function CatalogPage({
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-              {page.items.map((item) => (
+              {page.items.map((item, i) => (
                 <Link
                   key={item.sku}
                   href={`/catalog${buildQuery({ ...params, product: item.sku })}`}
                   scroll={false}
-                  className="group overflow-hidden rounded-xl border border-line bg-surface shadow-xs transition-all hover:-translate-y-0.5 hover:border-line-strong hover:shadow-md"
+                  className="group overflow-hidden rounded-xl border border-line bg-surface shadow-xs transition-[transform,box-shadow,border-color] hover:-translate-y-0.5 hover:border-line-strong hover:shadow-md"
                 >
-                  <CardImage src={item.image} alt={item.title || item.sku} />
+                  <CardImage src={item.image} alt={item.title || item.sku} eager={i < 8} />
                   <div className="space-y-1 p-3">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-faint">
                         {item.brand || "—"}
                       </span>
-                      {item.gsOwned && (
+                      {activeOwner === "all" && item.gsOwned && (
                         <span
-                          className="shrink-0 rounded-full bg-warn/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-warn"
+                          className="shrink-0 rounded border border-line bg-surface-2 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted"
                           title={t.discovery.gsBadgeHint}
                         >
                           GS
+                        </span>
+                      )}
+                      {(lockedCounts.get(item.sku) ?? 0) > 0 && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent/15 px-1 py-px text-[9px] font-bold text-accent-text tnum"
+                          title={t.discovery.lockedHint(lockedCounts.get(item.sku) ?? 0)}
+                        >
+                          <LockIcon className="h-2.5 w-2.5" />
+                          {lockedCounts.get(item.sku)}
                         </span>
                       )}
                       <span
@@ -248,6 +299,40 @@ export default async function CatalogPage({
 
       {drawer && <ProductDrawer data={drawer} closeHref={closeHref} />}
     </main>
+  );
+}
+
+function SourceTab({
+  href,
+  active,
+  label,
+  count,
+  hint,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+  count: number;
+  hint?: string;
+}) {
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      title={hint}
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:bg-surface-2 hover:text-ink"
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-1.5 py-px text-[10px] font-semibold tnum ${
+          active ? "bg-accent-fg/12" : "bg-surface-2 text-faint"
+        }`}
+      >
+        {count}
+      </span>
+    </Link>
   );
 }
 

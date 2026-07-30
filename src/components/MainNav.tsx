@@ -14,6 +14,7 @@ export function MainNav() {
   const pathname = usePathname();
 
   const tabs = [
+    { href: "/", label: t.header.navDashboard },
     { href: "/catalog", label: t.header.navCatalog },
     { href: "/sync", label: t.header.navSync },
     { href: "/import", label: t.header.navImport },

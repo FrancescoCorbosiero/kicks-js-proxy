@@ -14,6 +14,7 @@ export const it = {
     description: "Rivalutazione e sincronizzazione prezzi StockX → WooCommerce",
   },
   header: {
+    navDashboard: "Panoramica",
     navCatalog: "Catalogo",
     navSync: "Sync",
     navImport: "Importa",
@@ -22,12 +23,57 @@ export const it = {
     toggleTheme: "Cambia tema",
     language: "Lingua",
   },
-  home: {
-    badge: "StockX → WooCommerce",
-    titleLead: "Esplora il catalogo, ",
-    titleAccent: "controlla ogni prezzo",
-    desc: "Un catalogo KicksDB in continua crescita: esploralo, blocca prezzi manuali, e sincronizza lo store WooCommerce via REST con anteprima per variante prima di applicare.",
-    cta: "Apri il catalogo",
+  dashboard: {
+    title: "Panoramica",
+    desc: "Lo stato del catalogo e del negozio in un colpo d'occhio — da qui parte tutto.",
+    wooNotConfigured:
+      "Il collegamento a WooCommerce non è configurato: la sincronizzazione non è disponibile. Chiedi a chi gestisce il server di impostare le credenziali del negozio.",
+    pullRunning: (progress: string) => `Scaricamento del negozio in corso… ${progress} prodotti`,
+    syncCardTitle: "Sincronizza il negozio",
+    syncCardDesc:
+      "Confronta i prezzi del negozio con le fonti e applica le differenze. Nulla viene scritto senza la tua conferma.",
+    syncCardCta: "Vai alla sincronizzazione",
+    catalogCardTitle: "Sfoglia il catalogo",
+    catalogCardDesc:
+      "Cerca un prodotto, controlla i prezzi taglia per taglia e blocca quelli che decidi tu.",
+    catalogCardCta: "Apri il catalogo",
+    importCardTitle: "Aggiungi prodotti",
+    importCardDesc:
+      "Incolla una lista di codici SKU o carica un file: i prodotti riconosciuti entrano nel catalogo.",
+    importCardCta: "Importa prodotti",
+    statCatalog: "Prodotti a catalogo",
+    statKicksdb: "con prezzi StockX",
+    statGs: "gestiti dal fornitore",
+    statStale: "Prezzi da aggiornare",
+    statStaleHint:
+      "Questi prodotti hanno prezzi StockX più vecchi del limite. Aggiornali con un clic dalla scheda Feed.",
+    statStaleCta: "Aggiorna ora",
+    statStaleOk: "Tutti i prezzi sono aggiornati",
+    statStoreLine: (n: number) => `Negozio: ${n} prodotti`,
+    statStoreNever: "Stato del negozio mai scaricato — parti dalla sincronizzazione",
+    statFeed: "Listino fornitore",
+    statFeedLine: (skus: number, rows: number) => `${skus} prodotti · ${rows} taglie attive`,
+    lastSync: (when: string) => `Ultima sincronizzazione ${when}`,
+    lastSyncNever: "Nessuna sincronizzazione eseguita finora",
+    snapshotUpdated: (when: string) => `aggiornato ${when}`,
+    activityTitle: "Attività recente",
+    activityEmpty: "Ancora nessuna attività — comincia importando qualche prodotto.",
+    act: {
+      manual: "Import manuale",
+      file: "Import da file",
+      preview: "Anteprima catalogo",
+      kicksdbRefresh: "Aggiornamento prezzi StockX",
+      gsSync: "Sincronizzazione listino fornitore",
+      dryRun: "Prova di sincronizzazione",
+      applied: "Sincronizzazione negozio",
+      applyLine: (n: number) => `${n} ${n === 1 ? "prezzo scritto" : "prezzi scritti"}`,
+    },
+    ago: {
+      now: "adesso",
+      minutes: (n: number) => `${n} min fa`,
+      hours: (n: number) => (n === 1 ? "1 ora fa" : `${n} ore fa`),
+      days: (n: number) => (n === 1 ? "ieri" : `${n} giorni fa`),
+    },
   },
   preview: {
     crumbWorkspace: "Area di lavoro",
@@ -148,7 +194,12 @@ export const it = {
     saleRuleHint: "Se attivo, le varianti in saldo non vengono rivalutate",
     manualPlaceholder: "Prezzo",
     manualLock: "Blocca prezzo",
+    manualLockHint: "Scegli tu il prezzo di questa taglia: la sincronizzazione non lo sovrascriverà",
+    manualConfirm: "Blocca",
+    manualCancel: "Annulla",
+    manualEditHint: "Prezzo bloccato a mano — clicca per cambiarlo",
     manualClear: "Sblocca",
+    manualClearHint: "Sblocca: torna al prezzo automatico",
     locked: "bloccato",
     saving: "…",
   },
@@ -227,9 +278,19 @@ export const it = {
     freshBadge: "prezzi freschi",
     staleBadge: "da aggiornare",
     gsBadgeHint:
-      "Prodotto posseduto dal feed GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal feed.",
-    ownerLabel: "Fonte",
-    owners: { all: "Tutte le fonti", kicksdb: "KicksDB", goldensneakers: "GoldenSneakers" },
+      "Prodotto gestito dal fornitore GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal suo listino.",
+    tabs: {
+      all: "Tutti",
+      kicksdb: "StockX",
+      kicksdbHint: "Prodotti con prezzi automatici da StockX (via KicksDB)",
+      goldensneakers: "GoldenSneakers",
+      goldensneakersHint:
+        "Prodotti gestiti dal fornitore GoldenSneakers: taglie, prezzi e stock reali dal suo listino",
+    },
+    lockedHint: (n: number) =>
+      n === 1
+        ? "1 prezzo bloccato a mano — la sincronizzazione non lo tocca"
+        : `${n} prezzi bloccati a mano — la sincronizzazione non li tocca`,
     empty: "Nessun prodotto con questi filtri.",
     emptyCatalog: "Il catalogo è vuoto — aggiungi SKU dalla scheda Importa o esegui una sincronizzazione.",
     page: (p: number, n: number) => `Pagina ${p} di ${n}`,
@@ -252,7 +313,19 @@ export const it = {
     addedOn: (date: string) => `In catalogo dal ${date}`,
     gsOwned: "GoldenSneakers",
     gsOwnedHint:
-      "Prodotto posseduto dal feed GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal feed, non da KicksDB.",
+      "Prodotto gestito dal fornitore GoldenSneakers: taglie, prezzi finali e stock reale arrivano dal suo listino, non da StockX.",
+    pricesTitle: "Prezzi per taglia",
+    lockExplain:
+      "Vuoi decidere tu un prezzo? Bloccalo: un prezzo bloccato non viene MAI sovrascritto dalla sincronizzazione. Sbloccalo quando vuoi tornare al prezzo automatico.",
+    lockAll: (n: number) => `Blocca tutti (${n})`,
+    unlockAll: (n: number) => `Sblocca tutti (${n})`,
+    sourceTitle: "Chi decide i prezzi di questo prodotto",
+    sourceGs: "Fornitore",
+    sourceKicksdb: "StockX",
+    sourceGsHint:
+      "Taglie, prezzi e stock arrivano dal listino del fornitore GoldenSneakers (automatico).",
+    sourceKicksdbHint:
+      "Hai forzato i prezzi StockX per questo prodotto: il listino del fornitore viene ignorato.",
   },
   sync: {
     title: "Sync Woo",

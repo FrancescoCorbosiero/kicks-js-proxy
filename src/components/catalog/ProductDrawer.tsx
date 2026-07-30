@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/provider";
 import { refreshCatalogProduct } from "@/server/actions/catalog";
-import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
+import {
+  setProductManualPrices,
+  setProductOwnerPin,
+  setProductSaleRule,
+  setVariationManualPrice,
+} from "@/server/actions/overrides";
+import { LockIcon, UnlockIcon } from "@/components/icons";
 import { CardImage } from "./CardImage";
 import type { DrawerData, DrawerVariant } from "./drawer-data";
 
@@ -25,8 +31,41 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
   const router = useRouter();
   const [refreshing, startRefresh] = React.useTransition();
   const [savingRule, startRule] = React.useTransition();
+  const [bulkSaving, startBulk] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+
+  // Bulk lock targets: sizes with a stable EU key and a price to lock at.
+  const lockable = data.variants.filter(
+    (v) => v.euSize != null && v.manual == null && (v.proposed ?? v.ask) != null,
+  );
+  const locked = data.variants.filter((v) => v.euSize != null && v.manual != null);
+
+  function lockAll() {
+    if (lockable.length === 0) return;
+    setError(null);
+    startBulk(async () => {
+      const res = await setProductManualPrices({
+        parentSku: data.sku,
+        prices: lockable.map((v) => ({ euSize: v.euSize!, price: (v.proposed ?? v.ask)! })),
+      });
+      if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
+      else router.refresh();
+    });
+  }
+
+  function unlockAll() {
+    if (locked.length === 0) return;
+    setError(null);
+    startBulk(async () => {
+      const res = await setProductManualPrices({
+        parentSku: data.sku,
+        prices: locked.map((v) => ({ euSize: v.euSize!, price: null })),
+      });
+      if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
+      else router.refresh();
+    });
+  }
 
   const close = React.useCallback(() => {
     router.push(closeHref, { scroll: false });
@@ -53,6 +92,17 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
     setError(null);
     startRule(async () => {
       const res = await setProductSaleRule({ sku: data.sku, followSaleRule: !data.followSaleRule });
+      if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
+      else router.refresh();
+    });
+  }
+
+  const [pinSaving, startPin] = React.useTransition();
+
+  function savePin(owner: "kicksdb" | null) {
+    setError(null);
+    startPin(async () => {
+      const res = await setProductOwnerPin({ sku: data.sku, owner });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
       else router.refresh();
     });
@@ -103,7 +153,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
           {/* Product header */}
           <div className="flex gap-4">
             <div className="w-28 shrink-0 overflow-hidden rounded-lg border border-line sm:w-36">
-              <CardImage src={data.image} alt={data.title || data.sku} />
+              <CardImage src={data.image} alt={data.title || data.sku} eager />
             </div>
             <div className="min-w-0 flex-1 space-y-1 text-xs text-muted">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -163,10 +213,81 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
             </Link>
           </div>
 
+          {/* Price source: who decides this product's prices. Only shown when
+              the supplier feed actually covers the SKU, so the choice is real. */}
+          {data.gsCovered && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold">{t.drawer.sourceTitle}</div>
+                <p className="mt-0.5 text-[11px] leading-snug text-muted">
+                  {data.pinnedToKicksdb ? t.drawer.sourceKicksdbHint : t.drawer.sourceGsHint}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-line bg-surface-2 p-0.5">
+                <button
+                  type="button"
+                  disabled={pinSaving}
+                  onClick={() => data.pinnedToKicksdb && savePin(null)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    !data.pinnedToKicksdb ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {t.drawer.sourceGs}
+                </button>
+                <button
+                  type="button"
+                  disabled={pinSaving}
+                  onClick={() => !data.pinnedToKicksdb && savePin("kicksdb")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    data.pinnedToKicksdb ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {t.drawer.sourceKicksdb}
+                </button>
+              </div>
+            </div>
+          )}
+
           {error && <p className="text-sm text-skip">{error}</p>}
 
-          {/* Variant rows (stacked — readable on a phone, no wide table) */}
+          {/* Prices: per-size manual locks. The one panel a non-technical
+              operator must understand, so it explains itself. */}
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <LockIcon className="h-3.5 w-3.5 text-accent-text" />
+                  {t.drawer.pricesTitle}
+                </div>
+                <p className="mt-0.5 text-[11px] leading-snug text-muted">{t.drawer.lockExplain}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  onClick={lockAll}
+                  disabled={bulkSaving || lockable.length === 0}
+                >
+                  <LockIcon className="h-3 w-3" />
+                  {t.drawer.lockAll(lockable.length)}
+                </Button>
+                {locked.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    onClick={unlockAll}
+                    disabled={bulkSaving}
+                  >
+                    <UnlockIcon className="h-3 w-3" />
+                    {t.drawer.unlockAll(locked.length)}
+                  </Button>
+                )}
+              </div>
+            </div>
             <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 border-b border-line bg-surface-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
               <span>{t.product.headerSize}</span>
               <span className="text-right">{t.drawer.headerAsk}</span>
@@ -175,7 +296,13 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
             </div>
             <ul className="divide-y divide-line/60">
               {data.variants.map((v) => (
-                <VariantRow key={v.id} data={data} variant={v} onSaved={() => router.refresh()} />
+                <VariantRow
+                  key={v.id}
+                  data={data}
+                  variant={v}
+                  onSaved={() => router.refresh()}
+                  onError={(msg) => setError(msg)}
+                />
               ))}
             </ul>
           </div>
@@ -189,10 +316,12 @@ function VariantRow({
   data,
   variant,
   onSaved,
+  onError,
 }: {
   data: DrawerData;
   variant: DrawerVariant;
   onSaved: () => void;
+  onError: (message: string) => void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = React.useState(false);
@@ -211,6 +340,8 @@ function VariantRow({
       if (res.ok) {
         setEditing(false);
         onSaved();
+      } else {
+        onError(res.error ?? t.drawer.saveFailed);
       }
     });
   }
@@ -266,31 +397,62 @@ function VariantRow({
               placeholder={t.product.manualPlaceholder}
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditing(false);
+              }}
             />
-            <Button type="submit" size="sm" variant="accent" disabled={saving} className="h-7 px-2 text-xs">
-              {saving ? t.product.saving : t.product.manualLock}
+            <Button type="submit" size="sm" variant="accent" disabled={saving} className="h-7 gap-1 px-2 text-xs">
+              <LockIcon className="h-3 w-3" />
+              {saving ? t.product.saving : t.product.manualConfirm}
             </Button>
+            <button
+              type="button"
+              aria-label={t.product.manualCancel}
+              className="rounded p-1 text-faint hover:text-ink"
+              onClick={() => setEditing(false)}
+            >
+              ✕
+            </button>
           </form>
         ) : variant.manual != null ? (
-          <button
-            type="button"
-            className="rounded-md bg-accent/12 px-2 py-0.5 text-xs font-semibold text-accent-text tnum hover:bg-accent/20"
-            title={t.product.manualClear}
-            onClick={() => (saving ? undefined : save(null))}
-          >
-            {eur.format(variant.manual)} ✕
-          </button>
+          <>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-md bg-accent/15 px-2 py-1 text-xs font-semibold text-accent-text tnum hover:bg-accent/25"
+              title={t.product.manualEditHint}
+              onClick={() => {
+                setValue(String(variant.manual));
+                setEditing(true);
+              }}
+            >
+              <LockIcon className="h-3 w-3" />
+              {eur.format(variant.manual)}
+            </button>
+            <button
+              type="button"
+              aria-label={t.product.manualClear}
+              title={t.product.manualClearHint}
+              className="rounded p-1 text-faint hover:text-skip"
+              onClick={() => (saving ? undefined : save(null))}
+            >
+              ✕
+            </button>
+          </>
         ) : (
-          <button
+          <Button
             type="button"
-            className="text-xs font-medium text-muted underline-offset-2 hover:text-ink hover:underline"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 px-2 text-[11px]"
+            title={t.product.manualLockHint}
             onClick={() => {
               setValue(variant.proposed != null ? String(variant.proposed) : "");
               setEditing(true);
             }}
           >
+            <LockIcon className="h-3 w-3" />
             {t.product.manualLock}
-          </button>
+          </Button>
         )}
       </div>
     </li>

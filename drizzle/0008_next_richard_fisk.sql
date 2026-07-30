@@ -1,0 +1,2 @@
+CREATE INDEX "catalog_market_minask_idx" ON "catalog_products" USING btree ("market","min_ask");--> statement-breakpoint
+CREATE INDEX "catalog_market_title_idx" ON "catalog_products" USING btree ("market","title");

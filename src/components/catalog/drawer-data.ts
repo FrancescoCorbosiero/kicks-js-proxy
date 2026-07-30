@@ -4,7 +4,7 @@ import { resolveEffectiveRule } from "@core/config";
 import { computePrice } from "@core/core-spine";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
-import { followSaleRuleFor, manualPriceFor } from "@/server/overrides/model";
+import { followSaleRuleFor, manualPriceFor, ownerPinFor } from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { sourceEuSize } from "@/server/store-json/match";
 
@@ -35,6 +35,10 @@ export interface DrawerData {
   followSaleRule: boolean;
   /** Who owns this product: the feed's variant set replaces KicksDB's when GS. */
   owner: "kicksdb" | "goldensneakers";
+  /** An active GS feed listing covers this SKU → the price-source switch is shown. */
+  gsCovered: boolean;
+  /** The operator pinned this product back to StockX/KicksDB pricing. */
+  pinnedToKicksdb: boolean;
   variants: DrawerVariant[];
 }
 
@@ -53,8 +57,11 @@ export async function loadDrawerData(
 
   const overrides = await getOverrides().catch(() => null);
   // Product-level ownership: a GS-owned product shows the FEED's sizes,
-  // presented prices (passthrough rule) and real quantities.
-  const gs = (await gsOwnedProducts([entry.sku], market, overrides)).get(entry.sku);
+  // presented prices (passthrough rule) and real quantities. Coverage is
+  // computed pin-blind so the drawer can offer the source switch either way.
+  const covered = (await gsOwnedProducts([entry.sku], market, null)).get(entry.sku);
+  const pin = overrides ? ownerPinFor(overrides, entry.sku) : null;
+  const gs = pin === "kicksdb" ? undefined : covered;
   const product = gs?.product ?? entry.product;
   const deliveryType = config.source.defaultDeliveryType;
 
@@ -90,6 +97,8 @@ export async function loadDrawerData(
       new Date(entry.fetchedAt).getTime() >= Date.now() - config.source.cacheTtlSeconds * 1000,
     followSaleRule: overrides ? followSaleRuleFor(overrides, product.sku) : true,
     owner: gs ? "goldensneakers" : "kicksdb",
+    gsCovered: covered != null,
+    pinnedToKicksdb: pin === "kicksdb",
     variants,
   };
 }

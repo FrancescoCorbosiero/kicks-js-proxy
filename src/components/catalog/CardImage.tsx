@@ -2,8 +2,12 @@
 
 import * as React from "react";
 
-/** Product image with a graceful placeholder when missing or broken. */
-export function CardImage({ src, alt }: { src: string; alt: string }) {
+/**
+ * Product image with a graceful placeholder when missing or broken.
+ * `eager` marks above-the-fold cells (first grid rows, the drawer) so the
+ * browser prioritizes them; everything else stays lazy.
+ */
+export function CardImage({ src, alt, eager }: { src: string; alt: string; eager?: boolean }) {
   const [failed, setFailed] = React.useState(false);
 
   if (!src || failed) {
@@ -23,7 +27,9 @@ export function CardImage({ src, alt }: { src: string; alt: string }) {
     <img
       src={src}
       alt={alt}
-      loading="lazy"
+      loading={eager ? "eager" : "lazy"}
+      fetchPriority={eager ? "high" : "auto"}
+      decoding="async"
       className="aspect-square w-full bg-white object-contain"
       onError={() => setFailed(true)}
     />

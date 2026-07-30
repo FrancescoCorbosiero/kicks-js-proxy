@@ -118,6 +118,10 @@ export const catalogProducts = pgTable(
     index("catalog_market_brand_idx").on(t.market, t.brand),
     index("catalog_market_added_idx").on(t.market, t.addedAt),
     index("catalog_market_fetched_idx").on(t.market, t.fetchedAt),
+    // Discovery grid: price range filters + priceAsc/priceDesc sorts.
+    index("catalog_market_minask_idx").on(t.market, t.minAsk),
+    // Discovery grid: title sort.
+    index("catalog_market_title_idx").on(t.market, t.title),
   ],
 );
 

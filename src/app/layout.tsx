@@ -25,10 +25,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       <body className="min-h-screen">
         <I18nProvider initialLocale={locale}>
-          <header className="sticky top-0 z-30 border-b border-line bg-bg/72 backdrop-blur-xl">
+          <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-sm">
             <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
               <a href="/" className="group flex items-center gap-2.5">
-                <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_6px_18px_-6px] shadow-accent/50 transition-transform group-hover:scale-105">
+                <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_4px_12px_-6px] shadow-accent/35 transition-transform group-hover:scale-105">
                   K
                 </span>
                 <span className="flex flex-col leading-none">

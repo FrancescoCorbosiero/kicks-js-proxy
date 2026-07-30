@@ -144,6 +144,24 @@ export function ownerPinFor(overrides: StoreOverrides, sku: string): ProductOwne
   return overrides.products[productKey(sku)]?.owner ?? null;
 }
 
+/** Every SKU manually pinned to the given owner (the grid must agree with the sync). */
+export function skusPinnedTo(overrides: StoreOverrides, owner: ProductOwner): string[] {
+  return Object.entries(overrides.products)
+    .filter(([, o]) => o.owner === owner)
+    .map(([sku]) => sku);
+}
+
+/** Per-parent-SKU count of manually locked variation prices (catalog lock chips). */
+export function lockedPriceCounts(overrides: StoreOverrides): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [key, v] of Object.entries(overrides.variations)) {
+    if (v.manualPrice == null) continue;
+    const sku = key.split("::")[0];
+    out.set(sku, (out.get(sku) ?? 0) + 1);
+  }
+  return out;
+}
+
 /** The manual locked price for a variation, or null when none is set. */
 export function manualPriceFor(
   overrides: StoreOverrides,

@@ -11,7 +11,12 @@ import { db } from "./client";
  * Probes one representative object per recent migration wave (cheap: LIMIT 1).
  * Update the probes when a migration adds objects the app can't run without.
  */
+// The schema can only flip fail→pass via a migration (which restarts the app),
+// so one success is good forever: don't re-pay 4 roundtrips on every render.
+let verified = false;
+
 export async function assertSchemaCurrent(): Promise<void> {
+  if (verified) return;
   // 0005: new table + new catalog_products column.
   await db.execute(sql`select 1 from "store_pull_runs" limit 1`);
   await db.execute(sql`select "image" from "catalog_products" limit 1`);
@@ -19,4 +24,5 @@ export async function assertSchemaCurrent(): Promise<void> {
   await db.execute(sql`select 1 from "feed_items" limit 1`);
   // 0007: catalog provenance (multi-source catalog).
   await db.execute(sql`select "source" from "catalog_products" limit 1`);
+  verified = true;
 }
