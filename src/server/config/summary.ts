@@ -11,6 +11,8 @@ export interface PricingSummary {
   roundingMode: RoundingMode | null;
   increment: number | null;
   minAsks: number | null;
+  /** Anti-churn threshold: price drifts of at most this percent are not written. */
+  minDeltaPercent: number | null;
   hasGuardrail: boolean;
 }
 
@@ -26,6 +28,7 @@ export function pricingSummary(cfg: AppConfig): PricingSummary {
     roundingMode: r?.rounding?.mode ?? null,
     increment: r?.rounding?.increment ?? null,
     minAsks: r?.minAsks ?? null,
+    minDeltaPercent: r?.minDeltaPercent ?? null,
     hasGuardrail: cfg.pricingRules.some((x) => x.maxDeltaPercent != null),
   };
 }

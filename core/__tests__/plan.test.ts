@@ -98,6 +98,34 @@ describe("buildPlan", () => {
     expect(plan.items[0]).toMatchObject({ action: "update", proposedPrice: 300, locked: true });
   });
 
+  it("noop — change within minDeltaPercent is not worth a write", () => {
+    const cfg = makeConfig([flatRule({ minDeltaPercent: 2 })]);
+    const map = new Map([["v1", mapping(11, 99)]]); // 99 -> 100 is ~1% ≤ 2%
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0].action).toBe("noop");
+    expect(plan.items[0].reason).toContain("minDeltaPercent");
+  });
+
+  it("update — change beyond minDeltaPercent is written", () => {
+    const cfg = makeConfig([flatRule({ minDeltaPercent: 2 })]);
+    const map = new Map([["v1", mapping(11, 90)]]); // 90 -> 100 is ~11% > 2%
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100)]), cfg, map);
+    expect(plan.items[0]).toMatchObject({ action: "update", currentPrice: 90, proposedPrice: 100 });
+  });
+
+  it("minDeltaPercent still syncs stock when the source manages it", () => {
+    const cfg = makeConfig([flatRule({ minDeltaPercent: 2 })]);
+    const map = new Map([["v1", { ...mapping(11, 99), currentStock: 1 }]]);
+    const plan = buildPlan(makeProduct([makeVariant("v1", 100, 5)]), cfg, map, {
+      manageStockFromSource: true,
+    });
+    expect(plan.items[0]).toMatchObject({
+      action: "update",
+      proposedPrice: null, // stock-only: the small price drift is still not written
+      stockQuantity: 5,
+    });
+  });
+
   it("skip — change exceeds maxDeltaPercent guardrail", () => {
     const cfg = makeConfig([flatRule({ maxDeltaPercent: 5 })]);
     const map = new Map([["v1", mapping(11, 90)]]); // 90 -> 100 is ~11% > 5%

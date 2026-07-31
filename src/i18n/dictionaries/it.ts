@@ -103,6 +103,7 @@ export const it = {
     vat: (n: number) => `${n}% IVA`,
     rounding: (mode: string, inc: number | null) => `arrotonda ${mode}${inc != null ? ` ${inc}` : ""}`,
     minAsks: (n: number) => `minAsks ${n}`,
+    minDelta: (n: number) => `ignora variazioni ≤${n}%`,
     guardrailOn: "guardrail delta attivo",
     guardrailOff: "nessun limite delta",
     discountRule: "Rivaluta scontati",
@@ -117,6 +118,9 @@ export const it = {
     labelRounding: "Arrotondamento",
     labelIncrement: "Incremento",
     labelMinAsks: "Min asks",
+    labelMinDelta: "Min variazione %",
+    minDeltaHint:
+      "Le variazioni di prezzo fino a questa percentuale non vengono scritte sullo store (0 = riprezza sempre).",
     save: "Salva e ricalcola",
     saving: "Salvataggio…",
     saveFailed: "Impossibile salvare i prezzi",

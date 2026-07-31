@@ -44,6 +44,7 @@ export function PricingBar({
   const [dRounding, setDRounding] = React.useState<RoundingMode>("charm");
   const [dIncrement, setDIncrement] = React.useState("");
   const [dMinAsks, setDMinAsks] = React.useState("");
+  const [dMinDelta, setDMinDelta] = React.useState("");
 
   function openEditor() {
     setDMarkup(String(price.markupPercent ?? 0));
@@ -51,6 +52,7 @@ export function PricingBar({
     setDRounding(price.roundingMode ?? "charm");
     setDIncrement(price.increment != null ? String(price.increment) : "");
     setDMinAsks(String(price.minAsks ?? 0));
+    setDMinDelta(String(price.minDeltaPercent ?? 0));
     setEditing(true);
   }
 
@@ -63,6 +65,7 @@ export function PricingBar({
         roundingMode: dRounding,
         increment: dIncrement.trim() === "" ? undefined : Number(dIncrement),
         minAsks: Number(dMinAsks),
+        minDeltaPercent: Number(dMinDelta),
       });
       if (!res.ok || !res.summary) {
         setError(res.error ?? t.pricing.saveFailed);
@@ -112,6 +115,7 @@ export function PricingBar({
       ? [t.pricing.rounding(t.pricing.roundingOptions[price.roundingMode], price.increment ?? null)]
       : []),
     ...(price.minAsks != null ? [t.pricing.minAsks(price.minAsks)] : []),
+    ...(price.minDeltaPercent != null ? [t.pricing.minDelta(price.minDeltaPercent)] : []),
     price.hasGuardrail ? t.pricing.guardrailOn : t.pricing.guardrailOff,
   ];
 
@@ -209,6 +213,10 @@ export function PricingBar({
             <div className="space-y-1">
               <Label htmlFor="p-min">{t.pricing.labelMinAsks}</Label>
               <Input id="p-min" className="w-20" value={dMinAsks} onChange={(e) => setDMinAsks(e.target.value)} inputMode="numeric" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="p-mindelta" title={t.pricing.minDeltaHint}>{t.pricing.labelMinDelta}</Label>
+              <Input id="p-mindelta" className="w-20" value={dMinDelta} onChange={(e) => setDMinDelta(e.target.value)} inputMode="decimal" />
             </div>
             <Button type="button" onClick={savePricing} disabled={saving}>
               {saving ? t.pricing.saving : t.pricing.save}
