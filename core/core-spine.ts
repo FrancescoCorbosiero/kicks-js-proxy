@@ -197,6 +197,47 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
     };
 }
 
+/**
+ * Collapse duplicate products (same SKU, case/space-insensitive) into one.
+ * The bulk endpoint can return one SKU as several entries (and a messy input
+ * list can request it several times); left unmerged, each copy became its own
+ * preview plan — the same product N times, N× the variants "ready to write".
+ * Variants merge by id; offers dedupe by delivery type (first occurrence wins).
+ */
+export function mergeProductsBySku(products: SourceProduct[]): SourceProduct[] {
+    const bySku = new Map<string, SourceProduct>();
+    for (const p of products) {
+        const key = p.sku.trim().toUpperCase();
+        const cur = bySku.get(key);
+        if (!cur) {
+            bySku.set(key, p);
+            continue;
+        }
+        const byVid = new Map(cur.variants.map((v) => [v.stockxVariantId, v]));
+        for (const v of p.variants) {
+            const existing = byVid.get(v.stockxVariantId);
+            if (!existing) {
+                byVid.set(v.stockxVariantId, v);
+                continue;
+            }
+            const seen = new Set(existing.offers.map((o) => o.deliveryType));
+            const extra = v.offers.filter((o) => !seen.has(o.deliveryType));
+            if (extra.length > 0) {
+                byVid.set(v.stockxVariantId, { ...existing, offers: [...existing.offers, ...extra] });
+            }
+        }
+        bySku.set(key, {
+            ...cur,
+            // Keep the richest identity fields seen across the copies.
+            title: cur.title || p.title,
+            brand: cur.brand || p.brand,
+            image: cur.image || p.image,
+            variants: [...byVid.values()],
+        });
+    }
+    return [...bySku.values()];
+}
+
 /* ========================================================================== *
  * 3. PRICING-RULE ENGINE  (ask -> your retail price). This is mandatory:
  *    the API gives raw asks, never your shelf price.

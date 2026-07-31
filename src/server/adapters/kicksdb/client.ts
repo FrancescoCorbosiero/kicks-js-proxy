@@ -2,6 +2,7 @@ import "server-only";
 import {
   mapKicksPrices,
   mapKicksProduct,
+  mergeProductsBySku,
   type SourcePort,
   type SourceProduct,
 } from "@core/core-spine";
@@ -79,6 +80,10 @@ export class KicksDbSource implements SourcePort {
    * rethrown instead of burning hundreds of bisection calls.
    */
   async getPricesBatch(skus: string[], market: string): Promise<SourceProduct[]> {
+    // A messy store snapshot can request the same SKU several times — once
+    // per duplicate parent product. Send each SKU exactly once.
+    skus = [...new Map(skus.map((s) => [s.trim().toUpperCase(), s])).values()];
+
     const out: SourceProduct[] = [];
     const failed: string[] = [];
     let lastError: unknown;
@@ -140,7 +145,9 @@ export class KicksDbSource implements SourcePort {
           `${failed.slice(0, 10).join(", ")}${failed.length > 10 ? ", …" : ""}`,
       );
     }
-    return out;
+    // The API may split one SKU across several entries — one plan per SKU,
+    // never one per entry.
+    return mergeProductsBySku(out);
   }
 
   private displayParams(): Record<string, string> {
