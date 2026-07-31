@@ -39,10 +39,18 @@ export function CatalogFilters({
   }, []);
 
   function push(updates: QueryParams) {
+    // Merge over the LIVE URL, not the render-time `params` prop: a debounced
+    // push fires up to 350ms after the keystroke, and by then the user may
+    // have clicked a provider tab or another link — a stale base would
+    // silently revert that navigation. window.location updates synchronously
+    // at navigation start, unlike the prop (stale until the RSC payload lands).
+    const current: QueryParams = Object.fromEntries(
+      new URLSearchParams(window.location.search).entries(),
+    );
     // Inside a transition so the current grid stays interactive and we can
     // show a pending spinner instead of a frozen page.
     startTransition(() => {
-      router.replace(`/catalog${mergeQuery(params, { ...updates, page: undefined })}`, {
+      router.replace(`/catalog${mergeQuery(current, { ...updates, page: undefined })}`, {
         scroll: false,
       });
     });
@@ -115,11 +123,22 @@ export function CatalogFilters({
             type="button"
             className="text-xs font-medium text-muted underline-offset-2 hover:text-ink hover:underline"
             onClick={() => {
+              // A pending debounced push would resurrect the cleared filters.
+              if (timer.current) {
+                clearTimeout(timer.current);
+                timer.current = null;
+              }
               setQ("");
               setMin("");
               setMax("");
-              router.replace(`/catalog${mergeQuery({}, { owner: params.owner })}`, {
-                scroll: false,
+              // Through push(): keeps owner/market/sort (navigation state, not
+              // filters) and shows the pending spinner like every other control.
+              push({
+                q: undefined,
+                fresh: undefined,
+                min: undefined,
+                max: undefined,
+                brand: undefined,
               });
             }}
           >

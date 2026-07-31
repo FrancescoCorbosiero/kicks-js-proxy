@@ -35,9 +35,11 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
   const [error, setError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
 
-  // Bulk lock targets: sizes with a stable EU key and a price to lock at.
+  // Bulk lock targets: sizes with a stable EU key and a COMPUTED price to lock
+  // at. Never fall back to the raw ask — that's the source cost, not a shelf
+  // price, and locking it would silently sell at no markup.
   const lockable = data.variants.filter(
-    (v) => v.euSize != null && v.manual == null && (v.proposed ?? v.ask) != null,
+    (v) => v.euSize != null && v.manual == null && v.proposed != null,
   );
   const locked = data.variants.filter((v) => v.euSize != null && v.manual != null);
 
@@ -47,7 +49,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
     startBulk(async () => {
       const res = await setProductManualPrices({
         parentSku: data.sku,
-        prices: lockable.map((v) => ({ euSize: v.euSize!, price: (v.proposed ?? v.ask)! })),
+        prices: lockable.map((v) => ({ euSize: v.euSize!, price: v.proposed! })),
       });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
       else router.refresh();
@@ -168,7 +170,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
                 <span className="text-faint">{data.market}</span>
                 {data.owner === "goldensneakers" && (
                   <span
-                    className="inline-flex items-center gap-1 rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn"
+                    className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
                     title={t.drawer.gsOwnedHint}
                   >
                     {t.drawer.gsOwned}
@@ -398,7 +400,12 @@ function VariantRow({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Escape") {
+                  // Stop it from reaching the drawer's window listener, which
+                  // would close the whole drawer instead of just this edit.
+                  e.stopPropagation();
+                  setEditing(false);
+                }
               }}
             />
             <Button type="submit" size="sm" variant="accent" disabled={saving} className="h-7 gap-1 px-2 text-xs">

@@ -24,6 +24,20 @@ export async function getOverrides(): Promise<StoreOverrides> {
   }
 }
 
+/**
+ * Read the blob for a read-modify-WRITE. Unlike getOverrides, a read failure
+ * THROWS: degrading to "empty" here would make the subsequent save silently
+ * wipe every stored lock and pin the moment the DB hiccups.
+ */
+export async function getOverridesForWrite(): Promise<StoreOverrides> {
+  const rows = await db
+    .select()
+    .from(storeOverrides)
+    .where(eq(storeOverrides.id, SINGLETON))
+    .limit(1);
+  return rows.length ? normalizeOverrides(rows[0].data) : emptyOverrides();
+}
+
 /** Replace the single overrides blob. Throws on failure so actions can report it. */
 export async function saveOverrides(data: StoreOverrides): Promise<void> {
   await db

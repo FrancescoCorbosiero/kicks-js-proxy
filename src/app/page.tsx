@@ -191,7 +191,14 @@ function ActivityRow({ item, t }: { item: ActivityItem; t: Dictionary }) {
   if (item.kind === "apply") {
     label = item.run.dryRun ? d.act.dryRun : d.act.applied;
     detail = d.act.applyLine(item.run.updatedCount);
-    dotClass = item.run.status === "failed" ? "bg-skip" : item.run.dryRun ? "bg-info" : "bg-down";
+    dotClass =
+      item.run.status === "failed"
+        ? "bg-skip"
+        : item.run.status === "partial"
+          ? "bg-update"
+          : item.run.dryRun
+            ? "bg-info"
+            : "bg-down";
   } else {
     const source = item.run.source;
     label =

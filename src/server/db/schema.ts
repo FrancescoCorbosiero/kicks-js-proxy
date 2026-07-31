@@ -118,8 +118,11 @@ export const catalogProducts = pgTable(
     index("catalog_market_brand_idx").on(t.market, t.brand),
     index("catalog_market_added_idx").on(t.market, t.addedAt),
     index("catalog_market_fetched_idx").on(t.market, t.fetchedAt),
-    // Discovery grid: price range filters + priceAsc/priceDesc sorts.
+    // Discovery grid: price range filters + the priceAsc sort (ASC NULLS LAST).
     index("catalog_market_minask_idx").on(t.market, t.minAsk),
+    // priceDesc orders `desc nulls last`, which an ASC btree cannot serve
+    // backwards (that would be desc nulls FIRST) — it needs its own index.
+    index("catalog_market_minask_desc_idx").on(t.market, t.minAsk.desc().nullsLast()),
     // Discovery grid: title sort.
     index("catalog_market_title_idx").on(t.market, t.title),
   ],
