@@ -6,6 +6,17 @@ import { KicksPricesResponseSchema, KicksProductsResponseSchema } from "./schema
  * schema failed the WHOLE bulk response — taking the store preview down with
  * it. Unknown tiers must parse and be dropped, never explode.
  */
+describe("tolerant empty results", () => {
+  it("bulk prices: data null (no SKU matched) parses as an empty result", () => {
+    expect(KicksPricesResponseSchema.parse({ data: null }).data).toEqual([]);
+    expect(KicksPricesResponseSchema.parse({}).data).toEqual([]);
+  });
+
+  it("products: data null parses as an empty result", () => {
+    expect(KicksProductsResponseSchema.parse({ data: null, meta: null }).data).toEqual([]);
+  });
+});
+
 describe("tolerant delivery types", () => {
   it("bulk prices: unknown type parses and the row is droppable (type undefined)", () => {
     const parsed = KicksPricesResponseSchema.parse({
