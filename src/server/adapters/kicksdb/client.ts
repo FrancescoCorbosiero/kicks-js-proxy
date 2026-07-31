@@ -7,6 +7,7 @@ import {
   type SourceProduct,
 } from "@core/core-spine";
 import { chunk, requestJson, type RetryPolicy, DEFAULT_RETRY } from "../http";
+import { isPoisonedDataError } from "./poison";
 import {
   KicksPricesResponseSchema,
   KicksProductsResponseSchema,
@@ -77,7 +78,11 @@ export class KicksDbSource implements SourcePort {
    *
    * Outages stay loud: when a chunk fails AND two distinct single-SKU canary
    * probes from it also fail, the API itself is down — the original error is
-   * rethrown instead of burning hundreds of bisection calls.
+   * rethrown instead of burning hundreds of bisection calls. Exception: a
+   * failure carrying the poisoned-data signature (isPoisonedDataError) is
+   * never an outage, even when both canaries hit it — poisoned SKUs cluster at
+   * the head of the stale queue precisely because they always fail, so both
+   * canaries being poisoned is the EXPECTED steady state, not downtime.
    */
   async getPricesBatch(skus: string[], market: string): Promise<SourceProduct[]> {
     // A messy store snapshot can request the same SKU several times — once
@@ -87,6 +92,7 @@ export class KicksDbSource implements SourcePort {
     const out: SourceProduct[] = [];
     const failed: string[] = [];
     let lastError: unknown;
+    let poisonSeen = false;
 
     /** Fetch one sub-batch into `out`; false (+ lastError) on any failure. */
     const tryPart = async (part: string[], retry: RetryPolicy): Promise<boolean> => {
@@ -105,6 +111,7 @@ export class KicksDbSource implements SourcePort {
         return true;
       } catch (e) {
         lastError = e;
+        poisonSeen ||= isPoisonedDataError(e);
         return false;
       }
     };
@@ -131,7 +138,11 @@ export class KicksDbSource implements SourcePort {
       const midIdx = Math.floor(part.length / 2);
       const c1ok = await tryPart([part[0]], BISECT_RETRY);
       const c2ok = await tryPart([part[midIdx]], BISECT_RETRY);
-      if (!c1ok && !c2ok) throw lastError; // both canaries dead → real outage
+      // Both canaries dead → real outage — UNLESS any failure carried the
+      // poisoned-data signature, in which case the canaries themselves are
+      // just poisoned SKUs (they gather at the queue head) and bisection
+      // must continue.
+      if (!c1ok && !c2ok && !poisonSeen) throw lastError;
 
       // Poisoned data, not an outage: isolate the bad SKUs. Successfully
       // fetched canaries are already in `out` and excluded from the search.

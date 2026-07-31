@@ -500,6 +500,29 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
   }
 }
 
+/**
+ * Rotate SKUs the refresh attempted but could not re-price — the bulk endpoint
+ * ANSWERED without them (delisted, or the API 500s on the product's own data) —
+ * to the back of the stale queue by bumping fetchedAt. The stored prices are
+ * kept (a retry has no better data); the entry simply waits a full TTL cycle
+ * again instead of permanently clogging the head of the queue and starving
+ * every SKU behind it. Never called on an outage: that throws upstream.
+ */
+export async function touchCatalogSkus(market: string, skus: string[]): Promise<void> {
+  if (skus.length === 0) return;
+  const now = new Date();
+  try {
+    for (const part of chunkArray(skus.map(skuKey), 500)) {
+      await db
+        .update(catalogProducts)
+        .set({ fetchedAt: now, updatedAt: now })
+        .where(and(eq(catalogProducts.market, market), inArray(catalogProducts.sku, part)));
+    }
+  } catch (e) {
+    console.warn("[catalog] touch skipped (cache unavailable):", describeDbError(e));
+  }
+}
+
 /** Provenance of existing entries — feed syncs must never overwrite kicksdb rows. */
 export async function getCatalogSources(
   market: string,

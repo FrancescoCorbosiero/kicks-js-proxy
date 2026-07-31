@@ -2,7 +2,7 @@ import "server-only";
 import type { SourceProduct } from "@core/core-spine";
 import type { SourceLike } from "@/server/kicks/service";
 import { skuKey } from "@/lib/skus";
-import { getAnyBySkus, listStaleSkus, upsertCatalog } from "./repo";
+import { getAnyBySkus, listStaleSkus, touchCatalogSkus, upsertCatalog } from "./repo";
 
 /**
  * The built-in "KicksDB refresh" feed: re-price the stalest catalog entries.
@@ -11,8 +11,11 @@ import { getAnyBySkus, listStaleSkus, upsertCatalog } from "./repo";
  * title/brand/image, so fetched variants are MERGED onto the stored product
  * rather than replacing it: identity fields stay, offers/sizes refresh, and
  * upsertCatalog recomputes the denormalized discovery columns. The catalog
- * invariant holds — a SKU the batch didn't return is left untouched (still
- * stale), never removed.
+ * invariant holds — a SKU the batch didn't return keeps its stored prices and
+ * is never removed; it is only rotated to the back of the stale queue
+ * (fetchedAt bumped) so repeat offenders — delisted SKUs, products KicksDB
+ * errors on — can't sit at the head of the queue starving everything behind
+ * them run after run.
  */
 export interface RefreshOutcome {
   requested: number; // stale SKUs attempted this round
@@ -47,5 +50,12 @@ export async function refreshStaleCatalog(
   }
 
   await upsertCatalog(market, merged);
-  return { requested: stale.length, refreshed: merged.length, missed: stale.length - merged.length };
+
+  // Whatever the API answered WITHOUT gets rotated to the back of the queue.
+  // (An outage never reaches here — getPricesBatch throws on one.)
+  const refreshedKeys = new Set(merged.map((p) => skuKey(p.sku)));
+  const missed = stale.filter((s) => !refreshedKeys.has(skuKey(s)));
+  await touchCatalogSkus(market, missed);
+
+  return { requested: stale.length, refreshed: merged.length, missed: missed.length };
 }
