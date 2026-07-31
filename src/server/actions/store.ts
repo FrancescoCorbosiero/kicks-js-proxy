@@ -2,6 +2,7 @@
 
 import { parseStoreModel } from "@/server/store-json/model";
 import { saveSnapshot, getSnapshotInfo, type SnapshotInfo } from "@/server/store-json/repo";
+import { registerWooCatalogEntries } from "@/server/catalog/woo-register";
 
 export interface UploadResult {
   ok: boolean;
@@ -14,6 +15,8 @@ export async function uploadStoreSnapshot(text: string): Promise<UploadResult> {
   try {
     const model = parseStoreModel(text);
     await saveSnapshot(model);
+    // Mirror the whole store into the catalog (store-only products, source "woo").
+    await registerWooCatalogEntries(model);
     const info = await getSnapshotInfo();
     return { ok: true, info: info ?? undefined };
   } catch (e) {

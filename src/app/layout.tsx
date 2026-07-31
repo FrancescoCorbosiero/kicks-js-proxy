@@ -29,11 +29,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
               <a href="/" className="group flex items-center gap-2.5">
                 <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_4px_12px_-6px] shadow-accent/35 transition-transform group-hover:scale-105">
-                  K
+                  S
                 </span>
                 <span className="flex flex-col leading-none">
-                  <span className="text-[13.5px] font-semibold tracking-tight">kicks-js-proxy</span>
-                  <span className="text-[10.5px] font-medium text-faint">StockX → WooCommerce</span>
+                  <span className="text-[13.5px] font-semibold tracking-tight">Store Hub</span>
+                  <span className="text-[10.5px] font-medium text-faint">{t.header.tagline}</span>
                 </span>
               </a>
 

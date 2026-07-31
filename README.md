@@ -1,10 +1,15 @@
-# kicks-js-proxy
+# Store Hub
 
-Internal tool for a single sneaker shop, built around one core domain: an
-**ever-increasing catalog** of StockX products (via the KicksDB API). The
-operator explores the catalog, locks manual prices, and syncs the WooCommerce
-store **live over REST** — pull store state, preview a per-variant repricing
-plan, apply the selected changes (dry-run first).
+*(repo name `kicks-js-proxy` is historical — the app is branded Store Hub.)*
+
+The middleware between a WooCommerce shop and its non-technical vendor: one
+place to **see and manage the whole store inventory**. Built around an
+**ever-increasing, multi-source catalog** that mirrors everything the store
+sells — StockX-priced products (via the KicksDB API), supplier-feed products,
+and plain store-only products with no feed linked. The operator explores the
+catalog, locks manual prices, edits store-only products directly, and syncs
+the WooCommerce store **live over REST** — pull store state, preview a
+per-variant repricing plan, apply the selected changes (dry-run first).
 
 Next.js (App Router) · TypeScript · Tailwind + shadcn-style primitives · Drizzle/Postgres
 · Redis (optional KicksDB cache) · Zod. **No `@tanstack/*`** (enforced in CI).
@@ -34,8 +39,15 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
   discovery (card with a GS badge, drawer, filters). Refreshed by the feed's
   own sync; a later KicksDB verification wins the row (source flips), while
   feed syncs never overwrite a `kicksdb` row.
+- `woo`: the **store mirror** — registered after every snapshot refresh (REST
+  pull or file upload) for store products no feed covers, so the vendor sees
+  the WHOLE inventory, not just feed-linked products. Provenance precedence
+  is `kicksdb` > `goldensneakers` > `woo`: a woo row flips when KicksDB
+  verifies the SKU or the GS feed starts covering it. A `woo` row is
+  inventory only, **never a price source** — `getFreshBySkus`/`getAnyBySkus`
+  exclude it, so preview/apply/rebuild behave exactly as if it weren't there.
 
-Entries never leave. Every route feeds it: syncs, imports, previews.
+Entries never leave. Every route feeds it: syncs, imports, previews, pulls.
 
 Discovery columns (`image`, `min_ask`, `variant_count`, `added_at`) are
 denormalized from the stored product at upsert time, so the grid
@@ -48,18 +60,22 @@ filters/sorts/paginates in SQL.
   store snapshot state, last sync outcome, and a recent-activity feed
   (ingestion runs + apply runs merged). Big plain-language action cards deep-
   link into `/sync`, `/catalog` and `/import`.
-- **Catalog** (`/catalog`) — discovery: **provider tabs** (All / StockX /
-  GoldenSneakers, counts included — ownership is feed coverage minus manual
-  KicksDB pins, matching exactly what the sync does), brand sidebar with
-  counts, debounced search, freshness/price filters, six sorts, paged grid.
-  All state in the URL. Cards show a lock chip when any size carries a manual
-  price. Clicking a card opens the **product drawer** (`?product=<sku>`;
-  full-screen sheet on mobile): per-size asks + computed proposed prices,
-  **re-sync from KicksDB**, prominent per-size **manual price locks** (with
-  lock-all / unlock-all), the per-product **sale rule**, and — when the GS
-  feed covers the SKU — a **price-source switch** that pins the product back
-  to StockX pricing (all via `store_overrides`, keyed by SKU/EU size —
-  snapshot-independent, so the sync honors them automatically).
+- **Catalog** (`/catalog`) — the whole inventory: **provider tabs** (All /
+  StockX / GoldenSneakers / Store-only, counts included — ownership is feed
+  coverage minus manual KicksDB pins, matching exactly what the sync does),
+  brand sidebar with counts, debounced search, freshness/price filters, six
+  sorts, paged grid. All state in the URL. Cards show a lock chip when any
+  size carries a manual price. Clicking a card opens the **product drawer**
+  (`?product=<sku>`; full-screen sheet on mobile). Feed/StockX products get:
+  per-size asks + computed proposed prices, **re-sync from KicksDB**,
+  prominent per-size **manual price locks** (with lock-all / unlock-all), the
+  per-product **sale rule**, and — when the GS feed covers the SKU — a
+  **price-source switch** that pins the product back to StockX pricing (all
+  via `store_overrides`, keyed by SKU/EU size — snapshot-independent, so the
+  sync honors them automatically). Store-only products instead show the LIVE
+  store view — per-size shelf price and real stock — **directly editable**:
+  changes are written to WooCommerce immediately and mirrored into the
+  snapshot.
 - **Sync** (`/sync`) — the main workflow: **align sizes, then patch prices**,
   all over REST:
   1. **Pull**: walk the Woo REST API (`products` incl. attributes + variations)

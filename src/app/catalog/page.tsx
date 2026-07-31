@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
 
 const SORTS: CatalogSort[] = ["brand", "title", "added", "fetched", "priceAsc", "priceDesc"];
 const FRESHNESS: CatalogFreshness[] = ["all", "fresh", "stale"];
-const OWNERS: CatalogOwnerFilter[] = ["all", "kicksdb", "goldensneakers"];
+const OWNERS: CatalogOwnerFilter[] = ["all", "kicksdb", "goldensneakers", "woo"];
 
 function toNumber(x: string | undefined): number | undefined {
   if (!x) return undefined;
@@ -120,7 +120,9 @@ export default async function CatalogPage({
   const ownerLink = (owner?: CatalogOwnerFilter) =>
     `/catalog${buildQuery({ ...params, owner: owner === "all" ? undefined : owner, page: undefined })}`;
   const activeOwner: CatalogOwnerFilter =
-    sp.owner === "kicksdb" || sp.owner === "goldensneakers" ? sp.owner : "all";
+    OWNERS.includes(sp.owner as CatalogOwnerFilter) && sp.owner !== "all"
+      ? (sp.owner as CatalogOwnerFilter)
+      : "all";
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -208,6 +210,13 @@ export default async function CatalogPage({
                 count={ownerCounts.goldensneakers}
                 hint={t.discovery.tabs.goldensneakersHint}
               />
+              <SourceTab
+                href={ownerLink("woo")}
+                active={activeOwner === "woo"}
+                label={t.discovery.tabs.woo}
+                count={ownerCounts.woo}
+                hint={t.discovery.tabs.wooHint}
+              />
             </div>
           </div>
 
@@ -240,6 +249,14 @@ export default async function CatalogPage({
                           GS
                         </span>
                       )}
+                      {activeOwner === "all" && item.source === "woo" && !item.gsOwned && (
+                        <span
+                          className="shrink-0 rounded border border-line bg-surface-2 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted"
+                          title={t.discovery.wooBadgeHint}
+                        >
+                          {t.discovery.wooBadge}
+                        </span>
+                      )}
                       {(lockedCounts.get(item.sku) ?? 0) > 0 && (
                         <span
                           className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent/15 px-1 py-px text-[9px] font-bold text-accent-text tnum"
@@ -249,10 +266,14 @@ export default async function CatalogPage({
                           {lockedCounts.get(item.sku)}
                         </span>
                       )}
-                      <span
-                        className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${item.fresh ? "bg-up" : "bg-skip"}`}
-                        title={item.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}
-                      />
+                      {/* Freshness is a price-source signal — meaningless for
+                          store-only rows, whose data IS the store. */}
+                      {!(item.source === "woo" && !item.gsOwned) && (
+                        <span
+                          className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${item.fresh ? "bg-up" : "bg-skip"}`}
+                          title={item.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}
+                        />
+                      )}
                     </div>
                     <div className="line-clamp-2 min-h-[2.4em] text-[13px] font-medium leading-snug">
                       {item.title || item.sku}

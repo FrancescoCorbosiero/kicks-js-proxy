@@ -1,9 +1,10 @@
 import "server-only";
-import { and, eq, gte, ilike, inArray, lt, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
 import { catalogProducts } from "@/server/db/schema";
 import { skuKey } from "@/lib/skus";
+import { chunkArray } from "@/lib/chunk";
 
 /**
  * Return catalog entries for the given SKUs that are still FRESH (fetched within
@@ -33,6 +34,10 @@ export async function getFreshBySkus(
           eq(catalogProducts.market, market),
           inArray(catalogProducts.sku, keys),
           gte(catalogProducts.fetchedAt, threshold),
+          // The store mirror is inventory, never a price source: a "woo" row
+          // must read as a cache MISS so the normal KicksDB fetch happens
+          // (and, when verified, flips the row to kicksdb).
+          ne(catalogProducts.source, "woo"),
         ),
       );
     for (const r of rows) out.set(r.sku, r.data);
@@ -53,7 +58,15 @@ export async function getAnyBySkus(
     const rows = await db
       .select()
       .from(catalogProducts)
-      .where(and(eq(catalogProducts.market, market), inArray(catalogProducts.sku, skus.map(skuKey))));
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          inArray(catalogProducts.sku, skus.map(skuKey)),
+          // Same as getFreshBySkus: "woo" rows are the store's own mirror —
+          // apply/rebuild must never treat them as a source of truth.
+          ne(catalogProducts.source, "woo"),
+        ),
+      );
     for (const r of rows) out.set(r.sku, r.data);
   } catch (e) {
     console.warn("[catalog] read skipped (cache unavailable):", describeDbError(e));
@@ -105,8 +118,13 @@ export async function listCatalogEntries(
 
 export type CatalogSort = "brand" | "title" | "added" | "fetched" | "priceAsc" | "priceDesc";
 export type CatalogFreshness = "all" | "fresh" | "stale";
-/** Ownership lens: who currently DRIVES the product (feed coverage, not row provenance). */
-export type CatalogOwnerFilter = "all" | "kicksdb" | "goldensneakers";
+/**
+ * Ownership lens: who currently DRIVES the product.
+ *  - goldensneakers: the feed covers the SKU (minus manual KicksDB pins);
+ *  - woo: store-only inventory (registered from the snapshot, no feed linked);
+ *  - kicksdb: everything else — StockX-priced.
+ */
+export type CatalogOwnerFilter = "all" | "kicksdb" | "goldensneakers" | "woo";
 
 export interface CatalogPageFilters {
   brand?: string;
@@ -180,7 +198,10 @@ function pageConditions(market: string, f: CatalogPageFilters, threshold: Date):
   if (f.freshness === "fresh") conds.push(gte(catalogProducts.fetchedAt, threshold));
   if (f.freshness === "stale") conds.push(lt(catalogProducts.fetchedAt, threshold));
   if (f.owner === "goldensneakers") conds.push(sql`${gsOwned}`);
-  if (f.owner === "kicksdb") conds.push(sql`not ${gsOwned}`);
+  if (f.owner === "kicksdb")
+    conds.push(sql`(not ${gsOwned} and ${ne(catalogProducts.source, "woo")})`);
+  if (f.owner === "woo")
+    conds.push(sql`(not ${gsOwned} and ${eq(catalogProducts.source, "woo")})`);
   if (f.priceMin != null) conds.push(gte(catalogProducts.minAsk, f.priceMin));
   if (f.priceMax != null) conds.push(lte(catalogProducts.minAsk, f.priceMax));
   return conds;
@@ -272,6 +293,8 @@ export interface CatalogOwnerCounts {
   total: number;
   kicksdb: number;
   goldensneakers: number;
+  /** Store-only inventory: registered from the Woo snapshot, no feed linked. */
+  woo: number;
 }
 
 /**
@@ -288,15 +311,17 @@ export async function countByOwner(
       .select({
         total: sql<number>`count(*)::int`,
         goldensneakers: sql<number>`count(*) filter (where ${gsOwned})::int`,
+        woo: sql<number>`count(*) filter (where not ${gsOwned} and ${eq(catalogProducts.source, "woo")})::int`,
       })
       .from(catalogProducts)
       .where(eq(catalogProducts.market, market));
     const total = rows[0]?.total ?? 0;
     const goldensneakers = rows[0]?.goldensneakers ?? 0;
-    return { total, goldensneakers, kicksdb: total - goldensneakers };
+    const woo = rows[0]?.woo ?? 0;
+    return { total, goldensneakers, woo, kicksdb: total - goldensneakers - woo };
   } catch (e) {
     console.warn("[catalog] owner counts skipped (cache unavailable):", describeDbError(e));
-    return { total: 0, kicksdb: 0, goldensneakers: 0 };
+    return { total: 0, kicksdb: 0, goldensneakers: 0, woo: 0 };
   }
 }
 
@@ -322,6 +347,7 @@ export interface CatalogEntry {
   sku: string;
   title: string;
   brand: string;
+  source: string; // row provenance: "kicksdb" | "goldensneakers" | "woo"
   image: string;
   minAsk: number | null;
   addedAt: string;
@@ -343,6 +369,7 @@ export async function getCatalogEntry(market: string, sku: string): Promise<Cata
       sku: r.sku,
       title: r.title,
       brand: r.brand,
+      source: r.source,
       image: r.image,
       minAsk: r.minAsk,
       addedAt: r.addedAt.toISOString(),
@@ -445,25 +472,29 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
   }));
 
   try {
-    await db
-      .insert(catalogProducts)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [catalogProducts.market, catalogProducts.sku],
-        set: {
-          source: sql`excluded.source`,
-          stockxId: sql`excluded.stockx_id`,
-          title: sql`excluded.title`,
-          brand: sql`excluded.brand`,
-          image: sql`excluded.image`,
-          minAsk: sql`excluded.min_ask`,
-          variantCount: sql`excluded.variant_count`,
-          data: sql`excluded.data`,
-          fetchedAt: sql`excluded.fetched_at`,
-          updatedAt: sql`excluded.updated_at`,
-          // added_at intentionally NOT updated: it records first insert.
-        },
-      });
+    // Chunked: a whole-store registration can be thousands of rows, and a
+    // single multi-row INSERT would overflow Postgres's parameter limit.
+    for (const chunk of chunkArray(values, 500)) {
+      await db
+        .insert(catalogProducts)
+        .values(chunk)
+        .onConflictDoUpdate({
+          target: [catalogProducts.market, catalogProducts.sku],
+          set: {
+            source: sql`excluded.source`,
+            stockxId: sql`excluded.stockx_id`,
+            title: sql`excluded.title`,
+            brand: sql`excluded.brand`,
+            image: sql`excluded.image`,
+            minAsk: sql`excluded.min_ask`,
+            variantCount: sql`excluded.variant_count`,
+            data: sql`excluded.data`,
+            fetchedAt: sql`excluded.fetched_at`,
+            updatedAt: sql`excluded.updated_at`,
+            // added_at intentionally NOT updated: it records first insert.
+          },
+        });
+    }
   } catch (e) {
     console.warn("[catalog] write skipped (cache unavailable):", describeDbError(e));
   }

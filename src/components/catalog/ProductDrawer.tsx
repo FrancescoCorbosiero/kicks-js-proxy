@@ -13,9 +13,10 @@ import {
   setProductSaleRule,
   setVariationManualPrice,
 } from "@/server/actions/overrides";
+import { updateStoreVariation } from "@/server/actions/store-edit";
 import { LockIcon, UnlockIcon } from "@/components/icons";
 import { CardImage } from "./CardImage";
-import type { DrawerData, DrawerVariant } from "./drawer-data";
+import type { DrawerData, DrawerVariant, StoreDrawerVariant } from "./drawer-data";
 
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
@@ -159,15 +160,25 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
             </div>
             <div className="min-w-0 flex-1 space-y-1 text-xs text-muted">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                    data.fresh ? "bg-up/12 text-up" : "bg-skip/12 text-skip"
-                  }`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${data.fresh ? "bg-up" : "bg-skip"}`} />
-                  {data.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}
-                </span>
+                {data.owner !== "woo" && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      data.fresh ? "bg-up/12 text-up" : "bg-skip/12 text-skip"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${data.fresh ? "bg-up" : "bg-skip"}`} />
+                    {data.fresh ? t.discovery.freshBadge : t.discovery.staleBadge}
+                  </span>
+                )}
                 <span className="text-faint">{data.market}</span>
+                {data.owner === "woo" && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
+                    title={t.drawer.wooOwnedHint}
+                  >
+                    {t.drawer.wooOwned}
+                  </span>
+                )}
                 {data.owner === "goldensneakers" && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
@@ -185,7 +196,9 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
             </div>
           </div>
 
-          {/* Operations */}
+          {/* Operations — meaningless for store-only products (nothing to
+              re-sync, no sale rule, no plan-based sync). */}
+          {data.owner !== "woo" && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
             <Button type="button" variant="accent" size="sm" onClick={resync} disabled={refreshing}>
               {refreshing ? (
@@ -214,6 +227,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
               {t.drawer.syncThis} →
             </Link>
           </div>
+          )}
 
           {/* Price source: who decides this product's prices. Only shown when
               the supplier feed actually covers the SKU, so the choice is real. */}
@@ -252,8 +266,14 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
 
           {error && <p className="text-sm text-skip">{error}</p>}
 
+          {/* Store-only products: the live store view, directly editable. */}
+          {data.owner === "woo" && (
+            <StorePanel data={data} onSaved={() => router.refresh()} onError={setError} />
+          )}
+
           {/* Prices: per-size manual locks. The one panel a non-technical
               operator must understand, so it explains itself. */}
+          {data.owner !== "woo" && (
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
             <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
               <div className="min-w-0 flex-1">
@@ -308,9 +328,180 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
               ))}
             </ul>
           </div>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Store-only product panel: per-size shelf price + real stock from the live
+ * snapshot, edited in place and written straight to WooCommerce.
+ */
+function StorePanel({
+  data,
+  onSaved,
+  onError,
+}: {
+  data: DrawerData;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useI18n();
+
+  if (!data.store) {
+    return (
+      <div className="rounded-xl border border-line bg-surface p-4 text-sm text-muted">
+        {t.drawer.storeNoSnapshot}
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="border-b border-line px-3 py-2.5">
+        <div className="text-xs font-semibold">{t.drawer.storeTitle}</div>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted">{t.drawer.storeExplain}</p>
+      </div>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 border-b border-line bg-surface-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+        <span>{t.product.headerSize}</span>
+        <span className="text-right">{t.drawer.storeHeaderPrice}</span>
+        <span className="text-right">{t.drawer.storeHeaderStock}</span>
+        <span />
+      </div>
+      <ul className="divide-y divide-line/60">
+        {data.store.variants.map((v) => (
+          <StoreVariantRow
+            key={v.variationId}
+            productId={data.store!.productId}
+            variant={v}
+            onSaved={onSaved}
+            onError={onError}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StoreVariantRow({
+  productId,
+  variant,
+  onSaved,
+  onError,
+}: {
+  productId: number;
+  variant: StoreDrawerVariant;
+  onSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const [editing, setEditing] = React.useState(false);
+  const [price, setPrice] = React.useState(variant.price != null ? String(variant.price) : "");
+  const [stock, setStock] = React.useState(variant.stock != null ? String(variant.stock) : "");
+  const [saving, startSaving] = React.useTransition();
+
+  function save() {
+    const p = price.trim() === "" ? undefined : Number.parseFloat(price.replace(",", "."));
+    const s = stock.trim() === "" ? undefined : Number.parseInt(stock, 10);
+    if (p !== undefined && (!Number.isFinite(p) || p <= 0)) return;
+    if (s !== undefined && (!Number.isInteger(s) || s < 0)) return;
+    if (p === undefined && s === undefined) {
+      setEditing(false);
+      return;
+    }
+    startSaving(async () => {
+      const res = await updateStoreVariation({
+        storeProductId: productId,
+        variationId: variant.variationId,
+        price: p,
+        stock: s,
+      });
+      if (res.ok) {
+        setEditing(false);
+        onSaved();
+      } else {
+        onError(res.error ?? t.drawer.saveFailed);
+      }
+    });
+  }
+
+  if (editing) {
+    return (
+      <li className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+        <span className="min-w-16 font-medium tnum">{variant.sizeLabel}</span>
+        <form
+          className="flex flex-1 flex-wrap items-center justify-end gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <Input
+            autoFocus
+            inputMode="decimal"
+            aria-label={t.drawer.storeHeaderPrice}
+            className="h-7 w-24 text-right text-xs"
+            placeholder={t.drawer.storeHeaderPrice}
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+          <Input
+            inputMode="numeric"
+            aria-label={t.drawer.storeHeaderStock}
+            className="h-7 w-16 text-right text-xs"
+            placeholder={t.drawer.storeHeaderStock}
+            value={stock}
+            onChange={(e) => setStock(e.target.value)}
+          />
+          <Button type="submit" size="sm" variant="accent" disabled={saving} className="h-7 px-2 text-xs">
+            {saving ? t.product.saving : t.drawer.storeSave}
+          </Button>
+          <button
+            type="button"
+            aria-label={t.product.manualCancel}
+            className="rounded p-1 text-faint hover:text-ink"
+            onClick={() => setEditing(false)}
+          >
+            ✕
+          </button>
+        </form>
+      </li>
+    );
+  }
+
+  return (
+    <li className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 px-3 py-2 text-sm">
+      <span className="font-medium tnum">{variant.sizeLabel}</span>
+      <span className="text-right tnum">
+        {variant.price != null ? eur.format(variant.price) : <span className="text-faint">—</span>}
+        {variant.saleActive && (
+          <span className="ml-1 text-[10px] font-medium text-update">{t.drawer.storeSale}</span>
+        )}
+      </span>
+      <span
+        className={`text-right text-xs tnum ${variant.stock === 0 ? "text-skip" : "text-muted"}`}
+        title={variant.stock == null ? t.drawer.storeUnmanagedHint : undefined}
+      >
+        {variant.stock != null ? t.drawer.qty(variant.stock) : "—"}
+      </span>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-[11px]"
+          onClick={() => {
+            setPrice(variant.price != null ? String(variant.price) : "");
+            setStock(variant.stock != null ? String(variant.stock) : "");
+            setEditing(true);
+          }}
+        >
+          {t.drawer.storeEdit}
+        </Button>
+      </div>
+    </li>
   );
 }
 
