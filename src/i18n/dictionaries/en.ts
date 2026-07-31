@@ -3,10 +3,12 @@ import type { Dictionary } from "../dictionary";
 /** English dictionary. Must match the shape of the Italian source of truth. */
 export const en: Dictionary = {
   meta: {
-    title: "kicks-js-proxy — StockX → WooCommerce",
-    description: "StockX → WooCommerce repricing & sync",
+    title: "Store Hub — your store, one place",
+    description:
+      "The bridge between the WooCommerce store and its price lists: full inventory, prices and sync",
   },
   header: {
+    tagline: "WooCommerce · price lists · prices",
     navDashboard: "Overview",
     navCatalog: "Catalog",
     navSync: "Sync",
@@ -36,6 +38,7 @@ export const en: Dictionary = {
     statCatalog: "Products in catalog",
     statKicksdb: "with StockX prices",
     statGs: "managed by the supplier",
+    statWoo: "store only",
     statStale: "Prices to refresh",
     statStaleHint:
       "These products carry StockX prices older than the limit. Refresh them in one click from the Feeds tab.",
@@ -56,6 +59,7 @@ export const en: Dictionary = {
       preview: "Catalog preview",
       kicksdbRefresh: "StockX price refresh",
       gsSync: "Supplier price list sync",
+      wooRegister: "Store inventory registered",
       dryRun: "Sync dry run",
       applied: "Store sync",
       applyLine: (n) => `${n} ${n === 1 ? "price written" : "prices written"}`,
@@ -244,7 +248,7 @@ export const en: Dictionary = {
   },
   discovery: {
     title: "Catalog",
-    desc: "Every SKU verified fetchable on KicksDB — the set grows with every sync and import, and never shrinks.",
+    desc: "The store's whole inventory in one place: StockX-priced products, supplier price-list products, and store-only products.",
     total: (n) => `${n} SKUs`,
     searchPlaceholder: "Search by SKU or model…",
     brands: "Brands",
@@ -277,7 +281,13 @@ export const en: Dictionary = {
       goldensneakers: "GoldenSneakers",
       goldensneakersHint:
         "Products managed by the GoldenSneakers supplier: real sizes, prices and stock from its price list",
+      woo: "Store",
+      wooHint:
+        "Store-only products: no price list linked — price and stock are edited directly from the product sheet",
     },
+    wooBadge: "Store",
+    wooBadgeHint:
+      "Store-only product: not linked to any price list — price and stock are edited directly from the sheet",
     lockedHint: (n) =>
       n === 1
         ? "1 hand-locked price — sync never touches it"
@@ -317,6 +327,19 @@ export const en: Dictionary = {
       "Sizes, prices and stock come from the GoldenSneakers supplier price list (automatic).",
     sourceKicksdbHint:
       "You forced StockX prices for this product: the supplier price list is ignored.",
+    wooOwned: "Store only",
+    wooOwnedHint: "Product not linked to any price list: what you see is the store's real state.",
+    storeTitle: "Store prices & stock",
+    storeExplain:
+      "This product is not linked to any price list: this is the store's real state. Change price or quantity and press Save — the change goes to WooCommerce IMMEDIATELY.",
+    storeNoSnapshot:
+      "Store state unavailable for this product — run a store download from the Sync tab first.",
+    storeHeaderPrice: "Price",
+    storeHeaderStock: "Stock",
+    storeEdit: "Edit",
+    storeSave: "Save",
+    storeSale: "on sale",
+    storeUnmanagedHint: "Stock not managed on this size",
   },
   sync: {
     title: "Woo Sync",

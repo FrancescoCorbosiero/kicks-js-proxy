@@ -77,7 +77,7 @@ export default async function Home() {
           cta={d.catalogCardCta}
           lines={[
             `${data.catalog.total} ${d.statCatalog.toLowerCase()}`,
-            `${data.catalog.kicksdb} ${d.statKicksdb} · ${data.catalog.goldensneakers} ${d.statGs}`,
+            `${data.catalog.kicksdb} ${d.statKicksdb} · ${data.catalog.goldensneakers} ${d.statGs} · ${data.catalog.woo} ${d.statWoo}`,
           ]}
         />
         <ActionCard
@@ -210,7 +210,9 @@ function ActivityRow({ item, t }: { item: ActivityItem; t: Dictionary }) {
             ? d.act.kicksdbRefresh
             : source === "feed:goldensneakers"
               ? d.act.gsSync
-              : d.act.preview;
+              : source === "store:woo"
+                ? d.act.wooRegister
+                : d.act.preview;
     detail = t.importPage.historyLine(item.run.added, item.run.known, item.run.rejected);
     dotClass = item.run.error ? "bg-skip" : "bg-down";
   }

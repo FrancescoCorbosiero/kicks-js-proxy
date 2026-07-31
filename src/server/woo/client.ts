@@ -35,6 +35,8 @@ const WooProductSchema = z.looseObject({
   status: z.string().nullish(),
   permalink: z.string().nullish(),
   date_modified: z.string().nullish(),
+  // First entry's src feeds the catalog card of store-only products.
+  images: z.array(z.looseObject({ src: z.string().nullish() })).nullish(),
   // Needed by the cleanup: the parent pa_taglia option list lives here.
   attributes: z.array(z.unknown()).nullish(),
 });

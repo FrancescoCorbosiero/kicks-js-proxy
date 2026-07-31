@@ -42,20 +42,20 @@ function plausibleEu(size: string | null): string | null {
   return Number.isFinite(n) && n >= EU_MIN && n <= EU_MAX ? size : null;
 }
 
-function parsePrice(s?: string | null): number | null {
+export function parsePrice(s?: string | null): number | null {
   if (s == null || s === "") return null;
   const n = Number.parseFloat(s);
   return Number.isNaN(n) ? null : n;
 }
 
 /** A variation is on a manual discount when it has a positive sale_price. */
-function hasActiveSale(s?: string | null): boolean {
+export function hasActiveSale(s?: string | null): boolean {
   const n = parsePrice(s);
   return n != null && n > 0;
 }
 
 /** The store's MANAGED stock quantity, or null when stock is unmanaged. */
-function managedStock(vrt: StoreVariation): number | null {
+export function managedStock(vrt: StoreVariation): number | null {
   const managed = vrt.manage_stock;
   if (managed !== true && managed !== "true" && managed !== 1) return null;
   const q = vrt.stock_quantity;

@@ -11,7 +11,16 @@ import {
   ownerPinFor,
 } from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
-import { sourceEuSize } from "@/server/store-json/match";
+import { getActiveSnapshot } from "@/server/store-json/repo";
+import {
+  hasActiveSale,
+  managedStock,
+  normSize,
+  parsePrice,
+  sourceEuSize,
+  variationSizeLabel,
+} from "@/server/store-json/match";
+import { skuKey } from "@/lib/skus";
 
 /** One drawer row: a size variant with its ask, computed price and override state. */
 export interface DrawerVariant {
@@ -26,6 +35,15 @@ export interface DrawerVariant {
   manual: number | null; // operator-locked price (overrides subsystem)
 }
 
+/** One size of a store-only product: live shelf price + managed stock. */
+export interface StoreDrawerVariant {
+  variationId: number;
+  sizeLabel: string;
+  price: number | null;
+  saleActive: boolean;
+  stock: number | null; // null = stock not managed on this variation
+}
+
 export interface DrawerData {
   market: string;
   sku: string;
@@ -38,13 +56,15 @@ export interface DrawerData {
   fetchedAt: string;
   fresh: boolean;
   followSaleRule: boolean;
-  /** Who owns this product: the feed's variant set replaces KicksDB's when GS. */
-  owner: "kicksdb" | "goldensneakers";
+  /** Who owns this product: feed > store-only mirror > KicksDB. */
+  owner: "kicksdb" | "goldensneakers" | "woo";
   /** An active GS feed listing covers this SKU → the price-source switch is shown. */
   gsCovered: boolean;
   /** The operator pinned this product back to StockX/KicksDB pricing. */
   pinnedToKicksdb: boolean;
   variants: DrawerVariant[];
+  /** Store-only products: the live snapshot view, directly editable. */
+  store: { productId: number; variants: StoreDrawerVariant[] } | null;
 }
 
 /**
@@ -109,6 +129,34 @@ export async function loadDrawerData(
     }
   }
 
+  // Store-only products (source "woo", no feed linked): the drawer shows the
+  // LIVE snapshot — shelf price + real stock per size — and edits write
+  // straight to WooCommerce. No asks, no proposed prices, no locks.
+  const storeOnly = entry.source === "woo" && gs == null;
+  let store: DrawerData["store"] = null;
+  if (storeOnly) {
+    const snapshot = await getActiveSnapshot().catch(() => null);
+    const prod = snapshot?.products.find((p) => skuKey(p.sku) === entry.sku);
+    if (prod) {
+      store = {
+        productId: prod.id,
+        variants: prod.variations
+          .map<StoreDrawerVariant>((v) => ({
+            variationId: v.id,
+            sizeLabel: variationSizeLabel(prod.sku, v) ?? v.sku ?? String(v.id),
+            price: parsePrice(v.regular_price),
+            saleActive: hasActiveSale(v.sale_price),
+            stock: managedStock(v),
+          }))
+          .sort((a, b) => {
+            const an = Number.parseFloat(normSize(a.sizeLabel) ?? "");
+            const bn = Number.parseFloat(normSize(b.sizeLabel) ?? "");
+            return (Number.isFinite(an) ? an : 999) - (Number.isFinite(bn) ? bn : 999);
+          }),
+      };
+    }
+  }
+
   return {
     market,
     sku: entry.sku,
@@ -121,11 +169,13 @@ export async function loadDrawerData(
     fetchedAt: entry.fetchedAt,
     fresh:
       gs != null ||
+      storeOnly ||
       new Date(entry.fetchedAt).getTime() >= Date.now() - config.source.cacheTtlSeconds * 1000,
     followSaleRule: overrides ? followSaleRuleFor(overrides, product.sku) : true,
-    owner: gs ? "goldensneakers" : "kicksdb",
+    owner: gs ? "goldensneakers" : storeOnly ? "woo" : "kicksdb",
     gsCovered: covered != null,
     pinnedToKicksdb: pin === "kicksdb",
     variants,
+    store,
   };
 }

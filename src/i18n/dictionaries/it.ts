@@ -10,10 +10,12 @@ import type { RoundingMode } from "@/server/config/summary";
  */
 export const it = {
   meta: {
-    title: "kicks-js-proxy — StockX → WooCommerce",
-    description: "Rivalutazione e sincronizzazione prezzi StockX → WooCommerce",
+    title: "Store Hub — il tuo negozio, un unico posto",
+    description:
+      "Il ponte tra il negozio WooCommerce e i listini: inventario completo, prezzi e sincronizzazione",
   },
   header: {
+    tagline: "WooCommerce · listini · prezzi",
     navDashboard: "Panoramica",
     navCatalog: "Catalogo",
     navSync: "Sync",
@@ -44,6 +46,7 @@ export const it = {
     statCatalog: "Prodotti a catalogo",
     statKicksdb: "con prezzi StockX",
     statGs: "gestiti dal fornitore",
+    statWoo: "solo negozio",
     statStale: "Prezzi da aggiornare",
     statStaleHint:
       "Questi prodotti hanno prezzi StockX più vecchi del limite. Aggiornali con un clic dalla scheda Feed.",
@@ -64,6 +67,7 @@ export const it = {
       preview: "Anteprima catalogo",
       kicksdbRefresh: "Aggiornamento prezzi StockX",
       gsSync: "Sincronizzazione listino fornitore",
+      wooRegister: "Inventario negozio registrato",
       dryRun: "Prova di sincronizzazione",
       applied: "Sincronizzazione negozio",
       applyLine: (n: number) => `${n} ${n === 1 ? "prezzo scritto" : "prezzi scritti"}`,
@@ -253,7 +257,7 @@ export const it = {
   },
   discovery: {
     title: "Catalogo",
-    desc: "Ogni SKU verificato come recuperabile su KicksDB — l'insieme cresce a ogni sincronizzazione e importazione, non si riduce mai.",
+    desc: "Tutto l'inventario del negozio in un posto solo: prodotti con prezzi StockX, prodotti del listino fornitore e prodotti solo negozio.",
     total: (n: number) => `${n} SKU`,
     searchPlaceholder: "Cerca per SKU o modello…",
     brands: "Brand",
@@ -286,7 +290,13 @@ export const it = {
       goldensneakers: "GoldenSneakers",
       goldensneakersHint:
         "Prodotti gestiti dal fornitore GoldenSneakers: taglie, prezzi e stock reali dal suo listino",
+      woo: "Negozio",
+      wooHint:
+        "Prodotti solo negozio: nessun listino collegato — prezzi e stock si modificano direttamente dalla scheda prodotto",
     },
+    wooBadge: "Negozio",
+    wooBadgeHint:
+      "Prodotto solo negozio: non collegato a nessun listino — prezzi e stock si modificano direttamente dalla scheda",
     lockedHint: (n: number) =>
       n === 1
         ? "1 prezzo bloccato a mano — la sincronizzazione non lo tocca"
@@ -326,6 +336,20 @@ export const it = {
       "Taglie, prezzi e stock arrivano dal listino del fornitore GoldenSneakers (automatico).",
     sourceKicksdbHint:
       "Hai forzato i prezzi StockX per questo prodotto: il listino del fornitore viene ignorato.",
+    wooOwned: "Solo negozio",
+    wooOwnedHint:
+      "Prodotto non collegato a nessun listino: quello che vedi è lo stato reale del negozio.",
+    storeTitle: "Prezzi e stock sul negozio",
+    storeExplain:
+      "Questo prodotto non è collegato a nessun listino: qui vedi lo stato reale del negozio. Modifica prezzo o quantità e premi Salva — la modifica va SUBITO su WooCommerce.",
+    storeNoSnapshot:
+      "Stato del negozio non disponibile per questo prodotto — esegui prima uno scaricamento dalla scheda Sync.",
+    storeHeaderPrice: "Prezzo",
+    storeHeaderStock: "Stock",
+    storeEdit: "Modifica",
+    storeSave: "Salva",
+    storeSale: "in saldo",
+    storeUnmanagedHint: "Quantità non gestita su questa taglia",
   },
   sync: {
     title: "Sync Woo",
