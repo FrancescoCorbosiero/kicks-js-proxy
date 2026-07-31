@@ -82,7 +82,11 @@ export const KicksProductSchema = z.object({
 });
 
 export const KicksProductsResponseSchema = z.object({
-  data: z.array(KicksProductSchema),
+  // "No results" comes back as data: null, not [] — treat both as empty.
+  data: z
+    .array(KicksProductSchema)
+    .nullish()
+    .transform((v) => v ?? []),
   meta: z
     .object({
       current_page: z.number(),
@@ -113,7 +117,13 @@ export const KicksPricesProductSchema = z.object({
 });
 
 export const KicksPricesResponseSchema = z.object({
-  data: z.array(KicksPricesProductSchema),
+  // A batch where NO SKU matches (e.g. store-only products riding along in
+  // the whole-store preview) comes back as data: null — that's an empty
+  // result, not an error.
+  data: z
+    .array(KicksPricesProductSchema)
+    .nullish()
+    .transform((v) => v ?? []),
   meta: z.unknown().nullish(),
 });
 
