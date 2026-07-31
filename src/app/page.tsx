@@ -51,6 +51,14 @@ export default async function Home() {
             →
           </Link>
         )}
+        {data.duplicateSkus > 0 && (
+          <Link
+            href="/duplicates"
+            className="block rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-ink transition-colors hover:bg-warn/15"
+          >
+            {d.dupBanner(data.duplicateSkus)} →
+          </Link>
+        )}
       </div>
 
       {/* The three things the operator actually does, as big cards. */}
