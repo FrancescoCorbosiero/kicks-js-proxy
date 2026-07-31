@@ -12,11 +12,38 @@ export const DeliveryTypeSchema = z.enum([
   "express_expedited",
 ]);
 
+type DeliveryType = z.infer<typeof DeliveryTypeSchema>;
+
+/**
+ * KicksDB grows new delivery tiers over time, and a strict enum here once
+ * failed the ENTIRE bulk-prices response (and with it the store preview) the
+ * day a new value appeared. Unknown/missing values become undefined; the
+ * mappers drop those rows — pricing only ever reads the configured tier.
+ */
+const TolerantDeliveryType = z
+  .string()
+  .nullish()
+  .transform((v): DeliveryType | undefined =>
+    DeliveryTypeSchema.safeParse(v).success ? (v as DeliveryType) : undefined,
+  );
+
 const PriceSchema = z.object({
   price: z.number(),
   asks: z.number(),
-  type: DeliveryTypeSchema,
+  type: TolerantDeliveryType,
 });
+
+/** prices[] with unknown-tier entries dropped; empty → undefined so the
+ *  mapper's lowest_ask fallback kicks in. */
+const PricesArraySchema = z
+  .array(PriceSchema)
+  .nullish()
+  .transform((list) => {
+    const kept = (list ?? []).flatMap((p) =>
+      p.type == null ? [] : [{ price: p.price, asks: p.asks, type: p.type }],
+    );
+    return kept.length > 0 ? kept : undefined;
+  });
 
 const IdentifierSchema = z.object({
   identifier: z.string(),
@@ -38,7 +65,7 @@ export const KicksVariantSchema = z.object({
   size_type: z.string(),
   sizes: z.array(SizeSchema).nullish().transform(undef),
   identifiers: z.array(IdentifierSchema).nullish().transform(undef),
-  prices: z.array(PriceSchema).nullish().transform(undef),
+  prices: PricesArraySchema,
   lowest_ask: z.number().nullish().transform(undef),
   total_asks: z.number().nullish().transform(undef),
   currency: z.string().nullish().transform(undef),
@@ -76,7 +103,7 @@ const BulkVariantSchema = z.object({
   sizes: z.array(SizeSchema).nullish().transform(undef), // present only with show_sizes
   price: z.number().nullish().transform(undef),
   asks: z.number().nullish().transform(undef),
-  type: DeliveryTypeSchema.nullish().transform(undef),
+  type: TolerantDeliveryType,
 });
 
 export const KicksPricesProductSchema = z.object({
