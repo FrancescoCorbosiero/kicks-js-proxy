@@ -184,6 +184,18 @@ export class WooClient {
     };
   }
 
+  /**
+   * Remove a product. Default is Woo's TRASH (recoverable from wp-admin);
+   * force=true would delete permanently — the duplicates cleanup never uses it.
+   */
+  async deleteProduct(productId: number, force = false): Promise<void> {
+    await requestJson(
+      this.apiUrl(`products/${productId}`, force ? { force: "true" } : {}),
+      { method: "DELETE", headers: this.headers() },
+      this.retry,
+    );
+  }
+
   /** Update parent-product fields (e.g. the realigned pa_taglia option list). */
   async updateProduct(productId: number, body: Record<string, unknown>): Promise<void> {
     await requestJson(

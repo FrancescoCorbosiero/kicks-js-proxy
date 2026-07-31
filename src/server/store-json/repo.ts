@@ -53,6 +53,30 @@ export async function getActiveSnapshot(): Promise<StoreModel | null> {
   return rows.length ? (rows[0].data as StoreModel) : null;
 }
 
+/**
+ * How many store SKUs appear on MORE than one product — the dashboard's
+ * duplicate banner. Computed in SQL over the jsonb so the dashboard never
+ * loads the multi-MB snapshot blob. Best-effort: 0 on any error.
+ */
+export async function countDuplicateSkus(): Promise<number> {
+  try {
+    const res = await db.execute(sql`
+      select count(*)::int as n from (
+        select upper(trim(p->>'sku')) as k
+        from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+        where ${storeSnapshot.id} = ${SINGLETON} and coalesce(trim(p->>'sku'), '') <> ''
+        group by 1
+        having count(*) > 1
+      ) g
+    `);
+    const rows = res as unknown as { n?: number | string }[];
+    const n = Array.isArray(rows) ? rows[0]?.n : undefined;
+    return typeof n === "number" ? n : Number.parseInt(String(n ?? "0"), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getSnapshotInfo(): Promise<SnapshotInfo | null> {
   const rows = await db
     .select({

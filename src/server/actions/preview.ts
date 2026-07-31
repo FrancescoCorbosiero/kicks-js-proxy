@@ -208,10 +208,13 @@ export async function previewFromStore(
   if (!snapshot) {
     return { ok: false, error: "Upload a store snapshot first.", plans: [] };
   }
-  const skus =
+  // Deduped by canonical key: a messy store can carry the same parent SKU on
+  // several products, and duplicate requests became duplicate preview plans.
+  const rawSkus =
     skusOverride && skusOverride.length > 0
       ? skusOverride
       : snapshot.products.map((p) => p.sku).filter((s): s is string => !!s);
+  const skus = [...new Map(rawSkus.map((s) => [skuKey(s), s])).values()];
   if (skus.length === 0) {
     return { ok: false, error: "The store snapshot has no products.", plans: [] };
   }

@@ -51,6 +51,10 @@ export const en: Dictionary = {
     lastSync: (when) => `Last sync ${when}`,
     lastSyncNever: "No sync has run yet",
     snapshotUpdated: (when) => `updated ${when}`,
+    dupBanner: (n) =>
+      n === 1
+        ? "1 duplicated product on the store — review and fix"
+        : `${n} SKUs with duplicated products on the store — review and fix`,
     activityTitle: "Recent activity",
     activityEmpty: "No activity yet — start by importing some products.",
     act: {
@@ -340,6 +344,37 @@ export const en: Dictionary = {
     storeSave: "Save",
     storeSale: "on sale",
     storeUnmanagedHint: "Stock not managed on this size",
+  },
+  duplicates: {
+    title: "Duplicated products",
+    desc: "These products share the same SKU on the store: copies born from old imports that confuse customers and split stock. Redundant copies can be moved to the WordPress trash — recoverable, never permanently deleted.",
+    noSnapshot:
+      "The store state is needed to compute duplicates — run a store download from the Sync tab first.",
+    empty: "All clean: every SKU appears on exactly one product.",
+    groups: (n) => (n === 1 ? "1 SKU with copies" : `${n} SKUs with copies`),
+    keeperBadge: "KEEP THIS",
+    dupBadge: "COPY",
+    unnamed: "(unnamed)",
+    meta: (id, sizes, stock) => `#${id} · ${sizes} sizes · ${stock} pcs`,
+    safeHint: "Safe to remove: every size it carries already exists on the product to keep.",
+    unsafe: (sizes) => `Check by hand: it carries sizes the kept product lacks (${sizes}).`,
+    trash: "Move to trash",
+    trashing: "Moving…",
+    bulkTitle: (n) =>
+      n === 0
+        ? "no copy removable automatically"
+        : n === 1
+          ? "1 safe copy to remove"
+          : `${n} safe copies to remove`,
+    bulkHint: "They go to the WordPress trash: recover them anytime from wp-admin → Products → Trash.",
+    bulkStart: (n) => `Move all to trash (${n})`,
+    bulkConfirm: "Sure? Press again to confirm",
+    bulkProgress: (done, total) => `${done}/${total} moved…`,
+    bulkDone: (n) => `${n} copies moved to the trash ✓`,
+    bulkErrors: (n) => `${n} failed — retry`,
+    openInWoo: "Open in WordPress",
+    notConfigured: "WooCommerce REST is not configured — the report works, removal doesn't.",
+    failed: "Removal failed",
   },
   sync: {
     title: "Woo Sync",

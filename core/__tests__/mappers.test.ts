@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapKicksProduct, mapKicksPrices } from "../core-spine";
+import { mapKicksProduct, mapKicksPrices, mergeProductsBySku } from "../core-spine";
 
 describe("mapKicksProduct size normalization", () => {
   it("normalizes the sizes[] array, lowercasing the system and tolerating key variants", () => {
@@ -126,5 +126,40 @@ describe("mapKicksProduct size normalization", () => {
       "IT",
     );
     expect(sp.variants[0].sizes).toEqual([]);
+  });
+});
+
+describe("mergeProductsBySku", () => {
+  const variant = (id: string, price: number, type = "standard") => ({
+    stockxVariantId: id,
+    sizeLabel: "42",
+    sizeType: "eu",
+    offers: [{ deliveryType: type as "standard", lowestAsk: price, asks: 1 }],
+  });
+
+  it("collapses duplicate SKU entries into one product (the duplicate-plans bug)", () => {
+    const merged = mergeProductsBySku([
+      { stockxId: "a", sku: "IQ7604-100", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 100)] },
+      { stockxId: "a", sku: "iq7604-100 ", title: "Travis", brand: "Jordan", image: "x", market: "IT", currency: "EUR", variants: [variant("v1", 90, "express_standard"), variant("v2", 120)] },
+      { stockxId: "b", sku: "OTHER-1", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v9", 50)] },
+    ]);
+    expect(merged).toHaveLength(2);
+    const first = merged[0];
+    // variants merged by id; offers merged across entries by delivery type
+    expect(first.variants).toHaveLength(2);
+    const v1 = first.variants.find((v) => v.stockxVariantId === "v1")!;
+    expect(v1.offers.map((o) => o.deliveryType).sort()).toEqual(["express_standard", "standard"]);
+    // richest identity survives
+    expect(first.title).toBe("Travis");
+  });
+
+  it("keeps the first offer when duplicates share a delivery type", () => {
+    const merged = mergeProductsBySku([
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 100)] },
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 999)] },
+    ]);
+    expect(merged[0].variants[0].offers).toEqual([
+      { deliveryType: "standard", lowestAsk: 100, asks: 1 },
+    ]);
   });
 });

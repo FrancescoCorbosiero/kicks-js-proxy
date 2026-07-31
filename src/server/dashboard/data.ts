@@ -7,7 +7,7 @@ import { listIngestionRuns, type IngestionHistoryEntry } from "@/server/ingestio
 import { listApplyHistory, type ApplyHistoryEntry } from "@/server/woo/apply";
 import { getLatestPullRun } from "@/server/woo/pull";
 import { wooConfigured } from "@/server/woo/client";
-import { getSnapshotInfo, type SnapshotInfo } from "@/server/store-json/repo";
+import { countDuplicateSkus, getSnapshotInfo, type SnapshotInfo } from "@/server/store-json/repo";
 import { feedStats, GS_FEED } from "@/server/feeds/repo";
 import { gsConfigured } from "@/server/feeds/goldensneakers";
 import { assertSchemaCurrent } from "@/server/db/probe";
@@ -30,6 +30,8 @@ export interface DashboardData {
   /** The last LIVE apply that wrote something (dry runs and failures excluded). */
   lastApply: ApplyHistoryEntry | null;
   feed: { activeSkus: number; activeRows: number };
+  /** Store SKUs carried by more than one product — the duplicates banner. */
+  duplicateSkus: number;
   activity: ActivityItem[];
 }
 
@@ -49,7 +51,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const overrides = await getOverrides().catch(() => null);
   const pinnedToKicksdb = overrides ? skusPinnedTo(overrides, "kicksdb") : [];
 
-  const [catalog, staleCount, snapshot, latestPull, applyHistory, ingestionRuns, feed] =
+  const [catalog, staleCount, snapshot, latestPull, applyHistory, ingestionRuns, feed, duplicateSkus] =
     await Promise.all([
       countByOwner(market, pinnedToKicksdb),
       countStale(market, ttlSeconds),
@@ -58,6 +60,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
       listApplyHistory(6).catch(() => [] as ApplyHistoryEntry[]),
       listIngestionRuns(10),
       feedStats(GS_FEED),
+      countDuplicateSkus(),
     ]);
 
   // Both run shapes carry ISO startedAt strings, so a string sort is a time sort.
@@ -87,6 +90,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
       applyHistory.find(
         (r) => !r.dryRun && (r.status === "applied" || r.status === "partial"),
       ) ?? null,
+    duplicateSkus,
     feed: { activeSkus: feed.activeSkus, activeRows: feed.activeRows },
     activity,
   };

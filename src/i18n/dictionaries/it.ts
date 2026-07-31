@@ -59,6 +59,10 @@ export const it = {
     lastSync: (when: string) => `Ultima sincronizzazione ${when}`,
     lastSyncNever: "Nessuna sincronizzazione eseguita finora",
     snapshotUpdated: (when: string) => `aggiornato ${when}`,
+    dupBanner: (n: number) =>
+      n === 1
+        ? "1 prodotto duplicato sul negozio — controlla e sistema"
+        : `${n} SKU con prodotti duplicati sul negozio — controlla e sistema`,
     activityTitle: "Attività recente",
     activityEmpty: "Ancora nessuna attività — comincia importando qualche prodotto.",
     act: {
@@ -350,6 +354,40 @@ export const it = {
     storeSave: "Salva",
     storeSale: "in saldo",
     storeUnmanagedHint: "Quantità non gestita su questa taglia",
+  },
+  duplicates: {
+    title: "Prodotti duplicati",
+    desc: "Questi prodotti condividono lo stesso SKU sul negozio: copie nate da vecchie importazioni che confondono i clienti e dividono lo stock. Le copie superflue si possono spostare nel cestino di WordPress — recuperabili, mai eliminate per sempre.",
+    noSnapshot:
+      "Serve lo stato del negozio per calcolare i duplicati — esegui prima uno scaricamento dalla scheda Sync.",
+    empty: "Tutto pulito: ogni SKU compare su un solo prodotto.",
+    groups: (n: number) => (n === 1 ? "1 SKU con doppioni" : `${n} SKU con doppioni`),
+    keeperBadge: "DA TENERE",
+    dupBadge: "DOPPIONE",
+    unnamed: "(senza nome)",
+    meta: (id: number, sizes: number, stock: number) => `#${id} · ${sizes} taglie · ${stock} pz`,
+    safeHint: "Sicuro da rimuovere: tutte le sue taglie esistono già sul prodotto da tenere.",
+    unsafe: (sizes: string) =>
+      `Da controllare a mano: ha taglie che il prodotto da tenere non ha (${sizes}).`,
+    trash: "Sposta nel cestino",
+    trashing: "Spostamento…",
+    bulkTitle: (n: number) =>
+      n === 0
+        ? "nessun doppione rimovibile in automatico"
+        : n === 1
+          ? "1 doppione sicuro da rimuovere"
+          : `${n} doppioni sicuri da rimuovere`,
+    bulkHint:
+      "Vanno nel cestino di WordPress: puoi sempre recuperarli da wp-admin → Prodotti → Cestino.",
+    bulkStart: (n: number) => `Sposta tutti nel cestino (${n})`,
+    bulkConfirm: "Sicuro? Premi di nuovo per confermare",
+    bulkProgress: (done: number, total: number) => `${done}/${total} spostati…`,
+    bulkDone: (n: number) => `${n} doppioni spostati nel cestino ✓`,
+    bulkErrors: (n: number) => `${n} non riusciti — riprova`,
+    openInWoo: "Apri in WordPress",
+    notConfigured:
+      "REST WooCommerce non configurato — il report funziona, la rimozione no.",
+    failed: "Rimozione fallita",
   },
   sync: {
     title: "Sync Woo",
