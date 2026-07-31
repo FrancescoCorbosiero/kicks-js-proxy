@@ -27,6 +27,7 @@ export interface DashboardData {
   snapshot: SnapshotInfo | null;
   /** Progress of a pull that is mid-flight right now, else null. */
   runningPull: { productsFetched: number; totalProducts: number | null } | null;
+  /** The last LIVE apply that wrote something (dry runs and failures excluded). */
   lastApply: ApplyHistoryEntry | null;
   feed: { activeSkus: number; activeRows: number };
   activity: ActivityItem[];
@@ -75,11 +76,17 @@ export async function loadDashboardData(): Promise<DashboardData> {
     staleCount,
     ttlSeconds,
     snapshot,
+    // A pull abandoned mid-flight (closed tab) keeps status "running" forever;
+    // only advertise it while it's actually advancing.
     runningPull:
-      latestPull?.status === "running"
+      latestPull?.status === "running" &&
+      Date.now() - latestPull.updatedAt.getTime() < 10 * 60_000
         ? { productsFetched: latestPull.productsFetched, totalProducts: latestPull.totalProducts }
         : null,
-    lastApply: applyHistory[0] ?? null,
+    lastApply:
+      applyHistory.find(
+        (r) => !r.dryRun && (r.status === "applied" || r.status === "partial"),
+      ) ?? null,
     feed: { activeSkus: feed.activeSkus, activeRows: feed.activeRows },
     activity,
   };

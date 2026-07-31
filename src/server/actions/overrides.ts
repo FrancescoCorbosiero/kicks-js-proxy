@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { getOverrides, saveOverrides } from "@/server/overrides/repo";
+import { getOverridesForWrite, saveOverrides } from "@/server/overrides/repo";
 import {
   withGlobalSaleRule,
   withProductOwner,
@@ -23,7 +23,7 @@ export async function setGlobalSaleRule(
   const parsed = GlobalSaleRuleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const current = await getOverrides();
+    const current = await getOverridesForWrite();
     await saveOverrides(withGlobalSaleRule(current, parsed.data.followSaleRule));
     return { ok: true };
   } catch (e) {
@@ -44,7 +44,7 @@ export async function setProductSaleRule(
   const parsed = SaleRuleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const current = await getOverrides();
+    const current = await getOverridesForWrite();
     await saveOverrides(withProductSaleRule(current, parsed.data.sku, parsed.data.followSaleRule));
     return { ok: true };
   } catch (e) {
@@ -66,7 +66,7 @@ export async function setProductOwnerPin(
   const parsed = OwnerPinSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const current = await getOverrides();
+    const current = await getOverridesForWrite();
     await saveOverrides(withProductOwner(current, parsed.data.sku, parsed.data.owner));
     return { ok: true };
   } catch (e) {
@@ -98,7 +98,7 @@ export async function setProductManualPrices(
   const parsed = BulkManualPricesSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    let next = await getOverrides();
+    let next = await getOverridesForWrite();
     for (const p of parsed.data.prices) {
       next = withVariationPrice(next, parsed.data.parentSku, p.euSize, p.price);
     }
@@ -123,7 +123,7 @@ export async function setVariationManualPrice(
   const parsed = ManualPriceSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const current = await getOverrides();
+    const current = await getOverridesForWrite();
     await saveOverrides(
       withVariationPrice(current, parsed.data.parentSku, parsed.data.euSize, parsed.data.price),
     );

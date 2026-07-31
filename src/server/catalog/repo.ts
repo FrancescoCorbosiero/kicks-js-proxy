@@ -122,11 +122,19 @@ export interface CatalogPageFilters {
   perPage?: number;
 }
 
-/** True when an active GoldenSneakers row covers this catalog SKU (→ GS owns it). */
-const GS_COVERED_SQL = sql<boolean>`exists (
+/**
+ * True when GoldenSneakers effectively owns this catalog SKU. Mirrors
+ * gsOwnedProducts (src/server/feeds/owner.ts): at least one ACTIVE row, and at
+ * least one row with a sellable presented price (the priced row may be a
+ * deactivated size — the variant set includes those at qty 0).
+ */
+const GS_COVERED_SQL = sql<boolean>`(exists (
   select 1 from "feed_items" fi
   where fi."feed" = 'goldensneakers' and fi."active" = true and fi."sku" = ${catalogProducts.sku}
-)`;
+) and exists (
+  select 1 from "feed_items" fi
+  where fi."feed" = 'goldensneakers' and fi."presented_price" > 0 and fi."sku" = ${catalogProducts.sku}
+))`;
 
 /**
  * Effective GS ownership for the grid: feed coverage MINUS the SKUs the

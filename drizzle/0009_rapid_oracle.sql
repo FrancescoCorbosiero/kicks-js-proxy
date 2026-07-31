@@ -1,0 +1,1 @@
+CREATE INDEX "catalog_market_minask_desc_idx" ON "catalog_products" USING btree ("market","min_ask" DESC NULLS LAST);

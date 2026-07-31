@@ -76,6 +76,8 @@
   --info: #2f6fe0;
 
   --grid: rgba(17, 24, 19, 0.04);
+  /* Focus outline: the gold fill is too light on white for a 3:1 ring. */
+  --ring: #8a6b00;
   color-scheme: light;
 }
 
@@ -102,10 +104,11 @@
   --create: #45c98c;
   --skip: #ff7a66;
   --noop: #8a948c;
-  --warn: #e9c15a;
+  --warn: #ee9d4b; /* orange — must stay distinguishable from the gold accent */
   --info: #6aa6ff;
 
   --grid: rgba(255, 255, 255, 0.035);
+  --ring: #eccf67;
   color-scheme: dark;
 }
 
@@ -130,7 +133,7 @@ body {
   color: var(--ink);
 }
 :focus-visible {
-  outline: 2px solid var(--accent-strong);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 

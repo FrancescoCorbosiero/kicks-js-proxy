@@ -4,7 +4,12 @@ import { resolveEffectiveRule } from "@core/config";
 import { computePrice } from "@core/core-spine";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
-import { followSaleRuleFor, manualPriceFor, ownerPinFor } from "@/server/overrides/model";
+import {
+  followSaleRuleFor,
+  lockedPricesFor,
+  manualPriceFor,
+  ownerPinFor,
+} from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { sourceEuSize } from "@/server/store-json/match";
 
@@ -81,6 +86,28 @@ export async function loadDrawerData(
       manual: overrides && euSize ? manualPriceFor(overrides, product.sku, euSize) : null,
     };
   });
+
+  // Locks whose size the current variant set no longer offers (source switch,
+  // feed takeover, dropped size) would otherwise be counted on the card but
+  // invisible here — and silently re-applied if the size returns. Surface them
+  // as rows so the operator can see and clear them.
+  if (overrides) {
+    const present = new Set(variants.map((v) => v.euSize).filter((s): s is string => s != null));
+    for (const { euSize, price } of lockedPricesFor(overrides, entry.sku)) {
+      if (present.has(euSize)) continue;
+      variants.push({
+        id: `orphan::${euSize}`,
+        sizeLabel: euSize,
+        sizeType: "EU",
+        euSize,
+        upc: null,
+        ask: null,
+        asks: 0,
+        proposed: null,
+        manual: price,
+      });
+    }
+  }
 
   return {
     market,

@@ -151,13 +151,40 @@ export function skusPinnedTo(overrides: StoreOverrides, owner: ProductOwner): st
     .map(([sku]) => sku);
 }
 
+/**
+ * Split a variation key back into its parent SKU. The euSize suffix is always
+ * normSize output (a plain decimal string, never containing a colon), so the
+ * RIGHTMOST "::" is the separator — a SKU itself may legally contain "::".
+ */
+function variationKeySku(key: string): string | null {
+  const sep = key.lastIndexOf("::");
+  return sep < 0 ? null : key.slice(0, sep);
+}
+
 /** Per-parent-SKU count of manually locked variation prices (catalog lock chips). */
 export function lockedPriceCounts(overrides: StoreOverrides): Map<string, number> {
   const out = new Map<string, number>();
   for (const [key, v] of Object.entries(overrides.variations)) {
     if (v.manualPrice == null) continue;
-    const sku = key.split("::")[0];
+    const sku = variationKeySku(key);
+    if (sku == null) continue;
     out.set(sku, (out.get(sku) ?? 0) + 1);
+  }
+  return out;
+}
+
+/** Every locked price stored for a parent SKU, whatever the current variant set. */
+export function lockedPricesFor(
+  overrides: StoreOverrides,
+  parentSku: string,
+): { euSize: string; price: number }[] {
+  const target = skuKey(parentSku);
+  const out: { euSize: string; price: number }[] = [];
+  for (const [key, v] of Object.entries(overrides.variations)) {
+    if (v.manualPrice == null) continue;
+    const sep = key.lastIndexOf("::");
+    if (sep < 0 || key.slice(0, sep) !== target) continue;
+    out.push({ euSize: key.slice(sep + 2), price: v.manualPrice });
   }
   return out;
 }
