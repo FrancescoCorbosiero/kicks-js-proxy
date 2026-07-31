@@ -161,6 +161,12 @@ After upgrading an existing DB, press **Reset** once — the stored config row
 still carries the old flat rule. Precedence for any variant price:
 **manual lock > sale rule > computed price**.
 
+**Anti-churn threshold** (`minDeltaPercent`, default 1%): a price drift of at
+most this percent stays a `noop` in the plan — tiny ask movements never turn
+into store writes, so re-runs stop churning near-identical prices. Editable in
+the pricing bar ("Min change %"); 0 = always reprice. Manual locks are exempt:
+a locked price is applied exactly.
+
 ## Caching
 
 Two independent best-effort layers (an outage degrades to a live fetch, never a

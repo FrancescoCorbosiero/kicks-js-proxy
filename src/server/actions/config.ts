@@ -16,10 +16,11 @@ const PricingInputSchema = z.object({
   roundingMode: z.enum(["none", "integer", "charm", "nearest"]),
   increment: z.number().min(0).optional(),
   minAsks: z.number().int().min(0),
+  minDeltaPercent: z.number().min(0).max(100),
 });
 export type PricingInput = z.infer<typeof PricingInputSchema>;
 
-/** Update the general pricing rule (markup / VAT / rounding / minAsks) and save. */
+/** Update the general pricing rule (markup / VAT / rounding / minAsks / min delta) and save. */
 export async function updatePricing(
   input: PricingInput,
 ): Promise<{ ok: boolean; error?: string; summary?: PricingSummary }> {
@@ -41,6 +42,9 @@ export async function updatePricing(
   // chose a single percent. "Reset" restores the banded defaults.
   delete rule.markupBands;
   rule.minAsks = d.minAsks;
+  // 0 = off (reprice on any change) — stored as absence, like maxDeltaPercent.
+  if (d.minDeltaPercent > 0) rule.minDeltaPercent = d.minDeltaPercent;
+  else delete rule.minDeltaPercent;
   rule.rounding = {
     mode: d.roundingMode,
     ...(d.increment != null ? { increment: d.increment } : {}),

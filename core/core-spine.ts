@@ -424,6 +424,20 @@ export function buildPlan(
             }
             return stock(baseItem(v, m, proposed, "noop"));
         }
+        // Anti-churn threshold: a drift of at most minDeltaPercent is "close
+        // enough" — noop, so tiny ask movements never turn into store writes.
+        if (
+            rule!.minDeltaPercent != null &&
+            m.currentPrice != null &&
+            !exceedsDelta(m.currentPrice, proposed, rule!.minDeltaPercent)
+        ) {
+            if (stockChanged) {
+                return stock(baseItem(v, m, null, "update", "stock only — price within minDeltaPercent"));
+            }
+            return stock(
+                baseItem(v, m, proposed, "noop", `within minDeltaPercent (${rule!.minDeltaPercent}%)`),
+            );
+        }
         // Plan-time guardrail: reject a change larger than maxDeltaPercent.
         if (
             rule!.maxDeltaPercent != null &&

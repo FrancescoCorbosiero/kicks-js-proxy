@@ -76,6 +76,7 @@ export interface ScopedPricingRule {
     rounding?: RoundingConfig;
     tax?: TaxConfig;
     maxDeltaPercent?: number;             // guardrail: reject change bigger than this
+    minDeltaPercent?: number;             // skip writes smaller than this (anti-churn)
 }
 
 /* ------------------------------------------------------------------ */
@@ -127,6 +128,7 @@ export interface EffectivePricingRule {
     rounding: RoundingConfig;
     tax: TaxConfig;
     maxDeltaPercent?: number;
+    minDeltaPercent?: number;
 }
 
 /** Ascending by upTo, unbounded band last — resolution order for markupForAsk. */
@@ -195,6 +197,7 @@ export function resolveEffectiveRule(
         if (r.rounding != null) merged.rounding = r.rounding;
         if (r.tax != null) merged.tax = r.tax;
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
+        if (r.minDeltaPercent != null) merged.minDeltaPercent = r.minDeltaPercent;
     }
 
     // A rule must set a markup somehow: flat, or banded (whose top band then
@@ -213,5 +216,6 @@ export function resolveEffectiveRule(
         rounding: merged.rounding ?? { mode: "none" },
         tax: merged.tax ?? { priceIncludesVat: false, vatRatePercent: 0 },
         maxDeltaPercent: merged.maxDeltaPercent,
+        minDeltaPercent: merged.minDeltaPercent,
     };
 }

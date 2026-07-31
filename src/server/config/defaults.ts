@@ -68,6 +68,10 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         // No maxDeltaPercent by default: the KicksDB price always wins, regardless
         // of how far it is from the current store price. Add one per rule if you
         // want a guardrail against big jumps.
+        // Anti-churn: a drift of ≤1% is left alone (noop), so tiny ask movements
+        // never become store writes. Set 0 in the pricing editor to reprice on
+        // every change.
+        minDeltaPercent: 1,
       },
       goldenSneakersPassthroughRule(),
     ],

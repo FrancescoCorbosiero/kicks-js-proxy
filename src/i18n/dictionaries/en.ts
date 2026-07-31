@@ -95,6 +95,7 @@ export const en: Dictionary = {
     vat: (n) => `${n}% VAT`,
     rounding: (mode, inc) => `round ${mode}${inc != null ? ` ${inc}` : ""}`,
     minAsks: (n) => `minAsks ${n}`,
+    minDelta: (n) => `ignore drifts ≤${n}%`,
     guardrailOn: "delta guardrail on",
     guardrailOff: "no delta cap",
     discountRule: "Reprice discounted",
@@ -109,6 +110,9 @@ export const en: Dictionary = {
     labelRounding: "Rounding",
     labelIncrement: "Increment",
     labelMinAsks: "Min asks",
+    labelMinDelta: "Min change %",
+    minDeltaHint:
+      "Price drifts up to this percent are not written to the store (0 = always reprice).",
     save: "Save & recompute",
     saving: "Saving…",
     saveFailed: "Could not save pricing",
