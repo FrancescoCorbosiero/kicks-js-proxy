@@ -27,6 +27,9 @@ export interface KicksDbConfig {
 
 const HARD_MAX_BATCH = 50;
 
+/** Bisection probes hit deterministic 500s — don't burn the full retry budget. */
+const BISECT_RETRY: RetryPolicy = { attempts: 2, backoffMs: 300, timeoutMs: 20_000 };
+
 const DEFAULT_QUERY: KicksQueryOptions = {
   sort: "release_date",
   limit: 10,
@@ -63,21 +66,79 @@ export class KicksDbSource implements SourcePort {
     return u.toString();
   }
 
-  /** POST /stockx/prices — chunked at 50 skus per call. */
+  /**
+   * POST /stockx/prices — chunked at 50 skus per call, resilient to poisoned
+   * SKUs. KicksDB sometimes 500s on a product's OWN data (e.g. "cannot
+   * unmarshal number -4 into ... sell_faster of type uint32"), which used to
+   * fail the entire batch — and with it the whole store preview. A failed
+   * chunk is now bisected so only the genuinely unfetchable SKUs are dropped
+   * (logged; absent from the result, so callers report them as not found).
+   *
+   * Outages stay loud: when a chunk fails AND two distinct single-SKU canary
+   * probes from it also fail, the API itself is down — the original error is
+   * rethrown instead of burning hundreds of bisection calls.
+   */
   async getPricesBatch(skus: string[], market: string): Promise<SourceProduct[]> {
     const out: SourceProduct[] = [];
+    const failed: string[] = [];
+    let lastError: unknown;
+
+    /** Fetch one sub-batch into `out`; false (+ lastError) on any failure. */
+    const tryPart = async (part: string[], retry: RetryPolicy): Promise<boolean> => {
+      try {
+        const raw = await requestJson(
+          this.url("stockx/prices"),
+          {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify({ market, skus: part, show_sizes: true }),
+          },
+          retry,
+        );
+        const parsed = KicksPricesResponseSchema.parse(raw);
+        for (const p of parsed.data) out.push(mapKicksPrices(p, market));
+        return true;
+      } catch (e) {
+        lastError = e;
+        return false;
+      }
+    };
+
+    const bisect = async (part: string[]): Promise<void> => {
+      if (part.length === 0) return;
+      if (await tryPart(part, BISECT_RETRY)) return;
+      if (part.length === 1) {
+        failed.push(part[0]);
+        return;
+      }
+      const mid = Math.ceil(part.length / 2);
+      await bisect(part.slice(0, mid));
+      await bisect(part.slice(mid));
+    };
+
     for (const part of chunk(skus, this.batchSize)) {
-      const raw = await requestJson(
-        this.url("stockx/prices"),
-        {
-          method: "POST",
-          headers: this.headers(),
-          body: JSON.stringify({ market, skus: part, show_sizes: true }),
-        },
-        this.retry,
+      if (await tryPart(part, this.retry)) continue;
+      if (part.length === 1) {
+        failed.push(part[0]);
+        continue;
+      }
+
+      const midIdx = Math.floor(part.length / 2);
+      const c1ok = await tryPart([part[0]], BISECT_RETRY);
+      const c2ok = await tryPart([part[midIdx]], BISECT_RETRY);
+      if (!c1ok && !c2ok) throw lastError; // both canaries dead → real outage
+
+      // Poisoned data, not an outage: isolate the bad SKUs. Successfully
+      // fetched canaries are already in `out` and excluded from the search.
+      const rest = part.filter((_, i) => (i !== 0 || !c1ok) && (i !== midIdx || !c2ok));
+      await bisect(rest);
+    }
+
+    if (failed.length > 0) {
+      console.warn(
+        `[kicksdb] batch prices: ${failed.length} SKU(s) skipped — the API errors on them: ` +
+          `${failed.slice(0, 10).join(", ")}${failed.length > 10 ? ", …" : ""}`,
       );
-      const parsed = KicksPricesResponseSchema.parse(raw);
-      for (const p of parsed.data) out.push(mapKicksPrices(p, market));
     }
     return out;
   }
