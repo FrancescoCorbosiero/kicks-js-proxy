@@ -1,0 +1,68 @@
+name: Scheduled syncs
+
+# Calls the app's authenticated /api/cron/* endpoints on a schedule, wherever
+# the app is deployed. Requires two repository secrets (Settings → Secrets and
+# variables → Actions):
+#   APP_BASE_URL — public base URL of the deployed app (no trailing slash)
+#   CRON_SECRET  — same value as the app's CRON_SECRET env var
+#
+# All times are UTC. Off-the-hour minutes because GitHub delays :00 schedules
+# under load.
+on:
+  schedule:
+    # Daily full pipeline: GoldenSneakers complete sync, then a KicksDB
+    # re-pricing pass over whatever it registered.
+    - cron: "30 4 * * *"
+    # Extra KicksDB re-pricing passes through the day.
+    - cron: "30 10,16,22 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which sync to run
+        type: choice
+        default: all
+        options:
+          - all
+          - sync-goldensneakers
+          - refresh-catalog
+          - pull-store
+
+concurrency:
+  group: scheduled-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scheduler secrets
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Set the APP_BASE_URL and CRON_SECRET repository secrets before enabling this workflow."
+            exit 1
+          fi
+
+      - name: GoldenSneakers complete sync
+        if: >-
+          github.event.schedule == '30 4 * * *' ||
+          (github.event_name == 'workflow_dispatch' && contains(fromJSON('["all", "sync-goldensneakers"]'), inputs.target))
+        run: scripts/trigger-cron.sh sync-goldensneakers 360
+
+      # Runs even if the GS sync failed (the job still reports the failure):
+      # re-pricing the existing catalog is useful on its own.
+      - name: KicksDB catalog refresh
+        if: >-
+          !cancelled() &&
+          (github.event_name == 'schedule' ||
+           (github.event_name == 'workflow_dispatch' && contains(fromJSON('["all", "refresh-catalog"]'), inputs.target)))
+        run: scripts/trigger-cron.sh refresh-catalog 900
+
+      - name: Woo store pull
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'pull-store'
+        run: scripts/trigger-cron.sh pull-store 900

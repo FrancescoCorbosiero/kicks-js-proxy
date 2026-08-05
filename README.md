@@ -124,13 +124,41 @@ filters/sorts/paginates in SQL.
 
 ## Scheduled runs
 
-Two authenticated cron endpoints (set `CRON_SECRET`, then hit them from any
+Three authenticated cron endpoints (set `CRON_SECRET`, then hit them from any
 scheduler):
 
 ```bash
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/pull-store       # full Woo pull
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refresh-catalog  # re-price stale entries
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/pull-store           # full Woo pull
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refresh-catalog      # re-price stale entries (KicksDB)
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/sync-goldensneakers  # GS complete sync
 ```
+
+`scripts/trigger-cron.sh` wraps the curl call with retries and timeouts:
+
+```bash
+APP_BASE_URL=https://host CRON_SECRET=... scripts/trigger-cron.sh refresh-catalog
+```
+
+### Built-in scheduler (GitHub Actions)
+
+`.github/workflows/scheduled-sync.yml` automates the two feed syncs against
+the deployed app — no scheduling infrastructure needed on the host itself.
+Schedule (UTC):
+
+- **04:30 daily** — GoldenSneakers complete sync, then a KicksDB re-pricing
+  pass over whatever it registered.
+- **10:30 / 16:30 / 22:30** — KicksDB catalog refresh only, so prices never
+  go more than ~6 h stale.
+
+To enable it, deploy the app somewhere reachable over HTTPS and add two
+repository secrets (Settings → Secrets and variables → Actions):
+
+- `APP_BASE_URL` — public base URL of the deployment (no trailing slash)
+- `CRON_SECRET` — same value as the app's `CRON_SECRET` env var
+
+Until the secrets are set, scheduled runs fail fast with a pointer to this
+setup. Any sync (including `pull-store`) can also be fired on demand from the
+workflow's **Run workflow** button.
 
 ## Core
 
