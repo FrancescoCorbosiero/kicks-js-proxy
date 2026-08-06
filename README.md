@@ -126,13 +126,13 @@ filters/sorts/paginates in SQL.
 
 **The app schedules itself.** In production (`next start`) an in-app
 scheduler (`src/server/scheduler.ts`, started from `src/instrumentation.ts`)
-runs the **GoldenSneakers complete sync roughly once a day** and a **KicksDB
-re-pricing pass every 6 hours** — the first pass one minute after boot, and
-the daily GS sync always followed by a refresh so new products get priced
-immediately. Deploying the app is the whole setup; there is nothing else to
-configure. `SCHEDULER=on|off` overrides the default (on in production, off
-in dev). It needs a long-running server — `next start`, Docker, a VPS — not
-a serverless platform that freezes the process between requests.
+runs **one sync per day** — first tick a minute after boot: the
+GoldenSneakers complete sync, then a KicksDB re-pricing pass so whatever
+the sync registered gets priced immediately. Deploying the app is the whole
+setup; there is nothing else to configure. `SCHEDULER=on|off` overrides the
+default (on in production, off in dev). It needs a long-running server —
+`next start`, Docker, a VPS — not a serverless platform that freezes the
+process between requests.
 
 If you'd rather drive syncs from an external scheduler (crontab, systemd
 timer, an uptime service), set `SCHEDULER=off` and `CRON_SECRET`, then hit

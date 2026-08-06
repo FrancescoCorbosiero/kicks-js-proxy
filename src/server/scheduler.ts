@@ -2,11 +2,11 @@ import { env } from "@/lib/env";
 import { runKicksdbRefresh } from "@/server/actions/feeds";
 
 /**
- * In-app scheduler: the app re-prices itself, no external cron needed.
- * Started once per server boot from src/instrumentation.ts. Every tick
- * (6 h, first one a minute after boot) runs a KicksDB re-pricing pass;
- * roughly once a day the GoldenSneakers complete sync runs first, so the
- * refresh immediately prices whatever it registered.
+ * In-app scheduler: the app syncs itself, no external cron needed.
+ * Started once per server boot from src/instrumentation.ts. Once a day
+ * (first tick a minute after boot) it runs the GoldenSneakers complete
+ * sync, then a KicksDB re-pricing pass so whatever the sync registered
+ * gets priced immediately.
  *
  * On by default in production, off in dev; SCHEDULER=on|off overrides.
  * Needs a long-running server (`next start`, Docker) — a serverless
@@ -17,12 +17,9 @@ import { runKicksdbRefresh } from "@/server/actions/feeds";
 /** Rounds per refresh pass (100 SKUs each) — same backstop as the cron route. */
 const MAX_ROUNDS = 50;
 const FIRST_TICK_MS = 60 * 1000;
-const TICK_MS = 6 * 60 * 60 * 1000;
-// One-hour slack under 24 h so daily runs don't skip a tick when timers drift.
-const GS_EVERY_MS = 23 * 60 * 60 * 1000;
+const TICK_MS = 24 * 60 * 60 * 1000;
 
 let running = false;
-let lastGsSyncAt = 0;
 
 async function refreshCatalog(): Promise<void> {
   let runId: string | undefined;
@@ -45,10 +42,9 @@ async function tick(): Promise<void> {
   running = true;
   try {
     const { gsConfigured, syncGoldenSneakersFromApi } = await import("@/server/feeds/goldensneakers");
-    if (gsConfigured() && Date.now() - lastGsSyncAt >= GS_EVERY_MS) {
+    if (gsConfigured()) {
       try {
         const report = await syncGoldenSneakersFromApi();
-        lastGsSyncAt = Date.now(); // only on success — a failed sync retries next tick
         console.log(
           `[scheduler] GS sync done: ${report.skus} SKUs (${report.added} added, ${report.updated} updated, ${report.deactivated} deactivated)`,
         );
@@ -72,7 +68,7 @@ export function startScheduler(): void {
   if (g.__storeHubScheduler) return;
   g.__storeHubScheduler = true;
 
-  console.log("[scheduler] on — GS complete sync ~daily, KicksDB re-pricing every 6 h");
+  console.log("[scheduler] on — daily sync: GS complete sync, then KicksDB re-pricing");
   setTimeout(tick, FIRST_TICK_MS).unref();
   setInterval(tick, TICK_MS).unref();
 }
