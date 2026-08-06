@@ -261,6 +261,24 @@ export const en: Dictionary = {
     searchPlaceholder: "Search by SKU or model…",
     brands: "Brands",
     allBrands: "All brands",
+    categories: "Categories",
+    allCategories: "All categories",
+    uncategorized: "Uncategorized",
+    genderLabel: "Gender",
+    genderName: (g) =>
+      (
+        {
+          men: "Men",
+          women: "Women",
+          child: "Kids",
+          kids: "Kids",
+          youth: "Youth",
+          preschool: "Preschool",
+          toddler: "Toddler",
+          infant: "Infant",
+          unisex: "Unisex",
+        } as Record<string, string>
+      )[g] ?? g,
     freshnessLabel: "Freshness",
     freshness: { all: "All", fresh: "Fresh prices", stale: "Needs refresh" },
     sortLabel: "Sort by",

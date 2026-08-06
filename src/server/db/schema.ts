@@ -105,6 +105,14 @@ export const catalogProducts = pgTable(
     title: text("title").notNull().default(""),
     brand: text("brand").notNull().default(""),
     image: text("image").notNull().default(""),
+    // Navigation axes, denormalized from `data` at upsert time like image/
+    // minAsk. Empty string = metadata not (yet) known — the "Uncategorized"
+    // bucket in discovery; the scheduler backfills these over time.
+    category: text("category").notNull().default(""),
+    secondaryCategory: text("secondary_category").notNull().default(""),
+    gender: text("gender").notNull().default(""),
+    model: text("model").notNull().default(""),
+    productType: text("product_type").notNull().default(""),
     minAsk: numeric("min_ask", { mode: "number" }),
     variantCount: integer("variant_count").notNull().default(0),
     data: jsonb("data").$type<SourceProduct>().notNull(),
@@ -125,6 +133,9 @@ export const catalogProducts = pgTable(
     index("catalog_market_minask_desc_idx").on(t.market, t.minAsk.desc().nullsLast()),
     // Discovery grid: title sort.
     index("catalog_market_title_idx").on(t.market, t.title),
+    // Discovery nav: category tree counts + filters, gender chips.
+    index("catalog_market_category_idx").on(t.market, t.category, t.secondaryCategory),
+    index("catalog_market_gender_idx").on(t.market, t.gender),
   ],
 );
 

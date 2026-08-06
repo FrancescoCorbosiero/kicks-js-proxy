@@ -55,6 +55,15 @@ export interface SourceProduct {
      *  name (e.g. "goldensneakers") so source-scoped pricing rules apply. */
     source?: string;
     variants: SourceVariant[];
+    // Optional catalog metadata (KicksDB sends it; feeds usually don't).
+    model?: string;           // silhouette, e.g. "Jordan 1 Retro High"
+    gender?: string;          // "men" | "women" | "child" | ...
+    category?: string;        // e.g. "Air Jordan"
+    secondaryCategory?: string; // e.g. "One"
+    productType?: string;     // e.g. "sneakers"
+    description?: string;
+    /** Extra product shots, deduped and excluding `image` itself. */
+    gallery?: string[];
 }
 
 /* ========================================================================== *
@@ -115,6 +124,13 @@ interface KicksProductRaw {
     brand: string;
     image: string;
     variants?: KicksVariantRaw[];
+    model?: string;
+    gender?: string;
+    category?: string;
+    secondary_category?: string;
+    product_type?: string;
+    description?: string;
+    gallery?: string[];
 }
 
 const pickUpc = (v: KicksVariantRaw): string | undefined =>
@@ -130,6 +146,8 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         offers: normalizeOffers(v),
     }));
     const currency = raw.variants?.[0]?.currency ?? "EUR";
+    // The gallery's first entries usually duplicate the thumbnail verbatim.
+    const gallery = [...new Set(raw.gallery ?? [])].filter((u) => u && u !== raw.image);
     return {
         stockxId: raw.id,
         sku: raw.sku,
@@ -139,6 +157,13 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         market,
         currency,
         variants,
+        ...(raw.model ? { model: raw.model } : {}),
+        ...(raw.gender ? { gender: raw.gender } : {}),
+        ...(raw.category ? { category: raw.category } : {}),
+        ...(raw.secondary_category ? { secondaryCategory: raw.secondary_category } : {}),
+        ...(raw.product_type ? { productType: raw.product_type } : {}),
+        ...(raw.description ? { description: raw.description } : {}),
+        ...(gallery.length > 0 ? { gallery } : {}),
     };
 }
 // NOTE: the batch-prices endpoint returns a flatter variant shape (price/asks/type

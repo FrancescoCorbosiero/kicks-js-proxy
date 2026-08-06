@@ -126,8 +126,15 @@ export type CatalogFreshness = "all" | "fresh" | "stale";
  */
 export type CatalogOwnerFilter = "all" | "kicksdb" | "goldensneakers" | "woo";
 
+/** URL token for the empty-string category/gender bucket (rows without metadata). */
+export const UNCATEGORIZED = "none";
+
 export interface CatalogPageFilters {
   brand?: string;
+  /** Category filter; the UNCATEGORIZED token selects rows with no metadata. */
+  category?: string;
+  secondaryCategory?: string;
+  gender?: string;
   q?: string; // substring on SKU / title
   freshness?: CatalogFreshness;
   owner?: CatalogOwnerFilter;
@@ -191,6 +198,16 @@ function pageConditions(market: string, f: CatalogPageFilters, threshold: Date):
   const conds: SQL[] = [eq(catalogProducts.market, market)];
   const gsOwned = gsOwnedSql(f.pinnedToKicksdb ?? []);
   if (f.brand) conds.push(eq(catalogProducts.brand, f.brand));
+  if (f.category) {
+    conds.push(eq(catalogProducts.category, f.category === UNCATEGORIZED ? "" : f.category));
+    // Sub-category only narrows within an explicit category.
+    if (f.secondaryCategory) {
+      conds.push(eq(catalogProducts.secondaryCategory, f.secondaryCategory));
+    }
+  }
+  if (f.gender) {
+    conds.push(eq(catalogProducts.gender, f.gender === UNCATEGORIZED ? "" : f.gender));
+  }
   if (f.q?.trim()) {
     const like = `%${f.q.trim()}%`;
     conds.push(or(ilike(catalogProducts.sku, like), ilike(catalogProducts.title, like))!);
@@ -258,7 +275,7 @@ export async function listCatalogPage(
         })
         .from(catalogProducts)
         .where(where)
-        .orderBy(...pageOrder(filters.sort ?? "brand"))
+        .orderBy(...pageOrder(filters.sort ?? "added"))
         .limit(perPage)
         .offset((page - 1) * perPage),
     ]);
@@ -322,6 +339,78 @@ export async function countByOwner(
   } catch (e) {
     console.warn("[catalog] owner counts skipped (cache unavailable):", describeDbError(e));
     return { total: 0, kicksdb: 0, goldensneakers: 0, woo: 0 };
+  }
+}
+
+export interface CategoryCount {
+  category: string; // "" = uncategorized (no metadata yet)
+  secondaryCategory: string; // "" = none
+  count: number;
+}
+
+/**
+ * Category → sub-category counts for a market (the discovery sidebar tree).
+ * Rows without metadata come back under category "" — the Uncategorized bucket.
+ */
+export async function listCategoryCounts(market: string): Promise<CategoryCount[]> {
+  try {
+    return await db
+      .select({
+        category: catalogProducts.category,
+        secondaryCategory: catalogProducts.secondaryCategory,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market))
+      .groupBy(catalogProducts.category, catalogProducts.secondaryCategory)
+      .orderBy(catalogProducts.category, catalogProducts.secondaryCategory);
+  } catch (e) {
+    console.warn("[catalog] category counts skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
+/** Gender values present in a market with counts (the discovery chip row). */
+export async function listGenderCounts(
+  market: string,
+): Promise<{ gender: string; count: number }[]> {
+  try {
+    return await db
+      .select({ gender: catalogProducts.gender, count: sql<number>`count(*)::int` })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market))
+      .groupBy(catalogProducts.gender)
+      .orderBy(catalogProducts.gender);
+  } catch (e) {
+    console.warn("[catalog] gender counts skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
+/**
+ * KicksDB-sourced SKUs still missing catalog metadata (category = ''), least
+ * recently fetched first — the enrichment backfill's queue. Ordering by
+ * fetchedAt keeps SKUs whose metadata the API genuinely lacks rotating to the
+ * back (each attempt bumps fetchedAt) instead of monopolizing the daily batch.
+ */
+export async function listSkusMissingMetadata(market: string, limit: number): Promise<string[]> {
+  try {
+    const rows = await db
+      .select({ sku: catalogProducts.sku })
+      .from(catalogProducts)
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          eq(catalogProducts.source, "kicksdb"),
+          eq(catalogProducts.category, ""),
+        ),
+      )
+      .orderBy(catalogProducts.fetchedAt)
+      .limit(limit);
+    return rows.map((r) => r.sku);
+  } catch (e) {
+    console.warn("[catalog] metadata queue skipped (cache unavailable):", describeDbError(e));
+    return [];
   }
 }
 
@@ -463,6 +552,11 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     title: p.title,
     brand: p.brand,
     image: p.image ?? "",
+    category: p.category ?? "",
+    secondaryCategory: p.secondaryCategory ?? "",
+    gender: p.gender ?? "",
+    model: p.model ?? "",
+    productType: p.productType ?? "",
     minAsk: minAskOf(p),
     variantCount: p.variants.length,
     data: p,
@@ -486,6 +580,11 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
             title: sql`excluded.title`,
             brand: sql`excluded.brand`,
             image: sql`excluded.image`,
+            category: sql`excluded.category`,
+            secondaryCategory: sql`excluded.secondary_category`,
+            gender: sql`excluded.gender`,
+            model: sql`excluded.model`,
+            productType: sql`excluded.product_type`,
             minAsk: sql`excluded.min_ask`,
             variantCount: sql`excluded.variant_count`,
             data: sql`excluded.data`,
