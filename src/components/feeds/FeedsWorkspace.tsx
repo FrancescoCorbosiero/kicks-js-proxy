@@ -57,6 +57,9 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
 
   return (
     <div className="space-y-5">
+      {/* The in-app daily scheduler: status only — runs happen server-side */}
+      <SchedulerCard status={state.scheduler} />
+
       {/* Registry: the built-in feed */}
       <section className="rounded-xl border border-line bg-surface p-4 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
@@ -129,6 +132,66 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
         onSynced={async () => setState(await getFeedsState())}
       />
     </div>
+  );
+}
+
+function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
+  const { t } = useI18n();
+  const s = t.feeds.scheduler;
+  return (
+    <section className="rounded-xl border border-line bg-surface p-4 shadow-xs">
+      <div className="flex flex-wrap items-center gap-3">
+        <span
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+            status.enabled ? "bg-up/15 text-up" : "bg-surface-2 text-faint"
+          }`}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[18px] w-[18px]">
+            <circle cx="12" cy="12" r="8.5" />
+            <path d="M12 7.5V12l3 2" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            {s.name}
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+              {s.tag}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                status.enabled ? "bg-up/12 text-up" : "bg-skip/12 text-skip"
+              }`}
+            >
+              {status.enabled ? s.on : s.off}
+            </span>
+          </div>
+          <div className="text-xs text-muted">{s.desc}</div>
+        </div>
+        <div className="ml-auto text-right text-xs text-muted tnum">
+          {status.enabled ? (
+            <>
+              <div>
+                {status.running
+                  ? s.runningNow
+                  : status.nextRunAt
+                    ? s.nextRun(new Date(status.nextRunAt).toLocaleString())
+                    : null}
+              </div>
+              {status.lastRunAt && (
+                <div className="text-faint">
+                  {s.lastRun(new Date(status.lastRunAt).toLocaleString())}
+                  {status.lastGsSkus != null && ` · ${s.lastGs(status.lastGsSkus)}`}
+                  {status.lastRefreshed != null && ` · ${s.lastRepriced(status.lastRefreshed)}`}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="max-w-64 text-faint">{s.offHint}</div>
+          )}
+        </div>
+      </div>
+      {status.lastError && <p className="mt-2 text-sm text-skip">{status.lastError}</p>}
+    </section>
   );
 }
 

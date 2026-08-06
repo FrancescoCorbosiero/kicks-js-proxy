@@ -21,6 +21,10 @@ const EnvSchema = z.object({
   // Shared secret for the scheduled endpoints (/api/cron/*). Unset = disabled.
   CRON_SECRET: z.string().optional(),
 
+  // In-app scheduler (src/server/scheduler.ts). Default: on in production,
+  // off in dev; set explicitly to override either way.
+  SCHEDULER: z.enum(["on", "off"]).optional(),
+
   // GoldenSneakers feed — the flat-assortment endpoint (include VAT/markup
   // query params there: presented_price arrives FINAL) and its bearer token.
   // Optional: without them the Feeds tab falls back to manual JSON upload.

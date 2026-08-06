@@ -502,6 +502,19 @@ export const en: Dictionary = {
     progressRefreshed: (n) => `${n} refreshed`,
     progressRemaining: (n) => `${n} still stale`,
     runLine: (refreshed, missed) => `${refreshed} refreshed · ${missed} not returned`,
+    scheduler: {
+      name: "Automatic sync",
+      tag: "1×/day",
+      desc: "The server syncs itself once a day: complete GoldenSneakers feed, then a KicksDB re-pricing pass.",
+      on: "On",
+      off: "Off",
+      offHint: "Turns on in production with the server; SCHEDULER=on forces it in dev too.",
+      runningNow: "Running…",
+      nextRun: (when) => `Next run: ${when}`,
+      lastRun: (when) => `Last: ${when}`,
+      lastGs: (n) => `${n} SKUs from the GS feed`,
+      lastRepriced: (n) => `${n} re-priced`,
+    },
     kicksdb: {
       name: "KicksDB refresh",
       desc: (ttl) =>

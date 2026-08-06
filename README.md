@@ -124,12 +124,31 @@ filters/sorts/paginates in SQL.
 
 ## Scheduled runs
 
-Two authenticated cron endpoints (set `CRON_SECRET`, then hit them from any
-scheduler):
+**The app schedules itself.** In production (`next start`) an in-app
+scheduler (`src/server/scheduler.ts`, started from `src/instrumentation.ts`)
+runs **one sync per day** — first tick a minute after boot: the
+GoldenSneakers complete sync, then a KicksDB re-pricing pass so whatever
+the sync registered gets priced immediately. Deploying the app is the whole
+setup; there is nothing else to configure. `SCHEDULER=on|off` overrides the
+default (on in production, off in dev). It needs a long-running server —
+`next start`, Docker, a VPS — not a serverless platform that freezes the
+process between requests.
+
+If you'd rather drive syncs from an external scheduler (crontab, systemd
+timer, an uptime service), set `SCHEDULER=off` and `CRON_SECRET`, then hit
+the authenticated endpoints:
 
 ```bash
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/pull-store       # full Woo pull
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refresh-catalog  # re-price stale entries
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/pull-store           # full Woo pull
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refresh-catalog      # re-price stale entries (KicksDB)
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/sync-goldensneakers  # GS complete sync
+```
+
+`scripts/trigger-cron.sh` wraps the curl with retries and timeouts, e.g. a
+crontab line:
+
+```
+30 4 * * *  APP_BASE_URL=https://host CRON_SECRET=... /path/to/scripts/trigger-cron.sh sync-goldensneakers
 ```
 
 ## Core

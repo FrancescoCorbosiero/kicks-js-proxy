@@ -517,6 +517,20 @@ export const it = {
     progressRemaining: (n: number) => `${n} ancora da aggiornare`,
     runLine: (refreshed: number, missed: number) =>
       `${refreshed} rinfrescati · ${missed} non restituiti`,
+    scheduler: {
+      name: "Sincronizzazione automatica",
+      tag: "1×/giorno",
+      desc: "Il server esegue da solo una sincronizzazione al giorno: feed GoldenSneakers completo, poi ri-prezzatura KicksDB.",
+      on: "Attiva",
+      off: "Spenta",
+      offHint:
+        "Si attiva in produzione insieme al server; SCHEDULER=on la forza anche in sviluppo.",
+      runningNow: "In esecuzione…",
+      nextRun: (when: string) => `Prossima esecuzione: ${when}`,
+      lastRun: (when: string) => `Ultima: ${when}`,
+      lastGs: (n: number) => `${n} SKU dal feed GS`,
+      lastRepriced: (n: number) => `${n} ri-prezzati`,
+    },
     kicksdb: {
       name: "Aggiornamento KicksDB",
       desc: (ttl: number) =>
