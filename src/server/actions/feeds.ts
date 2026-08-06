@@ -36,11 +36,13 @@ export interface FeedsState {
   ttlSeconds: number;
   lastRuns: IngestionHistoryEntry[];
   gs: GsFeedState;
+  scheduler: import("@/server/scheduler").SchedulerStatus;
 }
 
 export async function getFeedsState(): Promise<FeedsState> {
   const { gsConfigured, GS_INGESTION_SOURCE } = await import("@/server/feeds/goldensneakers");
   const { feedStats, GS_FEED } = await import("@/server/feeds/repo");
+  const { getSchedulerStatus } = await import("@/server/scheduler");
 
   const config = await getActiveConfig();
   const market = config.source.market;
@@ -64,6 +66,7 @@ export async function getFeedsState(): Promise<FeedsState> {
       activeRows: gsStats.activeRows,
       lastRuns: gsRuns,
     },
+    scheduler: getSchedulerStatus(),
   };
 }
 

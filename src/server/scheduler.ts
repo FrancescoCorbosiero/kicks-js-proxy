@@ -19,43 +19,94 @@ const MAX_ROUNDS = 50;
 const FIRST_TICK_MS = 60 * 1000;
 const TICK_MS = 24 * 60 * 60 * 1000;
 
-let running = false;
+/** Live scheduler state, surfaced on /feeds via getFeedsState(). */
+export interface SchedulerStatus {
+  enabled: boolean;
+  running: boolean;
+  nextRunAt: number | null; // epoch ms
+  lastRunAt: number | null;
+  lastGsSkus: number | null; // SKUs in the last GS sync (null = not run)
+  lastRefreshed: number | null; // entries re-priced in the last pass
+  lastError: string | null;
+}
 
-async function refreshCatalog(): Promise<void> {
+// Instrumentation and the server-action bundle each get their own copy of
+// this module; globalThis is the one store both see.
+type SchedulerState = SchedulerStatus & { started: boolean };
+const g = globalThis as { __storeHubScheduler?: SchedulerState };
+
+function store(): SchedulerState {
+  return (g.__storeHubScheduler ??= {
+    started: false,
+    enabled: false,
+    running: false,
+    nextRunAt: null,
+    lastRunAt: null,
+    lastGsSkus: null,
+    lastRefreshed: null,
+    lastError: null,
+  });
+}
+
+export function getSchedulerStatus(): SchedulerStatus {
+  const { started: _started, ...status } = store();
+  return status;
+}
+
+async function refreshCatalog(): Promise<{ refreshed: number; error: string | null }> {
   let runId: string | undefined;
   let refreshed = 0;
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const res = await runKicksdbRefresh({ limit: 100, runId });
     if (!res.ok) {
       console.error(`[scheduler] KicksDB refresh failed after ${refreshed} re-priced: ${res.error}`);
-      return;
+      return { refreshed, error: res.error ?? "refresh failed" };
     }
     runId = res.runId ?? runId;
     refreshed += res.refreshed ?? 0;
     if ((res.requested ?? 0) === 0 || (res.remainingStale ?? 0) === 0) break;
   }
   console.log(`[scheduler] KicksDB refresh done: ${refreshed} re-priced`);
+  return { refreshed, error: null };
 }
 
 async function tick(): Promise<void> {
-  if (running) return; // previous pass still going — the next tick retries
-  running = true;
+  const s = store();
+  if (s.running) return; // previous pass still going — the next tick retries
+  s.running = true;
+  const errors: string[] = [];
   try {
     const { gsConfigured, syncGoldenSneakersFromApi } = await import("@/server/feeds/goldensneakers");
     if (gsConfigured()) {
       try {
         const report = await syncGoldenSneakersFromApi();
+        s.lastGsSkus = report.skus;
         console.log(
           `[scheduler] GS sync done: ${report.skus} SKUs (${report.added} added, ${report.updated} updated, ${report.deactivated} deactivated)`,
         );
       } catch (e) {
-        console.error(`[scheduler] GS sync failed: ${e instanceof Error ? e.message : String(e)}`);
+        const message = e instanceof Error ? e.message : String(e);
+        s.lastGsSkus = null;
+        errors.push(`GS sync: ${message}`);
+        console.error(`[scheduler] GS sync failed: ${message}`);
       }
     }
-    await refreshCatalog();
+    const refresh = await refreshCatalog();
+    s.lastRefreshed = refresh.refreshed;
+    if (refresh.error) errors.push(`KicksDB refresh: ${refresh.error}`);
   } finally {
-    running = false;
+    s.running = false;
+    s.lastRunAt = Date.now();
+    s.lastError = errors.length > 0 ? errors.join(" · ") : null;
   }
+}
+
+function schedule(delayMs: number): void {
+  store().nextRunAt = Date.now() + delayMs;
+  setTimeout(async () => {
+    await tick();
+    schedule(TICK_MS);
+  }, delayMs).unref();
 }
 
 export function startScheduler(): void {
@@ -64,11 +115,11 @@ export function startScheduler(): void {
   if (!enabled) return;
 
   // Dev hot-reload can re-run instrumentation; never double the timers.
-  const g = globalThis as { __storeHubScheduler?: boolean };
-  if (g.__storeHubScheduler) return;
-  g.__storeHubScheduler = true;
+  const s = store();
+  if (s.started) return;
+  s.started = true;
+  s.enabled = true;
 
   console.log("[scheduler] on — daily sync: GS complete sync, then KicksDB re-pricing");
-  setTimeout(tick, FIRST_TICK_MS).unref();
-  setInterval(tick, TICK_MS).unref();
+  schedule(FIRST_TICK_MS);
 }
