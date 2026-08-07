@@ -94,6 +94,23 @@ async function tick(): Promise<void> {
     const refresh = await refreshCatalog();
     s.lastRefreshed = refresh.refreshed;
     if (refresh.error) errors.push(`KicksDB refresh: ${refresh.error}`);
+
+    // Drain a slice of the metadata-backfill queue (rows imported before the
+    // catalog stored category/gender/gallery). Bounded so one tick never
+    // hammers the products endpoint; the queue empties over successive days.
+    try {
+      const { backfillCatalogMetadata } = await import("@/server/catalog/enrich");
+      const enrich = await backfillCatalogMetadata(250);
+      if (enrich.scanned > 0) {
+        console.log(
+          `[scheduler] metadata backfill: ${enrich.enriched} enriched, ${enrich.missed} rotated (of ${enrich.scanned})`,
+        );
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push(`metadata backfill: ${message}`);
+      console.error(`[scheduler] metadata backfill failed: ${message}`);
+    }
   } finally {
     s.running = false;
     s.lastRunAt = Date.now();

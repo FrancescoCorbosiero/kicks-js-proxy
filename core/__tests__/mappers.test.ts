@@ -35,6 +35,49 @@ describe("mapKicksProduct size normalization", () => {
     ]);
   });
 
+  it("maps catalog metadata and dedupes the gallery against the thumbnail", () => {
+    const sp = mapKicksProduct(
+      {
+        id: "p1",
+        sku: "AA3834-100",
+        title: "Jordan 1 Retro High Alaska",
+        brand: "Jordan",
+        image: "https://img/alaska.jpg",
+        model: "Jordan 1 Retro High",
+        gender: "men",
+        category: "Air Jordan",
+        secondary_category: "One",
+        product_type: "sneakers",
+        description: "The Air Jordan 1 …",
+        // Real-world shape: thumbnail duplicated (twice here), then extras.
+        gallery: [
+          "https://img/alaska.jpg",
+          "https://img/alaska.jpg",
+          "https://img/alaska-side.jpg",
+        ],
+        variants: [],
+      },
+      "IT",
+    );
+    expect(sp.model).toBe("Jordan 1 Retro High");
+    expect(sp.gender).toBe("men");
+    expect(sp.category).toBe("Air Jordan");
+    expect(sp.secondaryCategory).toBe("One");
+    expect(sp.productType).toBe("sneakers");
+    expect(sp.description).toBe("The Air Jordan 1 …");
+    expect(sp.gallery).toEqual(["https://img/alaska-side.jpg"]);
+  });
+
+  it("omits metadata fields entirely when the API sends none", () => {
+    const sp = mapKicksProduct(
+      { id: "p1", sku: "X", title: "T", brand: "B", image: "", variants: [] },
+      "IT",
+    );
+    expect(sp.model).toBeUndefined();
+    expect(sp.category).toBeUndefined();
+    expect(sp.gallery).toBeUndefined();
+  });
+
   it("falls back to variant-level lowest_ask when prices[] is empty", () => {
     const sp = mapKicksProduct(
       {

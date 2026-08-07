@@ -20,9 +20,12 @@ const SELECT_CLASSES =
  */
 export function CatalogFilters({
   params,
+  brands,
 }: {
   /** Current URL params — the base every update merges over. */
   params: QueryParams;
+  /** Brands present in the market — the (demoted) brand filter's options. */
+  brands: { brand: string; count: number }[];
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -76,6 +79,20 @@ export function CatalogFilters({
           pushDebounced({ q: e.target.value.trim() || undefined });
         }}
       />
+
+      <select
+        aria-label={t.discovery.brands}
+        className={SELECT_CLASSES}
+        value={String(params.brand ?? "")}
+        onChange={(e) => push({ brand: e.target.value || undefined })}
+      >
+        <option value="">{t.discovery.allBrands}</option>
+        {brands.map((b) => (
+          <option key={b.brand} value={b.brand}>
+            {b.brand} ({b.count})
+          </option>
+        ))}
+      </select>
 
       <select
         aria-label={t.discovery.freshnessLabel}
@@ -148,12 +165,12 @@ export function CatalogFilters({
         <select
           aria-label={t.discovery.sortLabel}
           className={cn(SELECT_CLASSES, "font-medium")}
-          value={String(params.sort ?? "brand")}
-          onChange={(e) => push({ sort: e.target.value === "brand" ? undefined : e.target.value })}
+          value={String(params.sort ?? "added")}
+          onChange={(e) => push({ sort: e.target.value === "added" ? undefined : e.target.value })}
         >
+          <option value="added">{t.discovery.sort.added}</option>
           <option value="brand">{t.discovery.sort.brand}</option>
           <option value="title">{t.discovery.sort.title}</option>
-          <option value="added">{t.discovery.sort.added}</option>
           <option value="fetched">{t.discovery.sort.fetched}</option>
           <option value="priceAsc">{t.discovery.sort.priceAsc}</option>
           <option value="priceDesc">{t.discovery.sort.priceDesc}</option>

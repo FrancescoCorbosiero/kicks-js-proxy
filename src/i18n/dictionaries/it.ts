@@ -270,13 +270,31 @@ export const it = {
     searchPlaceholder: "Cerca per SKU o modello…",
     brands: "Brand",
     allBrands: "Tutti i brand",
+    categories: "Categorie",
+    allCategories: "Tutte le categorie",
+    uncategorized: "Senza categoria",
+    genderLabel: "Genere",
+    genderName: (g: string) =>
+      (
+        {
+          men: "Uomo",
+          women: "Donna",
+          child: "Bambini",
+          kids: "Bambini",
+          youth: "Ragazzi",
+          preschool: "Bambini (PS)",
+          toddler: "Bimbi (TD)",
+          infant: "Neonati",
+          unisex: "Unisex",
+        } as Record<string, string>
+      )[g] ?? g,
     freshnessLabel: "Freschezza",
     freshness: { all: "Tutti", fresh: "Prezzi freschi", stale: "Da aggiornare" },
     sortLabel: "Ordina per",
     sort: {
+      added: "Aggiunti di recente",
       brand: "Brand",
       title: "Nome",
-      added: "Aggiunti di recente",
       fetched: "Aggiornati di recente",
       priceAsc: "Prezzo crescente",
       priceDesc: "Prezzo decrescente",

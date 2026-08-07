@@ -79,6 +79,16 @@ export const KicksProductSchema = z.object({
   brand: z.string(),
   image: z.string().nullish().transform((v) => v ?? ""),
   variants: z.array(KicksVariantSchema).nullish().transform(undef),
+  // Catalog metadata: navigation axes (category/gender/model) + creation
+  // payload material (description, gallery). All optional — the mapper and
+  // everything downstream treat absence as "no metadata yet".
+  model: z.string().nullish().transform(undef),
+  gender: z.string().nullish().transform(undef),
+  category: z.string().nullish().transform(undef),
+  secondary_category: z.string().nullish().transform(undef),
+  product_type: z.string().nullish().transform(undef),
+  description: z.string().nullish().transform(undef),
+  gallery: z.array(z.string()).nullish().transform(undef),
 });
 
 export const KicksProductsResponseSchema = z.object({

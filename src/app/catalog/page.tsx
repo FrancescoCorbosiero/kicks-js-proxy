@@ -1,12 +1,17 @@
+import * as React from "react";
 import Link from "next/link";
 import { getActiveConfig } from "@/server/config/repo";
 import {
   countByOwner,
   listBrandCounts,
   listCatalogPage,
+  listCategoryCounts,
+  listGenderCounts,
+  UNCATEGORIZED,
   type CatalogFreshness,
   type CatalogOwnerFilter,
   type CatalogSort,
+  type CategoryCount,
 } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { lockedPriceCounts, skusPinnedTo } from "@/server/overrides/model";
@@ -25,6 +30,29 @@ export const dynamic = "force-dynamic";
 const SORTS: CatalogSort[] = ["brand", "title", "added", "fetched", "priceAsc", "priceDesc"];
 const FRESHNESS: CatalogFreshness[] = ["all", "fresh", "stale"];
 const OWNERS: CatalogOwnerFilter[] = ["all", "kicksdb", "goldensneakers", "woo"];
+
+/** The sidebar tree: category → sub-category counts, Uncategorized last. */
+interface CategoryNode {
+  category: string; // "" = uncategorized
+  count: number;
+  children: { name: string; count: number }[];
+}
+
+function buildCategoryTree(rows: CategoryCount[]): CategoryNode[] {
+  const byCat = new Map<string, CategoryNode>();
+  for (const r of rows) {
+    const node = byCat.get(r.category) ?? { category: r.category, count: 0, children: [] };
+    node.count += r.count;
+    if (r.secondaryCategory !== "") {
+      node.children.push({ name: r.secondaryCategory, count: r.count });
+    }
+    byCat.set(r.category, node);
+  }
+  const nodes = [...byCat.values()];
+  const named = nodes.filter((n) => n.category !== "");
+  const uncategorized = nodes.find((n) => n.category === "");
+  return uncategorized ? [...named, uncategorized] : named;
+}
 
 function toNumber(x: string | undefined): number | undefined {
   if (!x) return undefined;
@@ -47,7 +75,7 @@ async function loadPageData(sp: Search) {
 
   const market = (sp.market ?? config.source.market).toUpperCase();
   const ttl = config.source.cacheTtlSeconds;
-  const sort = SORTS.includes(sp.sort as CatalogSort) ? (sp.sort as CatalogSort) : "brand";
+  const sort = SORTS.includes(sp.sort as CatalogSort) ? (sp.sort as CatalogSort) : "added";
   const freshness = FRESHNESS.includes(sp.fresh as CatalogFreshness)
     ? (sp.fresh as CatalogFreshness)
     : "all";
@@ -55,10 +83,13 @@ async function loadPageData(sp: Search) {
     ? (sp.owner as CatalogOwnerFilter)
     : "all";
 
-  // The current URL params — the base every filter/brand/page link merges over.
+  // The current URL params — the base every filter/nav/page link merges over.
   const params: QueryParams = {
     market: sp.market,
     brand: sp.brand,
+    cat: sp.cat,
+    sub: sp.sub,
+    gender: sp.gender,
     q: sp.q,
     fresh: sp.fresh,
     owner: sp.owner,
@@ -74,9 +105,12 @@ async function loadPageData(sp: Search) {
   const pinnedToKicksdb = overrides ? skusPinnedTo(overrides, "kicksdb") : [];
   const lockedCounts = overrides ? lockedPriceCounts(overrides) : new Map<string, number>();
 
-  const [page, brands, ownerCounts] = await Promise.all([
+  const [page, brands, categories, genders, ownerCounts] = await Promise.all([
     listCatalogPage(market, ttl, {
       brand: sp.brand,
+      category: sp.cat,
+      secondaryCategory: sp.sub,
+      gender: sp.gender,
       q: sp.q,
       freshness,
       owner,
@@ -87,12 +121,25 @@ async function loadPageData(sp: Search) {
       page: toNumber(sp.page) ?? 1,
     }),
     listBrandCounts(market),
+    listCategoryCounts(market),
+    listGenderCounts(market),
     countByOwner(market, pinnedToKicksdb),
   ]);
 
   const catalogSize = ownerCounts.total;
   const drawer = sp.product ? await loadDrawerData(market, sp.product, config) : null;
-  return { market, params, page, brands, catalogSize, ownerCounts, lockedCounts, drawer };
+  return {
+    market,
+    params,
+    page,
+    brands,
+    categoryTree: buildCategoryTree(categories),
+    genders: genders.filter((g) => g.gender !== ""),
+    catalogSize,
+    ownerCounts,
+    lockedCounts,
+    drawer,
+  };
 }
 
 export default async function CatalogPage({
@@ -110,11 +157,25 @@ export default async function CatalogPage({
     // The landing tab must explain a dead/unmigrated DB, not crash-overlay it.
     return <DbUnavailable error={e} />;
   }
-  const { market, params, page, brands, catalogSize, ownerCounts, lockedCounts, drawer } = data;
+  const {
+    market,
+    params,
+    page,
+    brands,
+    categoryTree,
+    genders,
+    catalogSize,
+    ownerCounts,
+    lockedCounts,
+    drawer,
+  } = data;
   const closeHref = `/catalog${buildQuery({ ...params, product: undefined })}`;
 
-  const brandLink = (brand?: string) =>
-    `/catalog${buildQuery({ ...params, brand, page: undefined })}`;
+  // Picking a category resets the sub-category; picking a sub keeps its parent.
+  const categoryLink = (cat?: string, sub?: string) =>
+    `/catalog${buildQuery({ ...params, cat, sub, page: undefined })}`;
+  const genderLink = (gender?: string) =>
+    `/catalog${buildQuery({ ...params, gender, page: undefined })}`;
   const pageLink = (p: number) =>
     `/catalog${buildQuery({ ...params, page: p === 1 ? undefined : p })}`;
   const ownerLink = (owner?: CatalogOwnerFilter) =>
@@ -143,52 +204,89 @@ export default async function CatalogPage({
       </div>
 
       <div className="flex items-start gap-6">
-        {/* Brand sidebar (desktop) */}
-        {brands.length > 0 && (
+        {/* Category sidebar (desktop): the silhouette tree, not brands. */}
+        {categoryTree.length > 0 && (
           <aside className="sticky top-20 hidden w-52 shrink-0 lg:block">
             <div className="rounded-xl border border-line bg-surface p-2 shadow-xs">
               <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                {t.discovery.brands}
+                {t.discovery.categories}
               </div>
               <nav className="max-h-[60vh] space-y-0.5 overflow-y-auto text-sm">
-                <BrandRow
-                  href={brandLink(undefined)}
-                  active={!sp.brand}
-                  label={t.discovery.allBrands}
+                <NavRow
+                  href={categoryLink(undefined, undefined)}
+                  active={!sp.cat}
+                  label={t.discovery.allCategories}
                   count={catalogSize}
                 />
-                {brands.map((b) => (
-                  <BrandRow
-                    key={b.brand}
-                    href={brandLink(b.brand)}
-                    active={sp.brand === b.brand}
-                    label={b.brand}
-                    count={b.count}
-                  />
-                ))}
+                {categoryTree.map((node) => {
+                  const token = node.category === "" ? UNCATEGORIZED : node.category;
+                  const activeCat = sp.cat === token;
+                  return (
+                    <div key={token}>
+                      <NavRow
+                        href={categoryLink(token, undefined)}
+                        active={activeCat && !sp.sub}
+                        label={node.category === "" ? t.discovery.uncategorized : node.category}
+                        count={node.count}
+                      />
+                      {/* Sub-categories unfold under the active category only. */}
+                      {activeCat && node.children.length > 0 && (
+                        <div className="ml-3 border-l border-line pl-1.5">
+                          {node.children.map((c) => (
+                            <NavRow
+                              key={c.name}
+                              href={categoryLink(token, c.name)}
+                              active={sp.sub === c.name}
+                              label={c.name}
+                              count={c.count}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </nav>
             </div>
           </aside>
         )}
 
         <div className="min-w-0 flex-1 space-y-4">
-          {/* Brand chips (mobile) */}
-          {brands.length > 0 && (
+          {/* Category chips (mobile) — the active category unfolds its subs. */}
+          {categoryTree.length > 0 && (
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden">
-              <BrandChip href={brandLink(undefined)} active={!sp.brand} label={t.discovery.allBrands} />
-              {brands.map((b) => (
-                <BrandChip
-                  key={b.brand}
-                  href={brandLink(b.brand)}
-                  active={sp.brand === b.brand}
-                  label={`${b.brand} (${b.count})`}
-                />
-              ))}
+              <NavChip
+                href={categoryLink(undefined, undefined)}
+                active={!sp.cat}
+                label={t.discovery.allCategories}
+              />
+              {categoryTree.map((node) => {
+                const token = node.category === "" ? UNCATEGORIZED : node.category;
+                const activeCat = sp.cat === token;
+                return (
+                  <React.Fragment key={token}>
+                    <NavChip
+                      href={categoryLink(token, undefined)}
+                      active={activeCat && !sp.sub}
+                      label={`${node.category === "" ? t.discovery.uncategorized : node.category} (${node.count})`}
+                    />
+                    {activeCat &&
+                      node.children.map((c) => (
+                        <NavChip
+                          key={c.name}
+                          href={categoryLink(token, c.name)}
+                          active={sp.sub === c.name}
+                          label={`↳ ${c.name} (${c.count})`}
+                        />
+                      ))}
+                  </React.Fragment>
+                );
+              })}
             </div>
           )}
 
-          {/* Provider tabs: one tap to see who drives each product's prices. */}
-          <div className="-mx-1 flex gap-1 overflow-x-auto px-1">
+          {/* Provider tabs + gender chips: who prices it, who wears it. */}
+          <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1">
             <div className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-xs">
               <SourceTab
                 href={ownerLink("all")}
@@ -218,9 +316,22 @@ export default async function CatalogPage({
                 hint={t.discovery.tabs.wooHint}
               />
             </div>
+            {genders.length > 0 && (
+              <div className="flex items-center gap-1.5" aria-label={t.discovery.genderLabel}>
+                <NavChip href={genderLink(undefined)} active={!sp.gender} label={t.discovery.freshness.all} />
+                {genders.map((g) => (
+                  <NavChip
+                    key={g.gender}
+                    href={genderLink(g.gender)}
+                    active={sp.gender === g.gender}
+                    label={`${t.discovery.genderName(g.gender)} (${g.count})`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
-          <CatalogFilters params={params} />
+          <CatalogFilters params={params} brands={brands} />
 
           {page.items.length === 0 ? (
             <div className="rounded-xl border border-line bg-surface p-10 text-center text-sm text-muted">
@@ -357,7 +468,7 @@ function SourceTab({
   );
 }
 
-function BrandRow({
+function NavRow({
   href,
   active,
   label,
@@ -381,7 +492,7 @@ function BrandRow({
   );
 }
 
-function BrandChip({ href, active, label }: { href: string; active: boolean; label: string }) {
+function NavChip({ href, active, label }: { href: string; active: boolean; label: string }) {
   return (
     <Link
       href={href}
