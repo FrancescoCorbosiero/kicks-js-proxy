@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { computePrice } from "@core/core-spine";
 import { resolveEffectiveRule } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
-import { gsOffersToSource, parseGsPayload } from "./goldensneakers-model";
+import { gsOffersToSource, parseGsPayload, resolveGsImage } from "./goldensneakers-model";
 
 /** Rows straight from the real GS flat sample (trimmed to the fields we read). */
 const SAMPLE = [
@@ -47,6 +47,47 @@ const SAMPLE = [
   },
 ];
 
+describe("resolveGsImage", () => {
+  const FULL =
+    "https://media.goldensneakers.net/products/images/2913_KJ8969/raw/c67b5534062a.png";
+
+  it("uses the new complete-URL format as-is — never doubles the filename", () => {
+    // Aug 2026: image_full_url already ends with image_name; blind
+    // concatenation would produce …/x.png/x.png → 404.
+    expect(resolveGsImage(FULL, "c67b5534062a.png")).toBe(FULL);
+  });
+
+  it("still joins the legacy folder format with image_name", () => {
+    expect(
+      resolveGsImage("https://www.goldensneakers.net/images/JS3801/main/", "front.png"),
+    ).toBe("https://www.goldensneakers.net/images/JS3801/main/front.png");
+  });
+
+  it("keeps a legacy folder URL as-is when no image_name is present", () => {
+    const folder = "https://www.goldensneakers.net/images/JS3801/main/";
+    expect(resolveGsImage(folder, null)).toBe(folder);
+    expect(resolveGsImage(folder, "")).toBe(folder);
+  });
+
+  it("accepts the apex domain and any true subdomain", () => {
+    expect(resolveGsImage("https://goldensneakers.net/i/a.png", "a.png")).toBe(
+      "https://goldensneakers.net/i/a.png",
+    );
+    expect(resolveGsImage("https://cdn.eu.goldensneakers.net/i/a.png", "a.png")).toBe(
+      "https://cdn.eu.goldensneakers.net/i/a.png",
+    );
+  });
+
+  it("rejects lookalike, third-party and non-https hosts", () => {
+    expect(resolveGsImage("https://evilgoldensneakers.net/i/a.png", "a.png")).toBe("");
+    expect(resolveGsImage("https://goldensneakers.net.evil.com/i/a.png", "a.png")).toBe("");
+    expect(resolveGsImage("https://imgur.com/a.png", "a.png")).toBe("");
+    expect(resolveGsImage("http://media.goldensneakers.net/i/a.png", "a.png")).toBe("");
+    expect(resolveGsImage("not a url", "a.png")).toBe("");
+    expect(resolveGsImage(null, "a.png")).toBe("");
+  });
+});
+
 describe("parseGsPayload", () => {
   it("normalizes sizes through the shared pipeline (fractions included)", () => {
     const { offers, rejected } = parseGsPayload(SAMPLE);
@@ -63,9 +104,7 @@ describe("parseGsPayload", () => {
     expect(parseGsPayload({ items: SAMPLE }).offers).toHaveLength(3);
   });
 
-  it("passes media URLs through verbatim, whatever the host or subdomain", () => {
-    // GS moved media to a subdomain (media.goldensneakers.net) once already —
-    // the pipeline must never filter or rewrite by host.
+  it("accepts the new complete-URL format on any goldensneakers.net subdomain", () => {
     const url = "https://media.goldensneakers.net/products/images/2913_KJ8969/raw/c67b5534062a.png";
     const { offers, rejected } = parseGsPayload([{ ...SAMPLE[0], image_full_url: url }]);
     expect(rejected).toHaveLength(0);
