@@ -336,6 +336,9 @@ export const it = {
   drawer: {
     close: "Chiudi",
     copySku: "Copia SKU",
+    notFoundTitle: "Prodotto non trovato",
+    notFoundBody:
+      "Questo prodotto non è nel catalogo per il mercato attivo. Il link potrebbe essere vecchio, oppure il prodotto è stato rimosso.",
     refresh: "Ri-sincronizza da KicksDB",
     refreshing: "Sincronizzazione…",
     refreshFailed: "Sincronizzazione fallita",

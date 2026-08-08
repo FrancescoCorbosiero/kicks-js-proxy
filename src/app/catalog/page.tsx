@@ -430,7 +430,60 @@ export default async function CatalogPage({
       </div>
 
       {drawer && <ProductDrawer data={drawer} closeHref={closeHref} />}
+      {/* A requested product that can't be loaded must say so — a click that
+          silently does nothing is indistinguishable from a broken page. */}
+      {sp.product && !drawer && (
+        <DrawerNotFound
+          sku={sp.product}
+          closeHref={closeHref}
+          title={t.drawer.notFoundTitle}
+          body={t.drawer.notFoundBody}
+          closeLabel={t.drawer.close}
+        />
+      )}
     </main>
+  );
+}
+
+/** Server-rendered stand-in for the drawer when ?product= can't be resolved. */
+function DrawerNotFound({
+  sku,
+  closeHref,
+  title,
+  body,
+  closeLabel,
+}: {
+  sku: string;
+  closeHref: string;
+  title: string;
+  body: string;
+  closeLabel: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label={title}>
+      <Link
+        href={closeHref}
+        scroll={false}
+        aria-label={closeLabel}
+        className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+      />
+      <div className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-bg shadow-2xl animate-fade-up sm:max-w-lg">
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{title}</div>
+            <div className="truncate font-mono text-[11px] text-faint">{sku}</div>
+          </div>
+          <Link
+            href={closeHref}
+            scroll={false}
+            className="inline-flex h-8 items-center justify-center rounded-md border border-line bg-surface px-3 text-xs font-medium text-ink shadow-xs hover:border-line-strong hover:bg-surface-2"
+          >
+            {closeLabel}
+          </Link>
+        </div>
+        <p className="p-4 text-sm leading-relaxed text-muted">{body}</p>
+      </div>
+    </div>
   );
 }
 
