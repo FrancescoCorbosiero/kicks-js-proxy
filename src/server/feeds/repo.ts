@@ -63,7 +63,9 @@ export async function upsertFeedItems(
           quantity: sql`excluded.quantity`,
           productName: sql`excluded.product_name`,
           brandName: sql`excluded.brand_name`,
-          image: sql`excluded.image`,
+          // A sync that arrives without a usable image must never blank a
+          // known-good one — images only ever improve.
+          image: sql`case when excluded.image = '' then ${feedItems.image} else excluded.image end`,
           active: sql`true`,
           raw: sql`excluded.raw`,
           syncedAt: sql`excluded.synced_at`,

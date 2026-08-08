@@ -93,6 +93,13 @@ export async function syncGoldenSneakers(payload: unknown): Promise<GsSyncReport
     );
   }
 
+  const noImage = new Set(offers.filter((o) => !o.image).map((o) => o.sku)).size;
+  if (noImage > 0) {
+    console.warn(
+      `[gs] ${noImage} feed product(s) arrived without a usable image — stored images are kept, never blanked.`,
+    );
+  }
+
   const config = await getActiveConfig();
   const market = config.source.market;
 

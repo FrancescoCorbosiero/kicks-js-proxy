@@ -21,8 +21,42 @@ export const GsRowSchema = z.looseObject({
   presented_price: z.number().nullish(),
   available_quantity: z.number().nullish(),
   image_full_url: z.string().nullish(),
+  image_name: z.string().nullish(),
 });
 export type GsRow = z.infer<typeof GsRowSchema>;
+
+/**
+ * Resolve a feed row's image URL, supporting BOTH formats GS has shipped:
+ *  - legacy: image_full_url is a base FOLDER (…/images/SKU/main/) and
+ *    image_name holds the file to append;
+ *  - current (Aug 2026): image_full_url is already the COMPLETE file URL on
+ *    media.goldensneakers.net while image_name still holds just the filename —
+ *    blind concatenation would double it (…/x.png/x.png → 404).
+ * Only https URLs on goldensneakers.net or a true subdomain are accepted;
+ * anything else — http, third-party hosts, lookalikes such as
+ * evilgoldensneakers.net — resolves to "" (no image, never a foreign URL).
+ */
+export function resolveGsImage(fullUrl?: string | null, name?: string | null): string {
+  const base = (fullUrl ?? "").trim();
+  if (!base) return "";
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return "";
+  }
+  const host = url.hostname;
+  const trusted =
+    url.protocol === "https:" &&
+    (host === "goldensneakers.net" || host.endsWith(".goldensneakers.net"));
+  if (!trusted) return "";
+
+  const file = (name ?? "").trim();
+  if (!file) return base;
+  const lastSegment = url.pathname.split("/").filter(Boolean).pop() ?? "";
+  if (lastSegment === file) return base; // already the complete file URL
+  return base.replace(/\/+$/, "") + "/" + file; // legacy: folder + filename
+}
 
 /** A validated, size-normalized GS offer ready for the feed_items table. */
 export interface GsOffer {
@@ -93,7 +127,7 @@ export function parseGsPayload(payload: unknown): GsParseResult {
       quantity: row.available_quantity ?? 0,
       productName: row.product_name ?? "",
       brandName: row.brand_name ?? "",
-      image: row.image_full_url ?? "",
+      image: resolveGsImage(row.image_full_url, row.image_name),
       raw: rawRow,
     };
     const key = `${offer.sku}::${offer.euNorm}`;

@@ -579,7 +579,10 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
             stockxId: sql`excluded.stockx_id`,
             title: sql`excluded.title`,
             brand: sql`excluded.brand`,
-            image: sql`excluded.image`,
+            // A refresh without an image must never blank a known-good one;
+            // the jsonb copy is patched to match so data.image never diverges
+            // from the denormalized column.
+            image: sql`case when excluded.image = '' then ${catalogProducts.image} else excluded.image end`,
             category: sql`excluded.category`,
             secondaryCategory: sql`excluded.secondary_category`,
             gender: sql`excluded.gender`,
@@ -587,7 +590,9 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
             productType: sql`excluded.product_type`,
             minAsk: sql`excluded.min_ask`,
             variantCount: sql`excluded.variant_count`,
-            data: sql`excluded.data`,
+            data: sql`case when excluded.image = '' and ${catalogProducts.image} <> ''
+              then jsonb_set(excluded.data, '{image}', to_jsonb(${catalogProducts.image}))
+              else excluded.data end`,
             fetchedAt: sql`excluded.fetched_at`,
             updatedAt: sql`excluded.updated_at`,
             // added_at intentionally NOT updated: it records first insert.
