@@ -63,6 +63,16 @@ describe("parseGsPayload", () => {
     expect(parseGsPayload({ items: SAMPLE }).offers).toHaveLength(3);
   });
 
+  it("passes media URLs through verbatim, whatever the host or subdomain", () => {
+    // GS moved media to a subdomain (media.goldensneakers.net) once already —
+    // the pipeline must never filter or rewrite by host.
+    const url = "https://media.goldensneakers.net/products/images/2913_KJ8969/raw/c67b5534062a.png";
+    const { offers, rejected } = parseGsPayload([{ ...SAMPLE[0], image_full_url: url }]);
+    expect(rejected).toHaveLength(0);
+    expect(offers[0].image).toBe(url);
+    expect(gsOffersToSource("JS3801", offers, "IT").image).toBe(url);
+  });
+
   it("collapses duplicate (sku, size) rows preferring the one with stock", () => {
     const dup = [
       { ...SAMPLE[0], id: 1, available_quantity: 0 },
