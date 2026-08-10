@@ -24,5 +24,9 @@ export async function assertSchemaCurrent(): Promise<void> {
   await db.execute(sql`select 1 from "feed_items" limit 1`);
   // 0007: catalog provenance (multi-source catalog).
   await db.execute(sql`select "source" from "catalog_products" limit 1`);
+  // 0010: catalog navigation metadata. Without these columns the grid's
+  // column-scoped reads still succeed while the drawer's full-row read fails —
+  // products silently stop opening, with no error anywhere.
+  await db.execute(sql`select "category" from "catalog_products" limit 1`);
   verified = true;
 }

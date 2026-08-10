@@ -327,6 +327,9 @@ export const en: Dictionary = {
   drawer: {
     close: "Close",
     copySku: "Copy SKU",
+    notFoundTitle: "Product not found",
+    notFoundBody:
+      "This product is not in the catalog for the active market. The link may be stale, or the product was removed.",
     refresh: "Re-sync from KicksDB",
     refreshing: "Syncing…",
     refreshFailed: "Sync failed",
