@@ -339,6 +339,23 @@ export const it = {
     notFoundTitle: "Prodotto non trovato",
     notFoundBody:
       "Questo prodotto non è nel catalogo per il mercato attivo. Il link potrebbe essere vecchio, oppure il prodotto è stato rimosso.",
+    audit: "Verifica prezzi (API)",
+    auditRunning: "Verifica…",
+    auditTitle: "Verifica prezzi per taglia",
+    auditExplain:
+      "Confronto: prezzo attuale sul negozio, ask in cache (quello usato dall'ultima sync), ask LIVE dai due endpoint KicksDB e prezzo proposto dalle regole. Le righe grezze dell'endpoint bulk sono incluse: se per una taglia compaiono più prezzi diversi sullo stesso canale, quella è l'origine del prezzo sbagliato.",
+    auditFailed: "Verifica fallita",
+    auditCacheMeta: (source: string, days: number) =>
+      `Cache: ${source} · aggiornata ${days === 0 ? "oggi" : `${days} ${days === 1 ? "giorno" : "giorni"} fa`}`,
+    auditHeaderStore: "Negozio",
+    auditHeaderCache: "Ask cache",
+    auditHeaderLive: "Ask live",
+    auditHeaderProposed: "Proposta",
+    auditBulk: "bulk",
+    auditConflict: "CONFLITTO",
+    auditStale: "cache ≠ live",
+    auditLiveError: "Chiamate live fallite",
+    auditNoData: "Nessun dato prezzi per questo SKU.",
     refresh: "Ri-sincronizza da KicksDB",
     refreshing: "Sincronizzazione…",
     refreshFailed: "Sincronizzazione fallita",

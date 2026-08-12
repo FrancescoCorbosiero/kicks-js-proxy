@@ -196,13 +196,76 @@ describe("mergeProductsBySku", () => {
     expect(first.title).toBe("Travis");
   });
 
-  it("keeps the first offer when duplicates share a delivery type", () => {
+  it("keeps the HIGHEST price when duplicate entries disagree on the same tier", () => {
+    // Entry order is arbitrary — first-wins once made the shelf price a coin
+    // flip between the real ask and a lower payout-style value, so products
+    // could be listed far below market. Max never undersells.
     const merged = mergeProductsBySku([
-      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 100)] },
-      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 999)] },
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 60)] },
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 82)] },
     ]);
     expect(merged[0].variants[0].offers).toEqual([
-      { deliveryType: "standard", lowestAsk: 100, asks: 1 },
+      { deliveryType: "standard", lowestAsk: 82, asks: 1 },
+    ]);
+    // Same result with the entries reversed — order must not matter.
+    const reversed = mergeProductsBySku([
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 82)] },
+      { stockxId: "a", sku: "X", title: "", brand: "", image: "", market: "IT", currency: "EUR", variants: [variant("v1", 60)] },
+    ]);
+    expect(reversed[0].variants[0].offers).toEqual([
+      { deliveryType: "standard", lowestAsk: 82, asks: 1 },
+    ]);
+  });
+});
+
+describe("conflicting same-tier price rows (the underpriced-variant bug)", () => {
+  it("bulk mapper: duplicate standard rows for one variant collapse to the highest price", () => {
+    const sp = mapKicksPrices(
+      {
+        product_id: "p1",
+        sku: "HP8695",
+        variants: [
+          // The API sometimes emits a second, LOWER row for the same variant
+          // and tier (payout-style value riding along). Row order is arbitrary.
+          { id: "v46", size: "46", size_type: "eu", price: 55.5, asks: 2, type: "standard" },
+          { id: "v46", size: "46", size_type: "eu", price: 78, asks: 2, type: "standard" },
+          { id: "v47", size: "47", size_type: "eu", price: 72, asks: 3, type: "standard" },
+        ],
+      },
+      "IT",
+    );
+    const v46 = sp.variants.find((v) => v.stockxVariantId === "v46")!;
+    expect(v46.offers).toEqual([{ deliveryType: "standard", lowestAsk: 78, asks: 2 }]);
+    const v47 = sp.variants.find((v) => v.stockxVariantId === "v47")!;
+    expect(v47.offers).toEqual([{ deliveryType: "standard", lowestAsk: 72, asks: 3 }]);
+  });
+
+  it("product mapper: duplicate-tier prices[] entries collapse to the highest price", () => {
+    const sp = mapKicksProduct(
+      {
+        id: "p1",
+        sku: "HP8695",
+        title: "Foam RNNR",
+        brand: "adidas",
+        image: "",
+        variants: [
+          {
+            id: "v1",
+            size: "48.5",
+            size_type: "eu",
+            prices: [
+              { price: 43.7, asks: 1, type: "standard" },
+              { price: 60, asks: 1, type: "standard" },
+              { price: 65, asks: 1, type: "express_standard" },
+            ],
+          },
+        ],
+      },
+      "IT",
+    );
+    expect(sp.variants[0].offers).toEqual([
+      { deliveryType: "standard", lowestAsk: 60, asks: 1 },
+      { deliveryType: "express_standard", lowestAsk: 65, asks: 1 },
     ]);
   });
 });

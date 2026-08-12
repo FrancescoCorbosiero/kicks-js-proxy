@@ -330,6 +330,23 @@ export const en: Dictionary = {
     notFoundTitle: "Product not found",
     notFoundBody:
       "This product is not in the catalog for the active market. The link may be stale, or the product was removed.",
+    audit: "Audit prices (API)",
+    auditRunning: "Auditing…",
+    auditTitle: "Per-size price audit",
+    auditExplain:
+      "Comparison: current store price, cached ask (what the last sync priced from), LIVE asks from both KicksDB endpoints, and the shelf price the rules propose. Raw bulk-endpoint rows are included: if a size shows multiple differing prices on the same tier, that is where a wrong price comes from.",
+    auditFailed: "Audit failed",
+    auditCacheMeta: (source: string, days: number) =>
+      `Cache: ${source} · refreshed ${days === 0 ? "today" : `${days} ${days === 1 ? "day" : "days"} ago`}`,
+    auditHeaderStore: "Store",
+    auditHeaderCache: "Cached ask",
+    auditHeaderLive: "Live ask",
+    auditHeaderProposed: "Proposed",
+    auditBulk: "bulk",
+    auditConflict: "CONFLICT",
+    auditStale: "cache ≠ live",
+    auditLiveError: "Live calls failed",
+    auditNoData: "No price data for this SKU.",
     refresh: "Re-sync from KicksDB",
     refreshing: "Syncing…",
     refreshFailed: "Sync failed",

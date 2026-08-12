@@ -102,16 +102,52 @@ const normalizeSizes = (v: { sizes?: KicksSizeRaw[] | null }): SourceSize[] =>
         .filter((s) => s.size.length > 0);
 
 /**
+ * One offer per delivery tier — the invariant every price consumer relies on.
+ * The API can emit several rows for the same variant AND tier with different
+ * prices (StockX payloads carry more price kinds than the lowest ask — their
+ * own 500s mention sell_faster fields — and one SKU can come back split across
+ * entries). With duplicates, computePrice's find() made the shelf price depend
+ * on arbitrary row order: sometimes the real ask, sometimes a lower value —
+ * which is how products end up on the store far below market. Keep the HIGHEST
+ * price per tier: the real lowest ask is never below a conflicting sibling row,
+ * so max never undersells; at worst it prices conservatively. Conflicts are
+ * logged so the upstream cause stays visible in ops logs.
+ */
+export function collapseOffersByTier(offers: PriceOffer[], context: string): PriceOffer[] {
+    if (offers.length < 2) return offers;
+    const byTier = new Map<DeliveryType, PriceOffer>();
+    let conflict = false;
+    for (const o of offers) {
+        const cur = byTier.get(o.deliveryType);
+        if (!cur) {
+            byTier.set(o.deliveryType, o);
+            continue;
+        }
+        if (o.lowestAsk !== cur.lowestAsk) conflict = true;
+        if (o.lowestAsk > cur.lowestAsk) byTier.set(o.deliveryType, o);
+    }
+    if (conflict) {
+        console.warn(
+            `[prices] conflicting same-tier price rows for ${context} — kept the highest per tier`,
+        );
+    }
+    return [...byTier.values()];
+}
+
+/**
  * Build offers from the per-delivery-type prices[] when present; otherwise fall
  * back to the variant-level lowest_ask/total_asks (the products/search endpoint
  * carries the ask there, with prices[] often empty).
  */
-const normalizeOffers = (v: KicksVariantRaw): PriceOffer[] => {
-    const offers = (v.prices ?? []).map((p) => ({
-        deliveryType: p.type,
-        lowestAsk: p.price,
-        asks: p.asks,
-    }));
+const normalizeOffers = (v: KicksVariantRaw, context: string): PriceOffer[] => {
+    const offers = collapseOffersByTier(
+        (v.prices ?? []).map((p) => ({
+            deliveryType: p.type,
+            lowestAsk: p.price,
+            asks: p.asks,
+        })),
+        context,
+    );
     if (offers.length === 0 && v.lowest_ask != null && v.lowest_ask > 0) {
         return [{ deliveryType: "standard", lowestAsk: v.lowest_ask, asks: v.total_asks ?? 0 }];
     }
@@ -143,7 +179,7 @@ export function mapKicksProduct(raw: KicksProductRaw, market: string): SourcePro
         sizeType: v.size_type,
         sizes: normalizeSizes(v),
         upc: pickUpc(v),
-        offers: normalizeOffers(v),
+        offers: normalizeOffers(v, `${raw.sku} ${v.size} ${v.size_type}`),
     }));
     const currency = raw.variants?.[0]?.currency ?? "EUR";
     // The gallery's first entries usually duplicate the thumbnail verbatim.
@@ -204,9 +240,12 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
             sizeType: first.size_type,
             sizes: normalizeSizes(first),
             // price 0 == no ask at that delivery tier (e.g. express rows) -> drop.
-            offers: rows
-                .filter((r) => r.type != null && r.price != null && r.price > 0)
-                .map((r) => ({ deliveryType: r.type!, lowestAsk: r.price!, asks: r.asks ?? 0 })),
+            offers: collapseOffersByTier(
+                rows
+                    .filter((r) => r.type != null && r.price != null && r.price > 0)
+                    .map((r) => ({ deliveryType: r.type!, lowestAsk: r.price!, asks: r.asks ?? 0 })),
+                `${raw.sku ?? raw.product_id} ${first.size} ${first.size_type}`,
+            ),
         };
     });
 
@@ -227,7 +266,9 @@ export function mapKicksPrices(raw: KicksPricesProductRaw, market: string): Sour
  * The bulk endpoint can return one SKU as several entries (and a messy input
  * list can request it several times); left unmerged, each copy became its own
  * preview plan — the same product N times, N× the variants "ready to write".
- * Variants merge by id; offers dedupe by delivery type (first occurrence wins).
+ * Variants merge by id; conflicting same-tier offers across copies collapse to
+ * the highest price (see collapseOffersByTier) — entry order must never decide
+ * the shelf price.
  */
 export function mergeProductsBySku(products: SourceProduct[]): SourceProduct[] {
     const bySku = new Map<string, SourceProduct>();
@@ -245,10 +286,14 @@ export function mergeProductsBySku(products: SourceProduct[]): SourceProduct[] {
                 byVid.set(v.stockxVariantId, v);
                 continue;
             }
-            const seen = new Set(existing.offers.map((o) => o.deliveryType));
-            const extra = v.offers.filter((o) => !seen.has(o.deliveryType));
-            if (extra.length > 0) {
-                byVid.set(v.stockxVariantId, { ...existing, offers: [...existing.offers, ...extra] });
+            if (v.offers.length > 0) {
+                byVid.set(v.stockxVariantId, {
+                    ...existing,
+                    offers: collapseOffersByTier(
+                        [...existing.offers, ...v.offers],
+                        `${key} ${existing.sizeLabel} ${existing.sizeType} (merged entries)`,
+                    ),
+                });
             }
         }
         bySku.set(key, {
