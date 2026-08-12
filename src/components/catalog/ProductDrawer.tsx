@@ -14,6 +14,7 @@ import {
   setVariationManualPrice,
 } from "@/server/actions/overrides";
 import { updateStoreVariation } from "@/server/actions/store-edit";
+import { auditPrices, type PriceAuditResult } from "@/server/actions/debug";
 import { LockIcon, UnlockIcon } from "@/components/icons";
 import { CardImage } from "./CardImage";
 import type { DrawerData, DrawerVariant, StoreDrawerVariant } from "./drawer-data";
@@ -101,6 +102,15 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
   }
 
   const [pinSaving, startPin] = React.useTransition();
+  const [audit, setAudit] = React.useState<PriceAuditResult | null>(null);
+  const [auditing, startAudit] = React.useTransition();
+
+  function runAudit() {
+    setError(null);
+    startAudit(async () => {
+      setAudit(await auditPrices({ sku: data.sku }));
+    });
+  }
 
   function savePin(owner: "kicksdb" | null) {
     setError(null);
@@ -210,6 +220,9 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
                 t.drawer.refresh
               )}
             </Button>
+            <Button type="button" variant="outline" size="sm" onClick={runAudit} disabled={auditing}>
+              {auditing ? t.drawer.auditRunning : t.drawer.audit}
+            </Button>
             <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted" title={t.product.saleRuleHint}>
               <input
                 type="checkbox"
@@ -228,6 +241,9 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
             </Link>
           </div>
           )}
+
+          {/* Price audit: live per-size comparison of every price source. */}
+          {audit && <AuditPanel audit={audit} />}
 
           {/* Price source: who decides this product's prices. Only shown when
               the supplier feed actually covers the SKU, so the choice is real. */}
@@ -331,6 +347,107 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-size price audit table: store price vs cached ask vs LIVE asks from both
+ * KicksDB endpoints vs the rules' proposal. Raw bulk rows included — a size
+ * showing several differing same-tier prices is the smoking gun for a wrongly
+ * cheap listing; a cached ask far from the live one flags a stale cache.
+ */
+function AuditPanel({ audit }: { audit: PriceAuditResult }) {
+  const { t } = useI18n();
+
+  if (!audit.ok) {
+    return (
+      <div className="rounded-xl border border-skip/40 bg-surface p-3 text-xs text-skip">
+        {t.drawer.auditFailed}: {audit.error}
+      </div>
+    );
+  }
+  const rows = audit.rows ?? [];
+  const price = (n: number | null) =>
+    n != null ? eur.format(n) : <span className="text-faint">—</span>;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="border-b border-line px-3 py-2.5">
+        <div className="text-xs font-semibold">{t.drawer.auditTitle}</div>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted">{t.drawer.auditExplain}</p>
+        {audit.cacheFetchedAt && (
+          <p className="mt-1 text-[11px] font-medium text-faint">
+            {t.drawer.auditCacheMeta(audit.cacheSource ?? "?", daysAgo(audit.cacheFetchedAt))}
+          </p>
+        )}
+        {audit.liveError && (
+          <p className="mt-1 break-all text-[11px] font-medium text-update">
+            {t.drawer.auditLiveError}: {audit.liveError}
+          </p>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="p-3 text-xs text-muted">{t.drawer.auditNoData}</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-2.5 border-b border-line bg-surface-2 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-faint">
+            <span>{t.product.headerSize}</span>
+            <span className="text-right">{t.drawer.auditHeaderStore}</span>
+            <span className="text-right">{t.drawer.auditHeaderCache}</span>
+            <span className="text-right">{t.drawer.auditHeaderLive}</span>
+            <span className="text-right">{t.drawer.auditHeaderProposed}</span>
+          </div>
+          <ul className="divide-y divide-line/60">
+            {rows.map((r, i) => {
+              // Cache ask drifting >10% off the live ask = the sync priced
+              // from stale/poisoned data; a same-tier bulk conflict = the API
+              // sent two different prices for one size.
+              const stale =
+                r.storedAsk != null &&
+                r.liveProductAsk != null &&
+                Math.abs(r.storedAsk - r.liveProductAsk) / r.liveProductAsk > 0.1;
+              return (
+                <li key={i} className="px-3 py-1.5 text-xs">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-2.5 tnum">
+                    <span className="font-medium">
+                      {r.euSize ? t.product.eu(r.euSize) : `${r.sizeLabel} ${r.sizeType}`}
+                    </span>
+                    <span className="text-right">{price(r.storePrice)}</span>
+                    <span className={`text-right ${stale ? "font-semibold text-update" : ""}`}>
+                      {price(r.storedAsk)}
+                      {r.storedAsk != null && <span className="text-[10px] text-faint"> ×{r.storedAsks}</span>}
+                    </span>
+                    <span className="text-right">{price(r.liveProductAsk)}</span>
+                    <span className="text-right font-semibold">
+                      {price(r.proposedFromLive ?? r.proposedFromStored)}
+                    </span>
+                  </div>
+                  {(r.liveBulkRows.length > 0 || r.bulkConflict || stale) && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-faint">
+                      {r.bulkConflict && (
+                        <span className="rounded bg-skip/15 px-1 py-px font-sans font-bold text-skip">
+                          {t.drawer.auditConflict}
+                        </span>
+                      )}
+                      {stale && (
+                        <span className="rounded bg-update/15 px-1 py-px font-sans font-bold text-update">
+                          {t.drawer.auditStale}
+                        </span>
+                      )}
+                      {r.liveBulkRows.length > 0 && (
+                        <span>
+                          {t.drawer.auditBulk}: {r.liveBulkRows.join(" · ")}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
