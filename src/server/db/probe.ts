@@ -28,5 +28,7 @@ export async function assertSchemaCurrent(): Promise<void> {
   // column-scoped reads still succeed while the drawer's full-row read fails —
   // products silently stop opening, with no error anywhere.
   await db.execute(sql`select "category" from "catalog_products" limit 1`);
+  // 0011: the orders workspace (orders snapshot + local workflow state).
+  await db.execute(sql`select 1 from "order_workflow" limit 1`);
   verified = true;
 }

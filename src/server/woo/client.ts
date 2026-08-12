@@ -130,6 +130,34 @@ export class WooClient {
     }
   }
 
+  /**
+   * One page of orders, newest first. Validated loosely — the orders model
+   * (src/server/orders/model.ts) normalizes the handful of fields the Orders
+   * tab shows and keeps the raw payload for everything else. `statuses`
+   * narrows server-side ("any" = all); `total` from X-WP-Total when present.
+   */
+  async getOrdersPage(
+    page: number,
+    perPage: number,
+    statuses = "any",
+  ): Promise<{ orders: Record<string, unknown>[]; total: number | null }> {
+    const { data, headers } = await requestJsonWithHeaders(
+      this.apiUrl("orders", {
+        status: statuses,
+        orderby: "date",
+        order: "desc",
+        page: String(page),
+        per_page: String(perPage),
+      }),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    const orders = z.array(z.looseObject({ id: z.number() })).parse(data);
+    const totalHeader = headers.get("x-wp-total");
+    const total = totalHeader != null ? Number.parseInt(totalHeader, 10) : NaN;
+    return { orders, total: Number.isFinite(total) ? total : null };
+  }
+
   /** One full product payload (attributes, meta, everything) — the rebuild input. */
   async getFullProduct(productId: number): Promise<Record<string, unknown>> {
     const raw = await requestJson(
