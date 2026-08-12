@@ -123,3 +123,33 @@ describe("medianTierAsk", () => {
     expect(medianTierAsk(thin, "standard")).toBeNull();
   });
 });
+
+describe("guaranteed minimum margin (minMarginFixed)", () => {
+  const rule = (extra: Partial<EffectivePricingRule>): EffectivePricingRule => ({
+    sourceDeliveryType: "standard",
+    markupPercent: 35,
+    rounding: { mode: "none" },
+    tax: { priceIncludesVat: false, vatRatePercent: 0 },
+    ...extra,
+  });
+
+  it("lifts cheap-ask prices to ask + margin; the occasion stays listed, never at a loss", () => {
+    // 35% of a 44€ ask is 15.40€ of margin — under the ~20€ fixed sourcing
+    // costs. With minMarginFixed 20 the price becomes 64 instead of 59.40.
+    expect(computePrice(std(44), rule({ minMarginFixed: 20 }))).toBe(64);
+  });
+
+  it("does nothing once the percent margin already covers it", () => {
+    // 35% of 100 = 35€ ≥ 20€ → untouched.
+    expect(computePrice(std(100), rule({ minMarginFixed: 20 }))).toBe(135);
+  });
+
+  it("applies on top of fixed-margin rules too", () => {
+    expect(computePrice(std(50), rule({ markupFixed: 3, minMarginFixed: 20 }))).toBe(70);
+  });
+
+  it("is inert at 0 or when unset", () => {
+    expect(computePrice(std(44), rule({ minMarginFixed: 0 }))).toBe(59.4);
+    expect(computePrice(std(44), rule({}))).toBe(59.4);
+  });
+});

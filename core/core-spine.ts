@@ -403,6 +403,12 @@ export function computePrice(
         rule.markupFixed != null
             ? ask + rule.markupFixed
             : ask * (1 + markupForAsk(ask, rule) / 100);
+    // Guaranteed margin: percent markups under-cover cheap asks (sourcing has
+    // fixed costs — shipping, fees), so the price never sits closer to the
+    // ask than this. Cheap market occasions stay listed, never at a loss.
+    if (rule.minMarginFixed != null && rule.minMarginFixed > 0) {
+        price = Math.max(price, ask + rule.minMarginFixed);
+    }
     if (rule.floor != null) price = Math.max(price, rule.floor);
     if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
         price = price * (1 + rule.tax.vatRatePercent / 100);

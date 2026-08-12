@@ -104,6 +104,7 @@ const RuleSchema = z.object({
   minDeltaPercent: z.number().min(0).max(100).optional(),
   maxDeltaPercent: z.number().min(0).max(1000).optional(),
   outlierFloorPercent: z.number().min(0).max(100).optional(),
+  minMarginFixed: z.number().min(0).max(10000).optional(),
 });
 
 const RulesSchema = z.array(RuleSchema).min(1).max(100);
@@ -161,6 +162,7 @@ export async function savePricingRules(input: unknown): Promise<SaveRulesResult>
     ...(r.minDeltaPercent != null ? { minDeltaPercent: r.minDeltaPercent } : {}),
     ...(r.maxDeltaPercent != null ? { maxDeltaPercent: r.maxDeltaPercent } : {}),
     ...(r.outlierFloorPercent != null ? { outlierFloorPercent: r.outlierFloorPercent } : {}),
+    ...(r.minMarginFixed != null ? { minMarginFixed: r.minMarginFixed } : {}),
   }));
 
   try {

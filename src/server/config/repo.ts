@@ -37,17 +37,26 @@ function ensureGsRule(rules: AppConfig["pricingRules"]): AppConfig["pricingRules
 }
 
 /**
- * Same read-time retrofit for the distribution guard: configs stored before
- * outlierFloorPercent existed get the default on their catch-all rule (and 0
- * on GS rules — supplier presented prices are real, never bad data). An
- * operator's explicit value, including 0, is always respected.
+ * Same read-time retrofit for the pricing safety nets: configs stored before
+ * minMarginFixed / outlierFloorPercent existed get the defaults on their
+ * catch-all rule (guaranteed 20€ margin over the ask; bad-data net at 40% of
+ * the product median) and explicit 0 on GS rules — supplier presented prices
+ * are final, margin included upstream. An operator's explicit value,
+ * including 0, is always respected.
  */
 function ensureOutlierGuard(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
   return rules.map((r) => {
-    if (r.outlierFloorPercent != null) return r;
-    if (r.scope.source === "goldensneakers") return { ...r, outlierFloorPercent: 0 };
-    const isCatchAll = Object.keys(r.scope).length === 0;
-    return isCatchAll ? { ...r, outlierFloorPercent: 60 } : r;
+    const out = { ...r };
+    if (r.scope.source === "goldensneakers") {
+      out.outlierFloorPercent = r.outlierFloorPercent ?? 0;
+      out.minMarginFixed = r.minMarginFixed ?? 0;
+      return out;
+    }
+    if (Object.keys(r.scope).length === 0) {
+      out.outlierFloorPercent = r.outlierFloorPercent ?? 40;
+      out.minMarginFixed = r.minMarginFixed ?? 20;
+    }
+    return out;
   });
 }
 

@@ -20,10 +20,11 @@ export function goldenSneakersPassthroughRule(): ScopedPricingRule {
     minAsks: 1,
     rounding: { mode: "none" },
     tax: { priceIncludesVat: false, vatRatePercent: 0 },
-    // Presented prices are the supplier's real list — a cheap size on the GS
-    // feed is a genuine bargain, never bad data. Guard explicitly OFF so the
-    // general rule's distribution floor cannot leak in.
+    // Presented prices are the supplier's real list, margin included upstream
+    // — a cheap size on the GS feed is a genuine bargain, never bad data.
+    // Both safety nets explicitly OFF so the general rule's cannot leak in.
     outlierFloorPercent: 0,
+    minMarginFixed: 0,
   };
 }
 
@@ -76,10 +77,15 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         // never becomes store writes. Set 0 in the pricing editor to reprice on
         // every change.
         minDeltaPercent: 3,
-        // Distribution guard: one size never wildly undercuts its own product.
-        // An ask below 60% of the product's median ask reads as bad data (a
-        // glitched API row) and is priced as if it were AT that floor.
-        outlierFloorPercent: 60,
+        // Guaranteed margin: the price never sits closer than this to the ask.
+        // Percent markups under-cover cheap asks — sourcing costs have a fixed
+        // part (shipping + marketplace fees) that 35% of a 44€ ask doesn't
+        // reach. Cheap market occasions stay LISTED, just never at a loss.
+        minMarginFixed: 20,
+        // Broad safety net only: an ask below 40% of the product's median is
+        // considered corrupted data and lifted. Real cheap sizes (market
+        // occasions) sit well above this; they list normally.
+        outlierFloorPercent: 40,
       },
       goldenSneakersPassthroughRule(),
     ],

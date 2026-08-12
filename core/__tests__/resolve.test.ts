@@ -145,3 +145,36 @@ describe("fixed-margin rules (markupFixed)", () => {
     expect(computePrice(variant, eff)).toBe(120);
   });
 });
+
+describe("safety-net fields survive resolution (regression: dropped from the effective rule)", () => {
+  it("outlierFloorPercent and minMarginFixed reach the effective rule and computePrice", async () => {
+    const { resolveEffectiveRule } = await import("../config");
+    const { computePrice } = await import("../core-spine");
+    const product: import("../core-spine").SourceProduct = {
+      stockxId: "p", sku: "S", title: "X", brand: "B", image: "", market: "IT", currency: "EUR", variants: [],
+    };
+    const variant: import("../core-spine").SourceVariant = {
+      stockxVariantId: "v", sizeLabel: "9", sizeType: "us m",
+      offers: [{ deliveryType: "standard", lowestAsk: 40, asks: 5 }],
+    };
+    const cfg = {
+      source: { market: "IT", defaultDeliveryType: "standard", batchChunkSize: 50, cacheTtlSeconds: 900, query: { sort: "", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } } },
+      pricingRules: [{
+        id: "general", scope: {}, enabled: true, sourceDeliveryType: "standard",
+        markupPercent: 35, rounding: { mode: "none" }, tax: { priceIncludesVat: false, vatRatePercent: 0 },
+        outlierFloorPercent: 40, minMarginFixed: 20,
+      }],
+      matching: { strategyOrder: ["upc"], skuTemplate: "" },
+      apply: { includeActions: ["update"], dryRunByDefault: true, requireApprovalAboveDeltaPercent: 25, concurrency: 1, wooBatchSize: 100, retry: { attempts: 1, backoffMs: 0 } },
+      connection: { kicksDbApiKey: "", woo: { baseUrl: "", consumerKey: "", consumerSecret: "" }, marketToCurrency: { IT: "EUR" } },
+    } as import("../config").AppConfig;
+
+    const eff = resolveEffectiveRule(product, variant, cfg)!;
+    expect(eff.outlierFloorPercent).toBe(40);
+    expect(eff.minMarginFixed).toBe(20);
+    // 40€ ask, min margin 20 → 60 (35% alone would give 54); median lift: ask
+    // below 40% of a 120 median lifts to 48 → 48+20 = 68 via the margin floor.
+    expect(computePrice(variant, eff)).toBe(60);
+    expect(computePrice(variant, eff, { medianAsk: 121 })).toBe(68.4);
+  });
+});

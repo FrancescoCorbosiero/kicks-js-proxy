@@ -348,6 +348,24 @@ function RuleCard({
               </button>
             </div>
           )}
+
+          {/* The knob that guarantees money is never lost on cheap asks —
+              front and center, not buried in the advanced section. */}
+          <label
+            className="mt-3 flex items-center gap-1.5 text-xs text-muted"
+            title={t.margins.minMarginHint}
+          >
+            {t.margins.minMargin}
+            <Input
+              inputMode="decimal"
+              className={FIELD}
+              value={rule.minMarginFixed != null ? String(rule.minMarginFixed) : ""}
+              onChange={(e) => onPatch({ minMarginFixed: num(e.target.value) })}
+            />
+          </label>
+          <p className="mt-1 max-w-md text-[11px] leading-snug text-faint">
+            {t.margins.minMarginHint}
+          </p>
         </div>
       </div>
 

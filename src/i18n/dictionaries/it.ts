@@ -672,9 +672,12 @@ export const it = {
     vat: "IVA % aggiunta sopra (0 = inclusa nel ricarico)",
     minDelta: "Ignora variazioni sotto il %",
     maxDelta: "Blocca variazioni oltre il % (0 = off)",
-    outlierFloor: "Anti-anomalia: % della mediana prodotto",
+    minMargin: "Margine minimo €",
+    minMarginHint:
+      "Il prezzo non scende mai sotto ask + questo importo: copre spedizione e commissioni sulle occasioni economiche, senza toglierle dal listino. 0 = off.",
+    outlierFloor: "Rete anti-dati-corrotti: % della mediana",
     outlierFloorHint:
-      "Un ask sotto questa percentuale della mediana del prodotto è trattato come dato sbagliato e alzato alla soglia. 0 = disattivo.",
+      "Solo rete di sicurezza: un ask sotto questa percentuale della mediana del prodotto è trattato come dato corrotto e alzato alla soglia. Le occasioni vere restano ben sopra. 0 = disattivo.",
     empty: "Nessuna regola definita.",
   },
   login: {

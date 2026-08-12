@@ -75,6 +75,13 @@ export interface ScopedPricingRule {
     // +3€ fissi". A rule setting it becomes a fixed-margin rule: bands and
     // percent from less-specific rules stop applying.
     markupFixed?: number;
+    /**
+     * Never sell below ask + this amount (currency units). Percent markups
+     * under-cover cheap asks — sourcing costs have a FIXED part (shipping,
+     * marketplace fees) that 35% of a 44€ ask doesn't reach. The cheap market
+     * occasion stays listed, but the margin is guaranteed. 0/absent = off.
+     */
+    minMarginFixed?: number;
     floor?: number;
     minAsks?: number;                     // skip if liquidity below this
     rounding?: RoundingConfig;
@@ -135,6 +142,7 @@ export interface EffectivePricingRule {
     markupPercent: number;               // fallback when no band covers the ask
     markupBands?: MarkupBand[];          // ordered ascending; wins when present
     markupFixed?: number;                // fixed € margin — wins over percent/bands
+    minMarginFixed?: number;             // price never below ask + this (€)
     floor?: number;
     minAsks?: number;
     rounding: RoundingConfig;
@@ -224,6 +232,7 @@ export function resolveEffectiveRule(
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
         if (r.minDeltaPercent != null) merged.minDeltaPercent = r.minDeltaPercent;
         if (r.outlierFloorPercent != null) merged.outlierFloorPercent = r.outlierFloorPercent;
+        if (r.minMarginFixed != null) merged.minMarginFixed = r.minMarginFixed;
     }
 
     // A rule must set a markup somehow: fixed, flat, or banded (whose top band
@@ -244,5 +253,7 @@ export function resolveEffectiveRule(
         tax: merged.tax ?? { priceIncludesVat: false, vatRatePercent: 0 },
         maxDeltaPercent: merged.maxDeltaPercent,
         minDeltaPercent: merged.minDeltaPercent,
+        outlierFloorPercent: merged.outlierFloorPercent,
+        minMarginFixed: merged.minMarginFixed,
     };
 }

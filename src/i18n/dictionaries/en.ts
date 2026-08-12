@@ -654,9 +654,12 @@ export const en: Dictionary = {
     vat: "VAT % added on top (0 = included in the markup)",
     minDelta: "Ignore changes below %",
     maxDelta: "Block changes above % (0 = off)",
-    outlierFloor: "Anomaly guard: % of product median",
+    minMargin: "Minimum margin €",
+    minMarginHint:
+      "The price never sits closer than this to the ask: covers shipping and fees on cheap occasions without delisting them. 0 = off.",
+    outlierFloor: "Corrupt-data net: % of product median",
     outlierFloorHint:
-      "An ask below this percent of the product's median is treated as bad data and lifted to the threshold. 0 = off.",
+      "Safety net only: an ask below this percent of the product's median is treated as corrupted data and lifted to the threshold. Real bargains sit well above it. 0 = off.",
     empty: "No rules defined.",
   },
   login: {
