@@ -153,6 +153,24 @@ export async function orderExists(orderId: number): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Seed workflow rows for orders that have NONE yet (first pull of settled
+ * history: Woo-completed orders start as concluso, cancelled as annullato).
+ * DO NOTHING on conflict — an existing row is the operator's state.
+ */
+export async function seedWorkflowStatuses(
+  entries: { orderId: number; status: OrderStatus }[],
+): Promise<void> {
+  if (entries.length === 0) return;
+  const now = new Date();
+  for (const chunk of chunkArray(entries, 200)) {
+    await db
+      .insert(orderWorkflow)
+      .values(chunk.map((e) => ({ orderId: e.orderId, status: e.status, updatedAt: now })))
+      .onConflictDoNothing({ target: orderWorkflow.orderId });
+  }
+}
+
 /** Set the local fulfillment status (stamps statusChangedAt). */
 export async function setWorkflowStatus(orderId: number, status: OrderStatus): Promise<void> {
   const now = new Date();

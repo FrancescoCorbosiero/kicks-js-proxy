@@ -1,7 +1,7 @@
 import "server-only";
 import { getWooClient } from "@/server/woo/client";
-import { normalizeWooOrder, type OrderModel } from "./model";
-import { upsertOrders } from "./repo";
+import { initialStatusForWoo, normalizeWooOrder, type OrderModel } from "./model";
+import { seedWorkflowStatuses, upsertOrders } from "./repo";
 
 /**
  * The orders pull: fetch the most recent orders over Woo REST and refresh the
@@ -45,5 +45,16 @@ export async function pullRecentOrders(): Promise<OrdersPullReport> {
 
   await upsertOrders(models);
   report.saved = models.length;
+
+  // Settled history starts settled: orders already completed/cancelled on Woo
+  // seed the matching local status (only where no workflow row exists — the
+  // operator's own state always wins).
+  await seedWorkflowStatuses(
+    models.flatMap((m) => {
+      const status = initialStatusForWoo(m.wooStatus);
+      return status ? [{ orderId: m.id, status }] : [];
+    }),
+  );
+
   return report;
 }
