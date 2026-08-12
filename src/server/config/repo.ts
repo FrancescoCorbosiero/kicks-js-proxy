@@ -24,12 +24,31 @@ export async function getActiveConfig(): Promise<AppConfig> {
   // Overlay env secrets onto the stored (secret-free) config. The GS
   // passthrough rule is ensured at read time so configs stored before the
   // feed existed keep working without a manual Reset.
-  return { ...rows[0].data, pricingRules: ensureGsRule(rows[0].data.pricingRules), connection };
+  return {
+    ...rows[0].data,
+    pricingRules: ensureOutlierGuard(ensureGsRule(rows[0].data.pricingRules)),
+    connection,
+  };
 }
 
 function ensureGsRule(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
   const hasGs = rules.some((r) => r.scope.source === "goldensneakers");
   return hasGs ? rules : [...rules, goldenSneakersPassthroughRule()];
+}
+
+/**
+ * Same read-time retrofit for the distribution guard: configs stored before
+ * outlierFloorPercent existed get the default on their catch-all rule (and 0
+ * on GS rules — supplier presented prices are real, never bad data). An
+ * operator's explicit value, including 0, is always respected.
+ */
+function ensureOutlierGuard(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
+  return rules.map((r) => {
+    if (r.outlierFloorPercent != null) return r;
+    if (r.scope.source === "goldensneakers") return { ...r, outlierFloorPercent: 0 };
+    const isCatchAll = Object.keys(r.scope).length === 0;
+    return isCatchAll ? { ...r, outlierFloorPercent: 60 } : r;
+  });
 }
 
 /** Never persist secrets: blank out the ConnectionConfig before writing to DB. */

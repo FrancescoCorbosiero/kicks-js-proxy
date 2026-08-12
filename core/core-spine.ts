@@ -399,7 +399,10 @@ export function computePrice(
         ask = Math.max(ask, (context.medianAsk * rule.outlierFloorPercent) / 100);
     }
 
-    let price = ask * (1 + markupForAsk(ask, rule) / 100);
+    let price =
+        rule.markupFixed != null
+            ? ask + rule.markupFixed
+            : ask * (1 + markupForAsk(ask, rule) / 100);
     if (rule.floor != null) price = Math.max(price, rule.floor);
     if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
         price = price * (1 + rule.tax.vatRatePercent / 100);

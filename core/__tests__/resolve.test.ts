@@ -94,3 +94,54 @@ describe("resolveEffectiveRule", () => {
     expect(resolveEffectiveRule(product, big, cfg)!.markupPercent).toBe(30);
   });
 });
+
+describe("fixed-margin rules (markupFixed)", () => {
+  const cfg = (rules: import("../config").ScopedPricingRule[]) =>
+    ({
+      source: { market: "IT", defaultDeliveryType: "standard", batchChunkSize: 50, cacheTtlSeconds: 900, query: { sort: "", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } } },
+      pricingRules: rules,
+      matching: { strategyOrder: ["upc"], skuTemplate: "" },
+      apply: { includeActions: ["update"], dryRunByDefault: true, requireApprovalAboveDeltaPercent: 25, concurrency: 1, wooBatchSize: 100, retry: { attempts: 1, backoffMs: 0 } },
+      connection: { kicksDbApiKey: "", woo: { baseUrl: "", consumerKey: "", consumerSecret: "" }, marketToCurrency: { IT: "EUR" } },
+    }) as import("../config").AppConfig;
+
+  const product: import("../core-spine").SourceProduct = {
+    stockxId: "p", sku: "S", title: "Air Jordan 4", brand: "Jordan", image: "", market: "IT", currency: "EUR",
+    variants: [],
+  };
+  const variant: import("../core-spine").SourceVariant = {
+    stockxVariantId: "v", sizeLabel: "9", sizeType: "us m",
+    offers: [{ deliveryType: "standard", lowestAsk: 100, asks: 5 }],
+  };
+
+  it("a specific fixed rule replaces the general banded markup", async () => {
+    const { resolveEffectiveRule } = await import("../config");
+    const { computePrice } = await import("../core-spine");
+    const eff = resolveEffectiveRule(product, variant, cfg([
+      { id: "general", scope: {}, enabled: true, sourceDeliveryType: "standard", markupPercent: 30, markupBands: [{ upTo: null, percent: 30 }], rounding: { mode: "none" }, tax: { priceIncludesVat: false, vatRatePercent: 0 } },
+      { id: "jordan-fixed", scope: { brand: "Jordan" }, enabled: true, markupFixed: 3 },
+    ]))!;
+    expect(eff.markupFixed).toBe(3);
+    expect(eff.markupBands).toBeUndefined();
+    expect(computePrice(variant, eff)).toBe(103); // ask + 3€, not +30%
+  });
+
+  it("a fixed rule alone satisfies the must-set-a-markup requirement", async () => {
+    const { resolveEffectiveRule } = await import("../config");
+    const eff = resolveEffectiveRule(product, variant, cfg([
+      { id: "only-fixed", scope: {}, enabled: true, sourceDeliveryType: "standard", markupFixed: 10, rounding: { mode: "none" }, tax: { priceIncludesVat: false, vatRatePercent: 0 } },
+    ]));
+    expect(eff?.markupFixed).toBe(10);
+  });
+
+  it("a more specific percent rule wins back over a general fixed rule", async () => {
+    const { resolveEffectiveRule } = await import("../config");
+    const { computePrice } = await import("../core-spine");
+    const eff = resolveEffectiveRule(product, variant, cfg([
+      { id: "general-fixed", scope: {}, enabled: true, sourceDeliveryType: "standard", markupFixed: 3, rounding: { mode: "none" }, tax: { priceIncludesVat: false, vatRatePercent: 0 } },
+      { id: "jordan-pct", scope: { brand: "Jordan" }, enabled: true, markupPercent: 20 },
+    ]))!;
+    expect(eff.markupFixed).toBeUndefined();
+    expect(computePrice(variant, eff)).toBe(120);
+  });
+});
