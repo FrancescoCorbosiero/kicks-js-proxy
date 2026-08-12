@@ -271,7 +271,57 @@ export const storePullProducts = pgTable(
   (t) => [primaryKey({ columns: [t.runId, t.storeProductId] })],
 );
 
+/**
+ * Snapshot of WooCommerce orders, one row per order, refreshed by the orders
+ * pull. Read-only mirror: the operational state (what the operator DOES with
+ * an order) lives in order_workflow so a re-pull never clobbers it — the same
+ * snapshot-independent split the product overrides use.
+ */
+export const storeOrders = pgTable(
+  "store_orders",
+  {
+    id: integer("id").primaryKey(), // Woo order id
+    number: text("number").notNull().default(""), // display number (usually = id)
+    wooStatus: text("woo_status").notNull().default(""),
+    currency: text("currency").notNull().default("EUR"),
+    total: numeric("total", { mode: "number" }),
+    customerName: text("customer_name").notNull().default(""),
+    customerEmail: text("customer_email").notNull().default(""),
+    customerPhone: text("customer_phone").notNull().default(""),
+    customerNote: text("customer_note").notNull().default(""),
+    paymentMethod: text("payment_method").notNull().default(""),
+    /** Normalized shipping address + line items (see src/server/orders/model.ts). */
+    shipping: jsonb("shipping").$type<unknown>().notNull(),
+    items: jsonb("items").$type<unknown>().notNull(),
+    raw: jsonb("raw").$type<unknown>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    modifiedAt: timestamp("modified_at", { withTimezone: true }),
+    pulledAt: timestamp("pulled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("store_orders_created_idx").on(t.createdAt)],
+);
+
+/**
+ * Local operational state per order: the fulfillment status the operator
+ * drives from the Orders tab, plus tracking details (carrier / code / URL —
+ * the same trio the store's order emails use) and a free note. Deliberately
+ * NOT written back to WooCommerce (yet): the operator mirrors changes there
+ * manually, and the tab flags orders whose local state is ahead of Woo.
+ */
+export const orderWorkflow = pgTable("order_workflow", {
+  orderId: integer("order_id").primaryKey(),
+  status: text("status").notNull().default("new"),
+  carrier: text("carrier").notNull().default(""),
+  trackingCode: text("tracking_code").notNull().default(""),
+  trackingUrl: text("tracking_url").notNull().default(""),
+  note: text("note").notNull().default(""),
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;
 export type ApplyAuditRow = typeof applyAudit.$inferSelect;
+export type StoreOrderRow = typeof storeOrders.$inferSelect;
+export type OrderWorkflowRow = typeof orderWorkflow.$inferSelect;
