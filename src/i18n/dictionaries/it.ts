@@ -623,6 +623,14 @@ export const it = {
       `+${added} · ${known} noti · ${rejected} rifiutati`,
     sources: { manual: "manuale", file: "file" },
   },
+  login: {
+    heading: "Accedi",
+    desc: "Inserisci la password per usare Store Hub.",
+    password: "Password",
+    submit: "Entra",
+    wrong: "Password sbagliata, riprova.",
+    logout: "Esci",
+  },
   orders: {
     title: "Ordini",
     desc: "Gli ordini del negozio senza entrare in WooCommerce: stato di lavorazione, tracking e note. Le modifiche restano qui — quando un ordine è spedito o annullato, un promemoria ti ricorda di aggiornare anche Woo.",

@@ -605,6 +605,14 @@ export const en: Dictionary = {
     historyLine: (added, known, rejected) => `+${added} · ${known} known · ${rejected} rejected`,
     sources: { manual: "manual", file: "file" },
   },
+  login: {
+    heading: "Sign in",
+    desc: "Enter the password to use Store Hub.",
+    password: "Password",
+    submit: "Enter",
+    wrong: "Wrong password, try again.",
+    logout: "Log out",
+  },
   orders: {
     title: "Orders",
     desc: "The store's orders without opening WooCommerce: fulfillment status, tracking and notes. Changes stay here — when an order is shipped or cancelled, a reminder tells you to update Woo too.",
