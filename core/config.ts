@@ -77,6 +77,13 @@ export interface ScopedPricingRule {
     tax?: TaxConfig;
     maxDeltaPercent?: number;             // guardrail: reject change bigger than this
     minDeltaPercent?: number;             // skip writes smaller than this (anti-churn)
+    /**
+     * Distribution guard: a variant whose ask falls below this percent of the
+     * PRODUCT's median ask is treated as unreliable data (a bad API row, a
+     * glitched listing) and priced as if it were AT that floor — one size can
+     * never undercut its own product wildly. 0 or absent = off.
+     */
+    outlierFloorPercent?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,6 +136,7 @@ export interface EffectivePricingRule {
     tax: TaxConfig;
     maxDeltaPercent?: number;
     minDeltaPercent?: number;
+    outlierFloorPercent?: number;
 }
 
 /** Ascending by upTo, unbounded band last — resolution order for markupForAsk. */
@@ -198,6 +206,7 @@ export function resolveEffectiveRule(
         if (r.tax != null) merged.tax = r.tax;
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
         if (r.minDeltaPercent != null) merged.minDeltaPercent = r.minDeltaPercent;
+        if (r.outlierFloorPercent != null) merged.outlierFloorPercent = r.outlierFloorPercent;
     }
 
     // A rule must set a markup somehow: flat, or banded (whose top band then

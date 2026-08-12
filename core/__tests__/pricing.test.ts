@@ -70,3 +70,56 @@ describe("computePrice", () => {
     expect(computePrice(v, { ...baseRule, markupPercent: 10 })).toBeNull();
   });
 });
+
+describe("distribution guard (outlierFloorPercent)", () => {
+  const guarded: EffectivePricingRule = {
+    sourceDeliveryType: "standard",
+    markupPercent: 30,
+    rounding: { mode: "none" },
+    tax: { priceIncludesVat: false, vatRatePercent: 0 },
+    outlierFloorPercent: 60,
+  };
+
+  it("lifts an absurdly low ask to the floor before markup", () => {
+    // Median ask 115 → floor 69; the glitched 44 ask prices as if it were 69.
+    expect(computePrice(std(44), guarded, { medianAsk: 115 })).toBe(69 * 1.3);
+  });
+
+  it("leaves normal and expensive sizes untouched", () => {
+    expect(computePrice(std(100), guarded, { medianAsk: 115 })).toBe(130);
+    expect(computePrice(std(180), guarded, { medianAsk: 115 })).toBe(234);
+  });
+
+  it("is inert without a median, with 0 percent, or when unset", () => {
+    expect(computePrice(std(44), guarded, {})).toBe(44 * 1.3);
+    expect(computePrice(std(44), guarded, { medianAsk: null })).toBe(44 * 1.3);
+    expect(computePrice(std(44), { ...guarded, outlierFloorPercent: 0 }, { medianAsk: 115 })).toBe(44 * 1.3);
+    expect(computePrice(std(44), { ...guarded, outlierFloorPercent: undefined }, { medianAsk: 115 })).toBe(44 * 1.3);
+  });
+
+  it("banded markup reads the LIFTED ask, so the outlier lands in the right band", () => {
+    const banded: EffectivePricingRule = {
+      ...guarded,
+      markupBands: [
+        { upTo: 50, percent: 50 },
+        { upTo: null, percent: 30 },
+      ],
+    };
+    // Without the guard the 44 ask would take the ≤50 band (50%); lifted to 69
+    // it takes the top band like its siblings.
+    expect(computePrice(std(44), banded, { medianAsk: 115 })).toBe(69 * 1.3);
+  });
+});
+
+describe("medianTierAsk", () => {
+  it("median across sizes with asks; null under 3 asks", async () => {
+    const { medianTierAsk } = await import("../core-spine");
+    const product = {
+      stockxId: "p", sku: "S", title: "", brand: "", image: "", market: "IT", currency: "EUR",
+      variants: [std(100), std(120), std(44), std(160), variant([])],
+    };
+    expect(medianTierAsk(product, "standard")).toBe(110); // 44,100,120,160 → (100+120)/2
+    const thin = { ...product, variants: [std(100), std(120)] };
+    expect(medianTierAsk(thin, "standard")).toBeNull();
+  });
+});

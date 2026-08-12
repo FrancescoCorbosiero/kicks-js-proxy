@@ -1,5 +1,5 @@
 import type { SourceProduct } from "@core/core-spine";
-import { computePrice } from "@core/core-spine";
+import { computePrice, medianTierAsk } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { resolveEffectiveRule } from "@core/config";
 import { euSize } from "@/lib/sizes";
@@ -150,7 +150,9 @@ export function planRebuild(input: {
 
     // Price: operator lock > pricing engine > the old shelf price > none.
     const rule = resolveEffectiveRule(catalog, variant, config);
-    const computed = rule ? computePrice(variant, rule) : null;
+    const computed = rule
+      ? computePrice(variant, rule, { medianAsk: medianTierAsk(catalog, rule.sourceDeliveryType) })
+      : null;
     let price: number | null;
     let priceSource: RebuildPriceSource;
     if (manual[euNorm] != null) {

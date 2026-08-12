@@ -20,6 +20,10 @@ export function goldenSneakersPassthroughRule(): ScopedPricingRule {
     minAsks: 1,
     rounding: { mode: "none" },
     tax: { priceIncludesVat: false, vatRatePercent: 0 },
+    // Presented prices are the supplier's real list — a cheap size on the GS
+    // feed is a genuine bargain, never bad data. Guard explicitly OFF so the
+    // general rule's distribution floor cannot leak in.
+    outlierFloorPercent: 0,
   };
 }
 
@@ -72,6 +76,10 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         // never becomes store writes. Set 0 in the pricing editor to reprice on
         // every change.
         minDeltaPercent: 3,
+        // Distribution guard: one size never wildly undercuts its own product.
+        // An ask below 60% of the product's median ask reads as bad data (a
+        // glitched API row) and is priced as if it were AT that floor.
+        outlierFloorPercent: 60,
       },
       goldenSneakersPassthroughRule(),
     ],

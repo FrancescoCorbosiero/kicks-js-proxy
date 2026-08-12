@@ -1,7 +1,7 @@
 import "server-only";
 import type { AppConfig } from "@core/config";
 import { resolveEffectiveRule } from "@core/config";
-import { computePrice } from "@core/core-spine";
+import { computePrice, medianTierAsk } from "@core/core-spine";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import {
@@ -102,7 +102,9 @@ export async function loadDrawerData(
       upc: v.upc ?? null,
       ask: offer && offer.lowestAsk > 0 ? offer.lowestAsk : null,
       asks: offer?.asks ?? 0,
-      proposed: rule ? computePrice(v, rule) : null,
+      proposed: rule
+        ? computePrice(v, rule, { medianAsk: medianTierAsk(product, rule.sourceDeliveryType) })
+        : null,
       manual: overrides && euSize ? manualPriceFor(overrides, product.sku, euSize) : null,
     };
   });
