@@ -5,6 +5,7 @@ import { db } from "@/server/db/client";
 import { catalogProducts } from "@/server/db/schema";
 import { skuKey } from "@/lib/skus";
 import { chunkArray } from "@/lib/chunk";
+import { classifyTitle } from "./classify";
 
 /**
  * Return catalog entries for the given SKUs that are still FRESH (fetched within
@@ -544,7 +545,11 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
   if (products.length === 0) return;
 
   const now = new Date();
-  const values = products.map((p) => ({
+  const values = products.map((p) => {
+    // Sources without metadata (feeds, store-only rows) get the navigation
+    // axes derived from the title — real API metadata always wins.
+    const derived = p.category ? null : classifyTitle(p.title, p.brand);
+    return {
     market,
     sku: skuKey(p.sku),
     source: p.source ?? "kicksdb",
@@ -552,9 +557,9 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     title: p.title,
     brand: p.brand,
     image: p.image ?? "",
-    category: p.category ?? "",
-    secondaryCategory: p.secondaryCategory ?? "",
-    gender: p.gender ?? "",
+    category: p.category ?? derived?.category ?? "",
+    secondaryCategory: p.secondaryCategory ?? derived?.secondaryCategory ?? "",
+    gender: p.gender ?? derived?.gender ?? "",
     model: p.model ?? "",
     productType: p.productType ?? "",
     minAsk: minAskOf(p),
@@ -563,7 +568,8 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     addedAt: now,
     fetchedAt: now,
     updatedAt: now,
-  }));
+    };
+  });
 
   try {
     // Chunked: a whole-store registration can be thousands of rows, and a
@@ -625,6 +631,70 @@ export async function touchCatalogSkus(market: string, skus: string[]): Promise<
   } catch (e) {
     console.warn("[catalog] touch skipped (cache unavailable):", describeDbError(e));
   }
+}
+
+/**
+ * One-shot classification of rows still without navigation metadata: derive
+ * category/secondary/gender from the stored title+brand (see classify.ts).
+ * Rows the classifier can't place stay uncategorized. Also canonicalizes
+ * case-variant duplicate categories ("ReStockX" vs "Restockx") to the most
+ * common spelling so the sidebar shows one bucket per category. Runs from the
+ * daily scheduler; cheap enough to repeat (it only touches unclassified rows).
+ */
+export async function recategorizeCatalog(
+  market: string,
+): Promise<{ classified: number; unified: number }> {
+  let classified = 0;
+  let unified = 0;
+  try {
+    const rows = await db
+      .select({ sku: catalogProducts.sku, title: catalogProducts.title, brand: catalogProducts.brand })
+      .from(catalogProducts)
+      .where(and(eq(catalogProducts.market, market), eq(catalogProducts.category, "")));
+
+    const updates = rows.flatMap((r) => {
+      const derived = classifyTitle(r.title, r.brand);
+      return derived ? [{ sku: r.sku, ...derived }] : [];
+    });
+    for (const u of updates) {
+      await db
+        .update(catalogProducts)
+        .set({
+          category: u.category,
+          secondaryCategory: u.secondaryCategory,
+          // Never blank a gender some other writer already knew.
+          ...(u.gender ? { gender: u.gender } : {}),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(catalogProducts.market, market), eq(catalogProducts.sku, u.sku)));
+      classified += 1;
+    }
+
+    // Case-variant dedupe: rewrite every category to its most common spelling.
+    const res = await db.execute(sql`
+      with canon as (
+        select lower("category") as lc,
+               (array_agg("category" order by cnt desc, "category"))[1] as best
+        from (
+          select "category", count(*) as cnt from "catalog_products"
+          where "market" = ${market} and "category" <> ''
+          group by "category"
+        ) variants
+        group by lower("category")
+        having count(*) > 1
+      )
+      update "catalog_products" c
+      set "category" = canon.best
+      from canon
+      where c."market" = ${market}
+        and lower(c."category") = canon.lc
+        and c."category" <> canon.best
+    `);
+    unified = (res as unknown as { rowCount?: number }).rowCount ?? 0;
+  } catch (e) {
+    console.warn("[catalog] recategorize skipped:", describeDbError(e));
+  }
+  return { classified, unified };
 }
 
 /** Provenance of existing entries — feed syncs must never overwrite kicksdb rows. */
