@@ -19,6 +19,7 @@ export function MainNav() {
     { href: "/orders", label: t.header.navOrders },
     { href: "/pricing", label: t.header.navMargins },
     { href: "/sync", label: t.header.navSync },
+    { href: "/publish", label: t.header.navPublish },
     { href: "/import", label: t.header.navImport },
     { href: "/feeds", label: t.header.navFeeds },
   ];

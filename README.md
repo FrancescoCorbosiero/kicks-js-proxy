@@ -99,6 +99,24 @@ filters/sorts/paginates in SQL.
      Every run lands in `apply_audit`; after a live run the stored snapshot is
      patched to the post-apply state, so the next preview reflects reality
      without a re-pull.
+- **Publish** (`/publish`) — the catalog→store direction. Every other write
+  path only ADJUSTS products the store already has (the sync walks the
+  snapshot, and its "create" rows are dropped), so a supplier feed's new
+  products reached the catalog and stopped there — visible to the operator,
+  invisible to customers. This lists exactly that delta and creates the
+  selected products on WooCommerce: parent, canonical EU `pa_taglia` sizes,
+  prices from the margin rules (manual locks winning), real feed stock, and
+  media sideloaded from the source. Variations are planned by the **rebuild
+  planner** run against an empty "before", so a published product is the same
+  canonical shape a rebuild produces. Safety: nothing selected by default, the
+  live run unlocks only after a dry run of that exact selection, and a **live
+  SKU lookup immediately before every create** (never the snapshot) so a stale
+  snapshot cannot mint a duplicate parent. **Force reimport** additionally
+  targets products the store already has — refreshing name/size list and
+  recreating the variation set — and is the one destructive option, so it is
+  opt-in and separately labelled. Products whose feed no longer covers them
+  are refused: listing a delisted supplier product as sell-on-demand at a
+  stale price is worse than not listing it.
 - **Margins** (`/pricing`) — the granular margin admin: the scoped pricing
   rules edited in place, from the banded catch-all down to a single SKU. Rules
   are scoped by source, brand, **product family / sub-family** (the catalog's
