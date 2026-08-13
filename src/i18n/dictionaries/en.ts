@@ -90,6 +90,9 @@ export const en: Dictionary = {
     dynamicBadge: "dynamic markup",
     dynamicHint:
       "The markup depends on the raw KicksDB ask and is the TOTAL shelf uplift (VAT inside the price, never added on top): higher bands for cheap items, lower for expensive ones.",
+    specificRules: (n: number) => (n === 1 ? "1 specific rule" : `${n} specific rules`),
+    specificRulesHint:
+      "This edits the default rule only. Product families and single SKUs can carry their own rule, which takes precedence — open it in the Margins tab.",
     bandUpTo: (limit, pct) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct) => `above → +${pct}%`,
     bandsEditHint:
@@ -107,6 +110,8 @@ export const en: Dictionary = {
     cancel: "Cancel",
     reset: "Reset",
     resetting: "Resetting…",
+    resetHint:
+      "Puts the default rule (dynamic bands, rounding, minimum margin) back to factory values. The specific rules you created are kept.",
     labelMarkup: "Markup %",
     labelVat: "VAT %",
     labelRounding: "Rounding",
@@ -377,6 +382,15 @@ export const en: Dictionary = {
       "You forced StockX prices for this product: the supplier price list is ignored.",
     wooOwned: "Store only",
     wooOwnedHint: "Product not linked to any price list: what you see is the store's real state.",
+    ruleTitle: "Margin rule",
+    ruleGeneral: "General rule (everything else)",
+    ruleMarginPercent: (n: number) => `+${n}% markup`,
+    ruleMarginFixed: (n: number) => `+€${n} fixed`,
+    ruleMarginBands: (n: number) => `dynamic markup, ${n} bands`,
+    rulePassthrough: "supplier's final price, no markup applied",
+    ruleMixed: "different sizes follow different rules",
+    ruleEdit: "Edit the rule",
+    ruleCreate: "Give this family its own rule",
     storeTitle: "Store prices & stock",
     storeExplain:
       "This product is not linked to any price list: this is the store's real state. Change price or quantity and press Save — the change goes to WooCommerce IMMEDIATELY.",
@@ -608,7 +622,7 @@ export const en: Dictionary = {
   },
   margins: {
     title: "Margins",
-    desc: "The pricing rules, from the most general to the most specific: for each product the most specific matching rule wins, field by field. Examples: everything banded, “Jordan” +3 € fixed, “Air Force 1” at 7%.",
+    desc: "The pricing rules, from the most general to the most specific. The MARGIN is decided by ONE rule — the most specific one that states a margin: its markup replaces the general one outright, bands included. Everything else — rounding, VAT, minimum margin, the safety nets — is inherited from the more general rules. Examples: the dynamic banded list for everything else, “Yeezy › Foam RNNR” at 45%, “Jordan” +3 € fixed.",
     addRule: "Add rule",
     save: "Save rules",
     saving: "Saving…",
@@ -620,10 +634,12 @@ export const en: Dictionary = {
     gsRule: "GoldenSneakers price list — passthrough",
     customRule: (n: number) => `Rule ${n}`,
     scopeTitle: "Applies to",
-    scopeHint: "Empty field = anything. The more fields you fill, the more specific the rule — and the most specific wins.",
+    scopeHint: "Empty field = anything. The rule describing the fewest products always wins: SKU › sub-family and name › family › brand › source.",
     scopeSource: "Source",
     scopeSourceAny: "Any",
-    scopeBrand: "Brand (exact)",
+    scopeBrand: "Brand",
+    scopeCategory: "Family",
+    scopeSecondaryCategory: "Sub-family",
     scopeModel: "Name contains",
     scopeSku: "SKU (exact)",
     scopeSizeMin: "Size from",
@@ -661,6 +677,12 @@ export const en: Dictionary = {
     outlierFloorHint:
       "Safety net only: an ask below this percent of the product's median is treated as corrupted data and lifted to the threshold. Real bargains sit well above it. 0 = off.",
     empty: "No rules defined.",
+    coverageCount: (n: number) =>
+      n === 1 ? "Sets the margin for 1 product" : `Sets the margin for ${n} products`,
+    coverageNone:
+      "Applies to no product — either nothing matches it, or a more specific rule outranks it",
+    coverageSizeScoped: "(only on the sizes it names)",
+    exampleLabel: "Example:",
   },
   login: {
     heading: "Sign in",

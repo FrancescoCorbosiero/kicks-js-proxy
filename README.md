@@ -99,6 +99,12 @@ filters/sorts/paginates in SQL.
      Every run lands in `apply_audit`; after a live run the stored snapshot is
      patched to the post-apply state, so the next preview reflects reality
      without a re-pull.
+- **Margins** (`/pricing`) — the granular margin admin: the scoped pricing
+  rules edited in place, from the banded catch-all down to a single SKU. Rules
+  are scoped by source, brand, **product family / sub-family** (the catalog's
+  own tree), name, SKU or size range; each card reports how many products it
+  really prices and what the engine charges at three sample asks. See
+  [Scoped rules](#scoped-rules-a-family-with-its-own-margin).
 - **Import** (`/import`) — manual textarea or CSV/TXT/TSV upload. SKUs are
   extracted, chunked, GET-verified and upserted through the same pipeline;
   each operator action is one `ingestion_runs` row (added / known / rejected).
@@ -175,10 +181,43 @@ ask, so the retail price never shifts its own band.
 
 The **Pricing** bar (on `/sync` and `/preview`) shows the live bands and the
 store-wide **Reprice discounted** switch, and hosts the editor: saving a flat
-markup there switches banding off; **Reset** restores the banded defaults.
-After upgrading an existing DB, press **Reset** once — the stored config row
-still carries the old flat rule. Precedence for any variant price:
+markup there switches banding off; **Reset** restores the banded defaults
+(scoped rules you created are kept — only the default rule goes back to
+factory). After upgrading an existing DB, press **Reset** once — the stored
+config row still carries the old flat rule. Precedence for any variant price:
 **manual lock > sale rule > computed price**.
+
+### Scoped rules: a family with its own margin
+
+The banded default is only the **catch-all**. The **Margins** tab (`/pricing`)
+edits the whole rule list, and any rule can carve out a slice of the catalog —
+by source, brand, **family / sub-family**, name, SKU or size range. The family
+axes are the catalog's own navigation tree, so the shop's
+`/marchio/yeezy/yeezy-foam/` is the rule scope `category: "Yeezy"`,
+`secondaryCategory: "Foam RNNR"`, picked from a dropdown of what the catalog
+actually holds. Feed and store-only rows get those axes from the title
+classifier (`src/server/catalog/classify.ts`), so a family rule covers them
+too, not just KicksDB rows.
+
+Two properties make the list predictable:
+
+- **The narrowest rule wins, not the one with the most fields.** Scopes are
+  weighted by how few products they describe (`sku` ⊂ `secondaryCategory` /
+  `model` ⊂ `category` ⊂ `brand` ⊂ `source`), so a per-SKU rule always beats
+  the family rule containing it. Text matching is case-insensitive.
+- **One rule owns the margin.** The most specific rule that states a margin
+  replaces *all three* mechanisms — percent, bands and fixed € — inherited
+  from broader rules. Everything that is not the margin (rounding, VAT,
+  floors, delta guards, the minimum-margin and anomaly nets) still merges
+  field by field, so a family rule that only changes the markup keeps every
+  house safety net. Before this, a specific percent rule left the general
+  bands in place and, since their top band is unbounded, silently never
+  applied.
+
+Each rule card reports **how many catalog products it actually prices** and
+the shelf price the engine returns at three sample asks — a rule that covers
+nothing, or that a narrower rule outranks, says so instead of looking healthy.
+The product drawer names the rule behind its proposed prices.
 
 **Anti-churn threshold** (`minDeltaPercent`, default 3%): a price drift of at
 most this percent stays a `noop` in the plan — tiny ask movements never turn

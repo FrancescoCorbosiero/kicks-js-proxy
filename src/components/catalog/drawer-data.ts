@@ -1,6 +1,6 @@
 import "server-only";
-import type { AppConfig } from "@core/config";
-import { resolveEffectiveRule } from "@core/config";
+import type { AppConfig, MarginKind, ScopedPricingRule } from "@core/config";
+import { marginKindOf, resolveEffectiveRule, scopeSpecificity } from "@core/config";
 import { computePrice, medianTierAsk } from "@core/core-spine";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
@@ -44,6 +44,26 @@ export interface StoreDrawerVariant {
   stock: number | null; // null = stock not managed on this variation
 }
 
+/**
+ * Which margin rule priced this product, in the terms the operator set it in.
+ * The drawer is where "why is this price what it is?" gets asked, and until
+ * the winning rule was named there was no way to tell a family rule that is
+ * working from one a broader rule silently outranks.
+ */
+export interface AppliedRule {
+  id: string;
+  /** The rule's scope, rendered: "Yeezy › Foam RNNR", "Jordan", "CT8012-047". */
+  scopeLabel: string;
+  kind: MarginKind;
+  markupPercent: number | null;
+  markupFixed: number | null;
+  bands: { upTo: number | null; percent: number }[] | null;
+  /** The general catch-all rule — i.e. this product has no rule of its own. */
+  isGeneral: boolean;
+  /** Sizes of this product are priced by different rules (a size-scoped rule). */
+  mixed: boolean;
+}
+
 export interface DrawerData {
   market: string;
   sku: string;
@@ -63,8 +83,40 @@ export interface DrawerData {
   /** The operator pinned this product back to StockX/KicksDB pricing. */
   pinnedToKicksdb: boolean;
   variants: DrawerVariant[];
+  /** The margin rule the proposed prices come from; null when nothing prices it. */
+  appliedRule: AppliedRule | null;
   /** Store-only products: the live snapshot view, directly editable. */
   store: { productId: number; variants: StoreDrawerVariant[] } | null;
+}
+
+/** Render a rule's scope the way the margins editor labels it. */
+function scopeLabelOf(rule: ScopedPricingRule): string {
+  const s = rule.scope;
+  const bits = [
+    s.brand,
+    [s.category, s.secondaryCategory].filter(Boolean).join(" › ") || null,
+    s.model ? `“${s.model}”` : null,
+    s.sku,
+    s.sizeMin != null || s.sizeMax != null ? `${s.sizeMin ?? ""}–${s.sizeMax ?? ""}` : null,
+    s.source,
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+
+function describeRule(
+  rule: ScopedPricingRule,
+  mixed: boolean,
+): AppliedRule {
+  return {
+    id: rule.id,
+    scopeLabel: scopeLabelOf(rule),
+    kind: marginKindOf(rule),
+    markupPercent: rule.markupPercent ?? null,
+    markupFixed: rule.markupFixed ?? null,
+    bands: rule.markupBands && rule.markupBands.length > 0 ? rule.markupBands : null,
+    isGeneral: Object.keys(rule.scope).length === 0,
+    mixed,
+  };
 }
 
 /**
@@ -90,10 +142,16 @@ export async function loadDrawerData(
   const product = gs?.product ?? entry.product;
   const deliveryType = config.source.defaultDeliveryType;
 
+  // Which rule owns the margin, collected as the variants are priced: sizes
+  // can legitimately fall under different rules (a size-scoped rule), so the
+  // drawer reports one rule only when they all agree.
+  const markupRuleIds = new Set<string>();
+
   const variants = product.variants.map<DrawerVariant>((v) => {
     const euSize = sourceEuSize(v) ?? null;
     const offer = v.offers.find((o) => o.deliveryType === deliveryType) ?? v.offers[0] ?? null;
     const rule = resolveEffectiveRule(product, v, config);
+    if (rule?.markupRuleId) markupRuleIds.add(rule.markupRuleId);
     return {
       id: v.stockxVariantId,
       sizeLabel: v.sizeLabel,
@@ -178,6 +236,16 @@ export async function loadDrawerData(
     gsCovered: covered != null,
     pinnedToKicksdb: pin === "kicksdb",
     variants,
+    appliedRule: (() => {
+      // With several rules in play, name the most specific one — that is the
+      // deliberate instruction the operator wants to verify — and flag the mix.
+      const winners = config.pricingRules.filter((r) => markupRuleIds.has(r.id));
+      if (winners.length === 0) return null;
+      const most = winners.reduce((a, b) =>
+        scopeSpecificity(b.scope) >= scopeSpecificity(a.scope) ? b : a,
+      );
+      return describeRule(most, winners.length > 1);
+    })(),
     store,
   };
 }

@@ -125,7 +125,7 @@ describe("resolveEffectiveRule with bands", () => {
     expect(resolved!.markupBands).toEqual(BANDS);
   });
 
-  it("a more specific flat rule overrides the percent but keeps general bands unless it clears them", () => {
+  it("a more specific flat rule takes the margin over WHOLE — general bands stop applying", () => {
     const resolved = resolveEffectiveRule(
       product,
       variant(100),
@@ -134,9 +134,36 @@ describe("resolveEffectiveRule with bands", () => {
         { id: "nike", scope: { brand: "Nike" }, enabled: true, markupPercent: 10 },
       ]),
     );
-    // Field-by-field merge: bands still present (they win in computePrice);
-    // the specific flat percent only changes the fallback.
+    // The specific rule owns the margin: its 10% is what prices the variant.
+    // (Field-by-field merging left the general bands in place, and since their
+    // top band is unbounded they covered every ask — the specific percent was
+    // set and then never read. That is the "my rule does nothing" bug.)
     expect(resolved!.markupPercent).toBe(10);
-    expect(resolved!.markupBands).toEqual(BANDS);
+    expect(resolved!.markupBands).toBeUndefined();
+    expect(resolved!.markupRuleId).toBe("nike");
+  });
+
+  it("a family rule with its own bands replaces the general bands entirely", () => {
+    const resolved = resolveEffectiveRule(
+      { ...product, category: "Yeezy", secondaryCategory: "Foam RNNR" },
+      variant(100),
+      config([
+        { id: "g", scope: {}, enabled: true, markupBands: BANDS, markupPercent: 19 },
+        {
+          id: "foam",
+          scope: { category: "Yeezy", secondaryCategory: "Foam RNNR" },
+          enabled: true,
+          markupBands: [
+            { upTo: 120, percent: 55 },
+            { upTo: null, percent: 40 },
+          ],
+        },
+      ]),
+    );
+    expect(resolved!.markupBands).toEqual([
+      { upTo: 120, percent: 55 },
+      { upTo: null, percent: 40 },
+    ]);
+    expect(resolved!.markupRuleId).toBe("foam");
   });
 });

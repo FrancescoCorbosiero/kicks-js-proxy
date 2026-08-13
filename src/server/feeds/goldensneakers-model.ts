@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SourceProduct } from "@core/core-spine";
+import { classifyTitle } from "@/server/catalog/classify";
 import { humanEuSize, normSize } from "@/server/store-json/match";
 import { skuKey } from "@/lib/skus";
 
@@ -148,15 +149,29 @@ export function parseGsPayload(payload: unknown): GsParseResult {
  */
 export function gsOffersToSource(sku: string, offers: GsOffer[], market: string): SourceProduct {
   const first = offers[0];
+  const title = first?.productName ?? "";
+  const brand = first?.brandName ?? "";
+  // The feed sends no taxonomy, so the family a pricing rule scopes to has to
+  // come from the title — the same classifier the catalog sidebar is built
+  // from. Without it a rule for "Yeezy → Foam RNNR" would skip exactly the
+  // GS-owned products the operator sees filed under that family.
+  const derived = classifyTitle(title, brand);
   return {
     stockxId: `gs:${skuKey(sku)}`,
     sku: skuKey(sku),
-    title: first?.productName ?? "",
-    brand: first?.brandName ?? "",
+    title,
+    brand,
     image: first?.image ?? "",
     market,
     currency: "EUR",
     source: "goldensneakers",
+    ...(derived
+      ? {
+          category: derived.category,
+          secondaryCategory: derived.secondaryCategory,
+          ...(derived.gender ? { gender: derived.gender } : {}),
+        }
+      : {}),
     variants: offers
       .filter((o) => o.presentedPrice != null && o.presentedPrice > 0)
       .map((o) => ({

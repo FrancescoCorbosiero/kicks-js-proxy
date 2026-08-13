@@ -31,9 +31,21 @@ export interface SourceConfig {
 /* B. PRICING — scoped rules with precedence                          */
 /* ------------------------------------------------------------------ */
 export interface RuleScope {
-    // any subset; omitted field = "matches anything". More fields set = more specific.
+    // any subset; omitted field = "matches anything". Narrower fields weigh
+    // more (see SCOPE_WEIGHT) — a per-SKU rule always beats a family rule.
+    // Every text field matches case-insensitively and trimmed.
     source?: string;                      // "kicksdb" (default) | a feed name, e.g. "goldensneakers"
     brand?: string;
+    /**
+     * The catalog's own navigation axes — the same two the store browses by
+     * (`/marchio/yeezy/yeezy-foam/` is category "Yeezy", secondary "Foam
+     * RNNR"). This is how a product FAMILY gets its own markup: the operator
+     * picks the family off the catalog tree instead of guessing a title
+     * substring. Exact match, case-insensitive.
+     */
+    category?: string;
+    secondaryCategory?: string;
+    /** Substring of the product's model or title (case-insensitive). */
     model?: string;
     sku?: string;
     sizeType?: string;                    // "us m"
@@ -150,6 +162,13 @@ export interface EffectivePricingRule {
     maxDeltaPercent?: number;
     minDeltaPercent?: number;
     outlierFloorPercent?: number;
+    /**
+     * Which rule decided the MARKUP (the one the operator is really asking
+     * about when a price looks wrong), and every rule that contributed a
+     * field. Reporting only — nothing in computePrice() reads them.
+     */
+    markupRuleId?: string;
+    matchedRuleIds?: string[];
 }
 
 /** Ascending by upTo, unbounded band last — resolution order for markupForAsk. */
@@ -174,26 +193,101 @@ function sizeToNumber(size: string): number {
     return Number.isNaN(n) ? NaN : n;
 }
 
+/** Scope text matching is case- and whitespace-insensitive throughout: feeds
+ *  spell the same brand "adidas"/"Adidas", and a rule must not die on that. */
+const norm = (s: string | undefined): string => (s ?? "").trim().toLowerCase();
+const sameText = (a: string | undefined, b: string | undefined): boolean => norm(a) === norm(b);
+
+/**
+ * The product-identity axes a scope can test. The catalog stores every one of
+ * them as its own column, so "which products does this rule cover?" can be
+ * answered from a light row read — no variants, no jsonb.
+ */
+export type ProductScopeAxes = Pick<
+    SourceProduct,
+    "sku" | "title" | "brand" | "source" | "category" | "secondaryCategory" | "model"
+>;
+
+/** The product half of a scope — everything that is not about the size. */
+export function productScopeMatches(scope: RuleScope, p: ProductScopeAxes): boolean {
+    if (scope.source && !sameText(scope.source, p.source ?? "kicksdb")) return false;
+    if (scope.brand && !sameText(scope.brand, p.brand)) return false;
+    if (scope.category && !sameText(scope.category, p.category)) return false;
+    if (scope.secondaryCategory && !sameText(scope.secondaryCategory, p.secondaryCategory)) {
+        return false;
+    }
+    if (scope.sku && !sameText(scope.sku, p.sku)) return false;
+    // "Name contains": the API's model field when it has one, else the title —
+    // KicksDB fills `model` ("Jordan 1 Retro High"), feeds only ever send a title.
+    if (scope.model) {
+        const needle = norm(scope.model);
+        if (!norm(p.model).includes(needle) && !norm(p.title).includes(needle)) return false;
+    }
+    return true;
+}
+
+/** True when the scope carries a size constraint (so it covers only part of a product). */
+export function scopeTargetsSizes(scope: RuleScope): boolean {
+    return scope.sizeType != null || scope.sizeMin != null || scope.sizeMax != null;
+}
+
 function scopeMatches(scope: RuleScope, p: SourceProduct, v: SourceVariant): boolean {
-    if (scope.source && scope.source !== (p.source ?? "kicksdb")) return false;
-    if (scope.brand && scope.brand !== p.brand) return false;
-    if (scope.sku && scope.sku !== p.sku) return false;
-    if (scope.model && !p.title.includes(scope.model)) return false;
-    if (scope.sizeType && scope.sizeType !== v.sizeType) return false;
+    if (!productScopeMatches(scope, p)) return false;
+    if (scope.sizeType && !sameText(scope.sizeType, v.sizeType)) return false;
     const sz = sizeToNumber(v.sizeLabel);
     if (scope.sizeMin != null && !(sz >= scope.sizeMin)) return false;
     if (scope.sizeMax != null && !(sz <= scope.sizeMax)) return false;
     return true;
 }
 
-/** Specificity = number of constrained fields; more specific rules win. */
-function specificity(scope: RuleScope): number {
-    return Object.values(scope).filter((x) => x != null).length;
+/**
+ * How narrow each axis is. Counting fields alone gets precedence WRONG: a
+ * one-field rule on a single SKU would lose to a two-field family rule, and
+ * the operator's most deliberate instruction ("this exact product costs
+ * this") would be the one that loses. Weights encode the containment order
+ * instead — sku ⊂ model/sub-family ⊂ family ⊂ brand — so the winner is
+ * always the rule describing the smallest set of products.
+ */
+const SCOPE_WEIGHT: Record<keyof RuleScope, number> = {
+    source: 1,
+    sizeType: 1,
+    sizeMin: 1,
+    sizeMax: 1,
+    brand: 2,
+    category: 3,
+    secondaryCategory: 4,
+    model: 4,
+    sku: 10,
+};
+
+/** Specificity = summed weight of the constrained fields; higher wins. */
+export function scopeSpecificity(scope: RuleScope): number {
+    let total = 0;
+    for (const [key, value] of Object.entries(scope)) {
+        if (value == null || value === "") continue;
+        total += SCOPE_WEIGHT[key as keyof RuleScope] ?? 1;
+    }
+    return total;
+}
+
+/** True if the rule states, in any of the three mechanisms, what the margin is. */
+export function declaresMarkup(rule: ScopedPricingRule): boolean {
+    return rule.markupPercent != null || rule.markupBands != null || rule.markupFixed != null;
 }
 
 /**
  * Returns the effective rule for one variant, or null if no rule applies.
  * Less-specific rules provide defaults; more-specific rules override field-by-field.
+ *
+ * THE MARKUP IS THE EXCEPTION, and it is the whole point of scoped rules: the
+ * most specific rule that states a margin owns it OUTRIGHT — its percent, its
+ * bands and its fixed € replace all three inherited ones together. Merging
+ * them field-by-field is what made a specific rule a no-op: the general rule's
+ * dynamic bands cover every ask (their top band is unbounded), so a "Yeezy
+ * Foam +60%" rule set the fallback percent and then never got read. Everything
+ * that is NOT the margin — rounding, VAT, floors, delta guards, the anomaly
+ * nets — still merges field-by-field, so the house defaults keep protecting a
+ * family rule that only means to change the margin.
  */
 export function resolveEffectiveRule(
     product: SourceProduct,
@@ -202,28 +296,25 @@ export function resolveEffectiveRule(
 ): EffectivePricingRule | null {
     const matched = config.pricingRules
         .filter((r) => r.enabled && scopeMatches(r.scope, product, variant))
-        .sort((a, b) => specificity(a.scope) - specificity(b.scope)); // general first
+        .sort((a, b) => scopeSpecificity(a.scope) - scopeSpecificity(b.scope)); // general first
 
     if (matched.length === 0) return null;
 
     const merged: Partial<EffectivePricingRule> = {
         sourceDeliveryType: config.source.defaultDeliveryType,
     };
+    let markupRuleId: string | undefined;
     for (const r of matched) {
         if (r.sourceDeliveryType != null) merged.sourceDeliveryType = r.sourceDeliveryType;
-        // Percent/banded and fixed margins are exclusive ways to decide the
-        // price: whichever the MORE SPECIFIC rule sets replaces the other.
-        if (r.markupPercent != null) {
-            merged.markupPercent = r.markupPercent;
-            merged.markupFixed = undefined;
-        }
-        if (r.markupBands != null) {
-            merged.markupBands = sortMarkupBands(r.markupBands);
-            merged.markupFixed = undefined;
-        }
-        if (r.markupFixed != null) {
-            merged.markupFixed = r.markupFixed;
+        // Whole-margin takeover: this rule's mechanism is the only one left.
+        if (declaresMarkup(r)) {
+            merged.markupPercent = undefined;
             merged.markupBands = undefined;
+            merged.markupFixed = undefined;
+            markupRuleId = r.id;
+            if (r.markupPercent != null) merged.markupPercent = r.markupPercent;
+            if (r.markupBands != null) merged.markupBands = sortMarkupBands(r.markupBands);
+            if (r.markupFixed != null) merged.markupFixed = r.markupFixed;
         }
         if (r.floor != null) merged.floor = r.floor;
         if (r.minAsks != null) merged.minAsks = r.minAsks;
@@ -255,5 +346,59 @@ export function resolveEffectiveRule(
         minDeltaPercent: merged.minDeltaPercent,
         outlierFloorPercent: merged.outlierFloorPercent,
         minMarginFixed: merged.minMarginFixed,
+        markupRuleId,
+        matchedRuleIds: matched.map((r) => r.id),
     };
+}
+
+/**
+ * The rule a product+variant is priced by, without computing a price — the
+ * "which rule is this?" question the margins editor and the drawer ask.
+ * Returns the winning rule object itself (not the merged effective one), so
+ * callers can show its name, scope and margin.
+ */
+export function resolveMarkupRule(
+    product: SourceProduct,
+    variant: SourceVariant,
+    config: AppConfig,
+): ScopedPricingRule | null {
+    const eff = resolveEffectiveRule(product, variant, config);
+    if (!eff?.markupRuleId) return null;
+    return config.pricingRules.find((r) => r.id === eff.markupRuleId) ?? null;
+}
+
+/**
+ * Which rule sets the margin for a whole product, judged on identity alone.
+ * Size-scoped rules are included: they genuinely win for the sizes they name,
+ * so callers report those separately rather than pretend they cover nothing.
+ * This is the question "does my rule actually do anything?" — asked once per
+ * catalog row, off the denormalized columns.
+ */
+export function winningMarkupRuleId(
+    axes: ProductScopeAxes,
+    rules: ScopedPricingRule[],
+): string | null {
+    let winner: ScopedPricingRule | null = null;
+    let best = -1;
+    for (const r of rules) {
+        if (!r.enabled || !declaresMarkup(r)) continue;
+        if (!productScopeMatches(r.scope, axes)) continue;
+        const weight = scopeSpecificity(r.scope);
+        // Ties go to the later rule, matching the resolver's stable sort.
+        if (weight >= best) {
+            best = weight;
+            winner = r;
+        }
+    }
+    return winner?.id ?? null;
+}
+
+/** Which of the three mechanisms a rule states its margin with (if any). */
+export type MarginKind = "percent" | "fixed" | "bands" | "none";
+
+export function marginKindOf(rule: ScopedPricingRule): MarginKind {
+    if (rule.markupBands && rule.markupBands.length > 0) return "bands";
+    if (rule.markupFixed != null) return "fixed";
+    if (rule.markupPercent != null) return "percent";
+    return "none";
 }

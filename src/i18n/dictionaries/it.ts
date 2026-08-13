@@ -98,6 +98,9 @@ export const it = {
     dynamicBadge: "ricarico dinamico",
     dynamicHint:
       "Il ricarico dipende dall'ask KicksDB grezzo ed è l'AUMENTO TOTALE del prezzo a scaffale (IVA inclusa nel prezzo, mai aggiunta sopra): fasce più alte per gli articoli economici, più basse per quelli costosi.",
+    specificRules: (n: number) => (n === 1 ? "1 regola specifica" : `${n} regole specifiche`),
+    specificRulesHint:
+      "Qui modifichi solo la regola predefinita. Famiglie di prodotti e singoli SKU possono avere una regola propria, che ha la precedenza — aprila nella scheda Margini.",
     bandUpTo: (limit: number, pct: number) => `≤${limit}€ → +${pct}%`,
     bandAbove: (pct: number) => `oltre → +${pct}%`,
     bandsEditHint:
@@ -115,6 +118,8 @@ export const it = {
     cancel: "Annulla",
     reset: "Ripristina",
     resetting: "Ripristino…",
+    resetHint:
+      "Riporta la regola predefinita (fasce dinamiche, arrotondamento, margine minimo) ai valori di fabbrica. Le regole specifiche che hai creato restano.",
     labelMarkup: "Ricarico %",
     labelVat: "IVA %",
     labelRounding: "Arrotondamento",
@@ -387,6 +392,15 @@ export const it = {
     wooOwned: "Solo negozio",
     wooOwnedHint:
       "Prodotto non collegato a nessun listino: quello che vedi è lo stato reale del negozio.",
+    ruleTitle: "Regola di margine",
+    ruleGeneral: "Regola generale (tutto il resto)",
+    ruleMarginPercent: (n: number) => `+${n}% di ricarico`,
+    ruleMarginFixed: (n: number) => `+${n} € fissi`,
+    ruleMarginBands: (n: number) => `ricarico dinamico a ${n} fasce`,
+    rulePassthrough: "prezzo finale del fornitore, nessun ricarico applicato",
+    ruleMixed: "taglie diverse seguono regole diverse",
+    ruleEdit: "Modifica la regola",
+    ruleCreate: "Dai a questa famiglia una regola sua",
     storeTitle: "Prezzi e stock sul negozio",
     storeExplain:
       "Questo prodotto non è collegato a nessun listino: qui vedi lo stato reale del negozio. Modifica prezzo o quantità e premi Salva — la modifica va SUBITO su WooCommerce.",
@@ -626,7 +640,7 @@ export const it = {
   },
   margins: {
     title: "Margini",
-    desc: "Le regole di prezzo, dalla più generale alla più specifica: per ogni prodotto vince la regola più specifica che gli corrisponde, campo per campo. Esempi: tutto a fasce, «Jordan» +3 € fissi, «Air Force 1» al 7%.",
+    desc: "Le regole di prezzo, dalla più generale alla più specifica. Il MARGINE lo decide una regola sola: la più specifica che ne indica uno: il suo ricarico sostituisce per intero quello generale (fasce comprese). Tutto il resto — arrotondamento, IVA, margine minimo, reti di sicurezza — si eredita dalle regole più generali. Esempi: il listino dinamico a fasce per tutto il resto, «Yeezy › Foam RNNR» al 45%, «Jordan» +3 € fissi.",
     addRule: "Aggiungi regola",
     save: "Salva regole",
     saving: "Salvataggio…",
@@ -638,10 +652,12 @@ export const it = {
     gsRule: "Listino GoldenSneakers — passthrough",
     customRule: (n: number) => `Regola ${n}`,
     scopeTitle: "Si applica a",
-    scopeHint: "Campo vuoto = qualsiasi. Più campi compili, più la regola è specifica — e la più specifica vince.",
+    scopeHint: "Campo vuoto = qualsiasi. Vince sempre la regola che descrive meno prodotti: SKU › sotto-famiglia e nome › famiglia › brand › sorgente.",
     scopeSource: "Sorgente",
     scopeSourceAny: "Qualsiasi",
-    scopeBrand: "Brand (esatto)",
+    scopeBrand: "Brand",
+    scopeCategory: "Famiglia",
+    scopeSecondaryCategory: "Sotto-famiglia",
     scopeModel: "Nome contiene",
     scopeSku: "SKU (esatto)",
     scopeSizeMin: "Taglia da",
@@ -679,6 +695,12 @@ export const it = {
     outlierFloorHint:
       "Solo rete di sicurezza: un ask sotto questa percentuale della mediana del prodotto è trattato come dato corrotto e alzato alla soglia. Le occasioni vere restano ben sopra. 0 = disattivo.",
     empty: "Nessuna regola definita.",
+    coverageCount: (n: number) =>
+      n === 1 ? "Decide il margine di 1 prodotto" : `Decide il margine di ${n} prodotti`,
+    coverageNone:
+      "Non si applica a nessun prodotto — o non corrisponde a nulla, o una regola più specifica la scavalca",
+    coverageSizeScoped: "(solo sulle taglie indicate)",
+    exampleLabel: "Esempio:",
   },
   login: {
     heading: "Accedi",

@@ -1,5 +1,6 @@
 import "server-only";
 import { and, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import type { ProductScopeAxes } from "@core/config";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
 import { catalogProducts } from "@/server/db/schema";
@@ -109,6 +110,32 @@ export async function listCatalogEntries(
       .orderBy(catalogProducts.brand, catalogProducts.sku);
   } catch (e) {
     console.warn("[catalog] list skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
+/**
+ * Every product's scope axes, straight off the denormalized columns — no
+ * jsonb, no variants. This is what "which rule prices what" is computed from:
+ * a whole-catalog read that stays cheap enough to run on demand when the
+ * margins editor opens.
+ */
+export async function listProductScopeAxes(market: string): Promise<ProductScopeAxes[]> {
+  try {
+    return await db
+      .select({
+        sku: catalogProducts.sku,
+        title: catalogProducts.title,
+        brand: catalogProducts.brand,
+        source: catalogProducts.source,
+        category: catalogProducts.category,
+        secondaryCategory: catalogProducts.secondaryCategory,
+        model: catalogProducts.model,
+      })
+      .from(catalogProducts)
+      .where(eq(catalogProducts.market, market));
+  } catch (e) {
+    console.warn("[catalog] scope axes skipped (cache unavailable):", describeDbError(e));
     return [];
   }
 }
@@ -549,6 +576,18 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     // Sources without metadata (feeds, store-only rows) get the navigation
     // axes derived from the title — real API metadata always wins.
     const derived = p.category ? null : classifyTitle(p.title, p.brand);
+    // The derived axes go into the STORED PRODUCT, not only the denormalized
+    // columns: pricing rules scoped to a family read category/secondary off
+    // the jsonb, so a rule for "Yeezy → Foam RNNR" would never have matched
+    // the very feed rows whose family the classifier is what established.
+    const stored: SourceProduct = derived
+      ? {
+          ...p,
+          category: p.category || derived.category,
+          secondaryCategory: p.secondaryCategory || derived.secondaryCategory,
+          gender: p.gender || derived.gender,
+        }
+      : p;
     return {
     market,
     sku: skuKey(p.sku),
@@ -557,14 +596,14 @@ export async function upsertCatalog(market: string, products: SourceProduct[]): 
     title: p.title,
     brand: p.brand,
     image: p.image ?? "",
-    category: p.category ?? derived?.category ?? "",
-    secondaryCategory: p.secondaryCategory ?? derived?.secondaryCategory ?? "",
-    gender: p.gender ?? derived?.gender ?? "",
+    category: stored.category ?? "",
+    secondaryCategory: stored.secondaryCategory ?? "",
+    gender: stored.gender ?? "",
     model: p.model ?? "",
     productType: p.productType ?? "",
     minAsk: minAskOf(p),
     variantCount: p.variants.length,
-    data: p,
+    data: stored,
     addedAt: now,
     fetchedAt: now,
     updatedAt: now,
@@ -643,9 +682,10 @@ export async function touchCatalogSkus(market: string, skus: string[]): Promise<
  */
 export async function recategorizeCatalog(
   market: string,
-): Promise<{ classified: number; unified: number }> {
+): Promise<{ classified: number; unified: number; synced: number }> {
   let classified = 0;
   let unified = 0;
+  let synced = 0;
   try {
     const rows = await db
       .select({ sku: catalogProducts.sku, title: catalogProducts.title, brand: catalogProducts.brand })
@@ -691,10 +731,36 @@ export async function recategorizeCatalog(
         and c."category" <> canon.best
     `);
     unified = (res as unknown as { rowCount?: number }).rowCount ?? 0;
+
+    // Mirror the navigation axes back into the stored product. The pricing
+    // engine resolves family-scoped rules against the jsonb, while the
+    // sidebar reads the columns — a row classified (or case-unified) before
+    // this ran shows up under "Yeezy → Foam RNNR" in the catalog and yet
+    // matches no rule scoped to it. Idempotent: only diverging rows are
+    // touched, and an axis is never blanked by an unknown one.
+    const sync = await db.execute(sql`
+      update "catalog_products"
+      set "data" = jsonb_set(
+            jsonb_set(
+              case when "gender" <> ''
+                then jsonb_set("data", '{gender}', to_jsonb("gender"))
+                else "data" end,
+              '{category}', to_jsonb("category")),
+            '{secondaryCategory}', to_jsonb("secondary_category")),
+          "updated_at" = now()
+      where "market" = ${market}
+        and "category" <> ''
+        and (
+          coalesce("data"->>'category', '') is distinct from "category"
+          or coalesce("data"->>'secondaryCategory', '') is distinct from "secondary_category"
+          or ("gender" <> '' and coalesce("data"->>'gender', '') is distinct from "gender")
+        )
+    `);
+    synced = (sync as unknown as { rowCount?: number }).rowCount ?? 0;
   } catch (e) {
     console.warn("[catalog] recategorize skipped:", describeDbError(e));
   }
-  return { classified, unified };
+  return { classified, unified, synced };
 }
 
 /** Provenance of existing entries — feed syncs must never overwrite kicksdb rows. */
