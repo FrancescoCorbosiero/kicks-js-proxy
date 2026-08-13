@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { ProductScopeAxes } from "@core/config";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
@@ -136,6 +136,60 @@ export async function listProductScopeAxes(market: string): Promise<ProductScope
       .where(eq(catalogProducts.market, market));
   } catch (e) {
     console.warn("[catalog] scope axes skipped (cache unavailable):", describeDbError(e));
+    return [];
+  }
+}
+
+/** A catalog product as the Publisher lists it: enough to decide, no jsonb. */
+export interface PublishCandidate {
+  sku: string;
+  title: string;
+  brand: string;
+  image: string;
+  source: string;
+  category: string;
+  secondaryCategory: string;
+  minAsk: number | null;
+  variantCount: number;
+  addedAt: string;
+}
+
+/**
+ * Every catalog product that could be published to the store, newest first.
+ *
+ * Excludes source "woo": those rows ARE the store mirror, so offering to
+ * publish them would mean creating a second copy of a product that already
+ * exists. Rows with no variants are excluded too — a parent with no sizes is
+ * an unsellable shell. Store presence is subtracted by the caller, which
+ * holds the snapshot.
+ */
+export async function listPublishCandidates(market: string): Promise<PublishCandidate[]> {
+  try {
+    const rows = await db
+      .select({
+        sku: catalogProducts.sku,
+        title: catalogProducts.title,
+        brand: catalogProducts.brand,
+        image: catalogProducts.image,
+        source: catalogProducts.source,
+        category: catalogProducts.category,
+        secondaryCategory: catalogProducts.secondaryCategory,
+        minAsk: catalogProducts.minAsk,
+        variantCount: catalogProducts.variantCount,
+        addedAt: catalogProducts.addedAt,
+      })
+      .from(catalogProducts)
+      .where(
+        and(
+          eq(catalogProducts.market, market),
+          ne(catalogProducts.source, "woo"),
+          gte(catalogProducts.variantCount, 1),
+        ),
+      )
+      .orderBy(desc(catalogProducts.addedAt));
+    return rows.map((r) => ({ ...r, addedAt: r.addedAt.toISOString() }));
+  } catch (e) {
+    console.warn("[catalog] publish candidates skipped (cache unavailable):", describeDbError(e));
     return [];
   }
 }

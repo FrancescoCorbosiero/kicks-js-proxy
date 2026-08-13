@@ -21,6 +21,7 @@ export const it = {
     navOrders: "Ordini",
     navMargins: "Margini",
     navSync: "Sync",
+    navPublish: "Pubblica",
     navImport: "Importa",
     navFeeds: "Feed",
     internalTool: "strumento interno",
@@ -701,6 +702,59 @@ export const it = {
       "Non si applica a nessun prodotto — o non corrisponde a nulla, o una regola più specifica la scavalca",
     coverageSizeScoped: "(solo sulle taglie indicate)",
     exampleLabel: "Esempio:",
+  },
+  publish: {
+    title: "Pubblica",
+    desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine, giacenze reali del fornitore e immagini. Prima una prova a vuoto, poi la scrittura vera.",
+    notConfigured:
+      "WooCommerce non è configurato (WOO_BASE_URL e chiavi API): non è possibile pubblicare.",
+    noSnapshot:
+      "Nessuna fotografia del negozio: scaricala dalla scheda Sync, altrimenti l'elenco qui sotto potrebbe proporre prodotti che sul negozio ci sono già. (Prima di creare, ogni SKU viene comunque verificato dal vivo.)",
+    deltaTitle: (n: number) =>
+      n === 1 ? "1 prodotto non è sul negozio" : `${n} prodotti non sono sul negozio`,
+    sourceTabs: { all: "Tutti", goldensneakers: "Fornitore", kicksdb: "StockX" },
+    searchPlaceholder: "Cerca per SKU, nome o brand…",
+    showOnStore: "Mostra anche quelli già sul negozio",
+    showOnStoreHint:
+      "Serve per il reimport forzato: i prodotti su cui agisce sono, per definizione, quelli che sul negozio ci sono già.",
+    alreadyOnStore: "sul negozio",
+    skipReasons: {
+      alreadyOnStore: "già sul negozio — spunta «Forza reimport» per ricostruirlo",
+      feedDelisted: "il listino del fornitore non copre più questo SKU — sincronizza prima il feed",
+    },
+    selectAll: "Seleziona tutti",
+    clear: "Deseleziona",
+    gallery: "Carica anche le foto aggiuntive",
+    galleryHint:
+      "WooCommerce scarica ogni immagine durante la creazione: più foto significa prodotti più lenti da creare. Il massimo è 6 per prodotto.",
+    force: "Forza reimport",
+    forceHint:
+      "Agisce anche sugli SKU che sul negozio ci sono già: aggiorna nome e taglie del prodotto e ricrea da zero l'elenco delle varianti.",
+    forceWarning:
+      "Attenzione: con il reimport forzato le varianti esistenti vengono ELIMINATE e ricreate dal catalogo. Prezzi manuali e giacenze vengono riscritti; eventuali modifiche fatte a mano sulle singole taglie si perdono.",
+    replaceMedia: "Sostituisci anche le immagini",
+    replaceMediaHint:
+      "Di default il reimport lascia le immagini che ci sono già sul negozio (ricaricarle ogni volta le duplicherebbe nella libreria media).",
+    dryRun: (n: number) => `Prova a vuoto (${n})`,
+    publishNow: (n: number) => `Pubblica ${n} sul negozio`,
+    dryRunFirst: "Fai prima una prova a vuoto della selezione attuale.",
+    running: "In corso…",
+    failed: "Pubblicazione fallita",
+    dryRunTitle: "Prova a vuoto — nulla è stato scritto",
+    liveTitle: "Pubblicazione eseguita",
+    willCreate: (n: number) => `${n} da creare`,
+    willReimport: (n: number) => `${n} da reimportare`,
+    wasSkipped: (n: number) => `${n} saltati`,
+    variationsCreated: (n: number) => `${n} taglie create`,
+    failedCount: (n: number) => `${n} con errori`,
+    sizes: (n: number) => `${n} taglie`,
+    imageCount: (n: number) => `${n} foto`,
+    from: (price: string) => `da ${price}`,
+    unpriced: (n: number) => `${n} senza prezzo`,
+    openOnStore: "Apri sul negozio",
+    empty:
+      "Nessun prodotto da pubblicare: tutto il catalogo è già sul negozio.",
+    truncated: (n: number) => `Mostrati i primi 300 di ${n} — usa la ricerca per restringere.`,
   },
   login: {
     heading: "Accedi",

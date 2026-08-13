@@ -224,6 +224,32 @@ export class WooClient {
     );
   }
 
+  /**
+   * Products carrying this exact SKU, in ANY status (drafts and pending
+   * included). The publisher checks this immediately before creating: the
+   * snapshot is a point-in-time copy, and trusting it would mint a duplicate
+   * parent for anything added to the store since the last pull — the precise
+   * mess the Duplicates tab exists to clean up.
+   */
+  async findProductsBySku(sku: string): Promise<WooRestProduct[]> {
+    const raw = await requestJson(
+      this.apiUrl("products", { sku, status: "any", per_page: "10" }),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    return z.array(WooProductSchema).parse(raw);
+  }
+
+  /** Create a product (the publisher's parent). Returns the new product. */
+  async createProduct(body: Record<string, unknown>): Promise<WooRestProduct> {
+    const raw = await requestJson(
+      this.apiUrl("products"),
+      { method: "POST", headers: this.headers(), body: JSON.stringify(body) },
+      this.retry,
+    );
+    return WooProductSchema.parse(raw);
+  }
+
   /** Update parent-product fields (e.g. the realigned pa_taglia option list). */
   async updateProduct(productId: number, body: Record<string, unknown>): Promise<void> {
     await requestJson(
