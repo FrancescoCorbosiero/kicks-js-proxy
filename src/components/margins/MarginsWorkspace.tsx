@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import type { MarkupBand, RoundingConfig, ScopedPricingRule } from "@core/config";
-import { savePricingRules } from "@/server/actions/config";
+import type { MarginKind, MarkupBand, RoundingConfig, ScopedPricingRule } from "@core/config";
+import { marginKindOf } from "@core/config";
+import { pricingRuleCoverage, savePricingRules, type RuleCoverage } from "@/server/actions/config";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,16 +13,23 @@ import { Input } from "@/components/ui/input";
  * document. Each card is a rule — scope (who it applies to), margin (percent,
  * fixed € or price bands) and the advanced knobs. Deliberately form-only, no
  * modal flows: the operator sees every rule and its precedence at a glance.
+ *
+ * Every card also states what the rule DOES: how many catalog products it
+ * really sets the margin for, and the shelf price the engine returns at three
+ * sample asks. A rule that covers nothing, or that a broader rule silently
+ * outranks, used to look exactly like a working one.
  */
 
-type MarginType = "percent" | "fixed" | "bands" | "none";
+type MarginType = MarginKind;
 
-function marginTypeOf(r: ScopedPricingRule): MarginType {
-  if (r.markupBands && r.markupBands.length > 0) return "bands";
-  if (r.markupFixed != null) return "fixed";
-  if (r.markupPercent != null) return "percent";
-  return "none";
+/** One (category, sub-category) pair present in the catalog, with its count. */
+export interface FamilyOption {
+  category: string;
+  secondaryCategory: string;
+  count: number;
 }
+
+const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
 /** Parse a locale-tolerant number input; "" -> undefined. */
 function num(v: string): number | undefined {
@@ -35,11 +43,39 @@ const FIELD = "h-8 w-24 text-xs";
 const SELECT =
   "h-8 rounded-md border border-line bg-surface px-2 text-xs text-ink shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/40";
 
-export function MarginsWorkspace({ initialRules }: { initialRules: ScopedPricingRule[] }) {
+export function MarginsWorkspace({
+  initialRules,
+  families = [],
+}: {
+  initialRules: ScopedPricingRule[];
+  families?: FamilyOption[];
+}) {
   const { t } = useI18n();
   const [rules, setRules] = React.useState<ScopedPricingRule[]>(initialRules);
   const [saving, setSaving] = React.useState(false);
   const [note, setNote] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [coverage, setCoverage] = React.useState<Map<string, RuleCoverage>>(new Map());
+
+  // Diagnostics track the list being EDITED, not the saved one: retune a band
+  // and the sample prices move before you commit. Debounced, and stale
+  // responses are dropped so a slow round-trip can't overwrite a newer one.
+  React.useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      pricingRuleCoverage(rules)
+        .then((res) => {
+          if (cancelled) return;
+          setCoverage(new Map(res.coverage.map((c) => [c.ruleId, c])));
+        })
+        .catch(() => {
+          /* diagnostics are advisory — never block editing */
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [rules]);
 
   function patchRule(index: number, patch: Partial<ScopedPricingRule>) {
     setNote(null);
@@ -90,6 +126,8 @@ export function MarginsWorkspace({ initialRules }: { initialRules: ScopedPricing
             key={rule.id}
             rule={rule}
             index={i}
+            families={families}
+            coverage={coverage.get(rule.id) ?? null}
             onPatch={(p) => patchRule(i, p)}
             onRemove={() => removeRule(i)}
           />
@@ -122,8 +160,10 @@ function ruleLabel(
   if (rule.id === "goldensneakers-passthrough" || rule.scope.source === "goldensneakers") {
     return t.margins.gsRule;
   }
+  const family = [rule.scope.category, rule.scope.secondaryCategory].filter(Boolean).join(" › ");
   const bits = [
     rule.scope.brand,
+    family || null,
     rule.scope.model && `“${rule.scope.model}”`,
     rule.scope.sku,
     rule.scope.sizeMin != null || rule.scope.sizeMax != null
@@ -136,17 +176,43 @@ function ruleLabel(
 function RuleCard({
   rule,
   index,
+  families,
+  coverage,
   onPatch,
   onRemove,
 }: {
   rule: ScopedPricingRule;
   index: number;
+  families: FamilyOption[];
+  coverage: RuleCoverage | null;
   onPatch: (patch: Partial<ScopedPricingRule>) => void;
   onRemove: () => void;
 }) {
   const { t } = useI18n();
-  const type = marginTypeOf(rule);
+  const type = marginKindOf(rule);
   const isGeneral = rule.id === "general";
+
+  // Category → its sub-categories, from what the catalog actually holds.
+  const categories = React.useMemo(() => {
+    const byCategory = new Map<string, { count: number; subs: Map<string, number> }>();
+    for (const f of families) {
+      if (!f.category) continue;
+      const entry = byCategory.get(f.category) ?? { count: 0, subs: new Map<string, number>() };
+      entry.count += f.count;
+      if (f.secondaryCategory) {
+        entry.subs.set(f.secondaryCategory, (entry.subs.get(f.secondaryCategory) ?? 0) + f.count);
+      }
+      byCategory.set(f.category, entry);
+    }
+    return byCategory;
+  }, [families]);
+
+  const subCategories = React.useMemo(() => {
+    const chosen = rule.scope.category;
+    if (!chosen) return [];
+    const entry = categories.get(chosen);
+    return entry ? [...entry.subs.entries()].sort((a, b) => a[0].localeCompare(b[0])) : [];
+  }, [categories, rule.scope.category]);
 
   function setType(next: MarginType) {
     // One margin mechanism per rule: switching clears the others.
@@ -228,6 +294,48 @@ function RuleCard({
               value={rule.scope.brand ?? ""}
               onChange={(e) => patchScope({ brand: e.target.value || undefined })}
             />
+            {/* The catalog's own family tree — the same axes the sidebar
+                browses by, so "Yeezy › Foam RNNR" is picked, never typed. */}
+            <select
+              aria-label={t.margins.scopeCategory}
+              className={SELECT}
+              value={rule.scope.category ?? ""}
+              onChange={(e) =>
+                patchScope({
+                  category: e.target.value || undefined,
+                  // A sub-family only means something inside its family.
+                  secondaryCategory: undefined,
+                })
+              }
+            >
+              <option value="">
+                {t.margins.scopeCategory}: {t.margins.scopeSourceAny}
+              </option>
+              {[...categories.entries()]
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([name, entry]) => (
+                  <option key={name} value={name}>
+                    {name} ({entry.count})
+                  </option>
+                ))}
+            </select>
+            {rule.scope.category && subCategories.length > 0 && (
+              <select
+                aria-label={t.margins.scopeSecondaryCategory}
+                className={SELECT}
+                value={rule.scope.secondaryCategory ?? ""}
+                onChange={(e) => patchScope({ secondaryCategory: e.target.value || undefined })}
+              >
+                <option value="">
+                  {t.margins.scopeSecondaryCategory}: {t.margins.scopeSourceAny}
+                </option>
+                {subCategories.map(([name, count]) => (
+                  <option key={name} value={name}>
+                    {name} ({count})
+                  </option>
+                ))}
+              </select>
+            )}
             <Input
               aria-label={t.margins.scopeModel}
               placeholder={t.margins.scopeModel}
@@ -369,6 +477,8 @@ function RuleCard({
         </div>
       </div>
 
+      <RuleDiagnostics rule={rule} coverage={coverage} />
+
       {/* Advanced knobs */}
       <details className="border-t border-line px-4 py-3">
         <summary className="cursor-pointer text-xs font-semibold text-muted hover:text-ink">
@@ -471,5 +581,46 @@ function RuleCard({
         </div>
       </details>
     </li>
+  );
+}
+
+/**
+ * What this rule actually does, in the two terms that matter: how many
+ * catalog products it sets the margin for, and the shelf price the engine
+ * returns for them at three sample asks. Zero coverage is called out loudly —
+ * that is the state a rule silently sat in while the operator believed it was
+ * pricing a family.
+ */
+function RuleDiagnostics({
+  rule,
+  coverage,
+}: {
+  rule: ScopedPricingRule;
+  coverage: RuleCoverage | null;
+}) {
+  const { t } = useI18n();
+  if (!coverage) return null;
+
+  const dead = rule.enabled && coverage.products === 0;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line bg-canvas/40 px-4 py-2.5 text-[11px]">
+      <span className={dead ? "font-semibold text-skip" : "font-medium text-muted"}>
+        {dead ? t.margins.coverageNone : t.margins.coverageCount(coverage.products)}
+      </span>
+      {coverage.sizeScoped && coverage.products > 0 && (
+        <span className="text-faint">{t.margins.coverageSizeScoped}</span>
+      )}
+      <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-faint tnum">
+        <span>{t.margins.exampleLabel}</span>
+        {coverage.examples.map((ex) => (
+          <span key={ex.ask}>
+            {eur.format(ex.ask)} →{" "}
+            <span className="font-semibold text-ink">
+              {ex.price != null ? eur.format(ex.price) : "—"}
+            </span>
+          </span>
+        ))}
+      </span>
+    </div>
   );
 }

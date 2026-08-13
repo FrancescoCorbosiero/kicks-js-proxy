@@ -120,9 +120,10 @@ async function tick(): Promise<void> {
       const { getActiveConfig } = await import("@/server/config/repo");
       const market = (await getActiveConfig()).source.market;
       const recat = await recategorizeCatalog(market);
-      if (recat.classified > 0 || recat.unified > 0) {
+      if (recat.classified > 0 || recat.unified > 0 || recat.synced > 0) {
         console.log(
-          `[scheduler] recategorize: ${recat.classified} classified from titles, ${recat.unified} case-duplicates unified`,
+          `[scheduler] recategorize: ${recat.classified} classified from titles, ` +
+            `${recat.unified} case-duplicates unified, ${recat.synced} synced into the stored product`,
         );
       }
     } catch (e) {

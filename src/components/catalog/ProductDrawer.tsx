@@ -17,7 +17,7 @@ import { updateStoreVariation } from "@/server/actions/store-edit";
 import { auditPrices, type PriceAuditResult } from "@/server/actions/debug";
 import { LockIcon, UnlockIcon } from "@/components/icons";
 import { CardImage } from "./CardImage";
-import type { DrawerData, DrawerVariant, StoreDrawerVariant } from "./drawer-data";
+import type { AppliedRule, DrawerData, DrawerVariant, StoreDrawerVariant } from "./drawer-data";
 
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
@@ -242,6 +242,9 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
           </div>
           )}
 
+          {/* Which margin rule these proposed prices come from. */}
+          {data.appliedRule && <AppliedRuleCard rule={data.appliedRule} />}
+
           {/* Price audit: live per-size comparison of every price source. */}
           {audit && <AuditPanel audit={audit} />}
 
@@ -357,6 +360,48 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
  * showing several differing same-tier prices is the smoking gun for a wrongly
  * cheap listing; a cached ask far from the live one flags a stale cache.
  */
+/**
+ * The margin rule behind the proposed prices, named. "Why is this priced like
+ * this?" is the question the drawer exists to answer, and a family rule that
+ * a broader one outranks is invisible until the winner says its own name.
+ */
+function AppliedRuleCard({ rule }: { rule: AppliedRule }) {
+  const { t } = useI18n();
+  // The supplier's presented price is already final: calling that "+0% markup"
+  // reads as a broken rule rather than the passthrough it is.
+  const passthrough = rule.id === "goldensneakers-passthrough";
+  const margin = passthrough
+    ? t.drawer.rulePassthrough
+    : rule.kind === "fixed" && rule.markupFixed != null
+      ? t.drawer.ruleMarginFixed(rule.markupFixed)
+      : rule.kind === "bands" && rule.bands
+        ? t.drawer.ruleMarginBands(rule.bands.length)
+        : rule.markupPercent != null
+          ? t.drawer.ruleMarginPercent(rule.markupPercent)
+          : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-line bg-surface p-3">
+      <span className="text-xs font-semibold">{t.drawer.ruleTitle}</span>
+      <span className="rounded-md bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-ink">
+        {passthrough
+          ? t.margins.gsRule
+          : rule.isGeneral
+            ? t.drawer.ruleGeneral
+            : rule.scopeLabel}
+      </span>
+      {margin && <span className="text-[11px] font-medium text-muted tnum">{margin}</span>}
+      {rule.mixed && <span className="text-[11px] text-faint">{t.drawer.ruleMixed}</span>}
+      <Link
+        href="/pricing"
+        className="ml-auto text-[11px] font-semibold text-accent-text underline-offset-2 hover:underline"
+      >
+        {rule.isGeneral ? t.drawer.ruleCreate : t.drawer.ruleEdit} →
+      </Link>
+    </div>
+  );
+}
+
 function AuditPanel({ audit }: { audit: PriceAuditResult }) {
   const { t } = useI18n();
 

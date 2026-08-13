@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { resetPricingToDefaults, updatePricing } from "@/server/actions/config";
 import { setGlobalSaleRule } from "@/server/actions/overrides";
 import type { PricingSummary, RoundingMode } from "@/server/config/summary";
@@ -139,6 +140,17 @@ export function PricingBar({
             {t.pricing.dynamicBadge}
           </span>
         ) : null}
+        {/* This bar edits the DEFAULT rule; families and single SKUs can have
+            their own, and those win. Say so, and link to where they live. */}
+        {price.specificRules > 0 && (
+          <Link
+            href="/pricing"
+            className="rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline"
+            title={t.pricing.specificRulesHint}
+          >
+            {t.pricing.specificRules(price.specificRules)}
+          </Link>
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           {chips.map((c) => (
             <span
@@ -170,7 +182,14 @@ export function PricingBar({
           <Button type="button" variant="ghost" size="sm" onClick={() => (editing ? setEditing(false) : openEditor())}>
             {editing ? t.pricing.cancel : t.pricing.edit}
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onResetPricing} disabled={resetting}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onResetPricing}
+            disabled={resetting}
+            title={t.pricing.resetHint}
+          >
             {resetting ? t.pricing.resetting : t.pricing.reset}
           </Button>
         </div>

@@ -1,5 +1,5 @@
 import type { AppConfig, MarkupBand } from "@core/config";
-import { sortMarkupBands } from "@core/config";
+import { declaresMarkup, sortMarkupBands } from "@core/config";
 
 export type RoundingMode = "none" | "integer" | "charm" | "nearest";
 
@@ -14,6 +14,12 @@ export interface PricingSummary {
   /** Anti-churn threshold: price drifts of at most this percent are not written. */
   minDeltaPercent: number | null;
   hasGuardrail: boolean;
+  /**
+   * Enabled rules that set their OWN margin for a subset of the catalog. This
+   * bar edits the general rule only, so without this number it reads as "the
+   * markup", when a family or per-SKU rule may be overriding it entirely.
+   */
+  specificRules: number;
 }
 
 /** A compact view of the active pricing for the UI (reads the first rule). */
@@ -30,5 +36,8 @@ export function pricingSummary(cfg: AppConfig): PricingSummary {
     minAsks: r?.minAsks ?? null,
     minDeltaPercent: r?.minDeltaPercent ?? null,
     hasGuardrail: cfg.pricingRules.some((x) => x.maxDeltaPercent != null),
+    specificRules: cfg.pricingRules.filter(
+      (x) => x.enabled && declaresMarkup(x) && Object.keys(x.scope).length > 0,
+    ).length,
   };
 }

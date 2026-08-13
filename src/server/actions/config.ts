@@ -1,14 +1,33 @@
 "use server";
 
 import { z } from "zod";
-import type { ScopedPricingRule } from "@core/config";
+import type { AppConfig, ScopedPricingRule } from "@core/config";
+import { resolveEffectiveRule, scopeTargetsSizes, winningMarkupRuleId } from "@core/config";
+import type { SourceProduct, SourceVariant } from "@core/core-spine";
+import { computePrice } from "@core/core-spine";
+import { listProductScopeAxes } from "@/server/catalog/repo";
 import { clearConfig, getActiveConfig, saveActiveConfig } from "@/server/config/repo";
 import { pricingSummary, type PricingSummary } from "@/server/config/summary";
 
-/** Wipe the stored config and re-seed from defaults.ts; return the new summary. */
+/**
+ * Restore the DEFAULT margin from defaults.ts — the dynamic banded catch-all
+ * and the GoldenSneakers passthrough — and keep every scoped rule the operator
+ * wrote. Reset lives on a bar that edits the general rule, so it must mean
+ * "put the default back", not "delete the Yeezy Foam rule I built last week".
+ */
 export async function resetPricingToDefaults(): Promise<PricingSummary> {
+  const current = await getActiveConfig().catch(() => null);
+  const kept = (current?.pricingRules ?? []).filter(
+    (r) => Object.keys(r.scope).length > 0 && r.scope.source !== "goldensneakers",
+  );
+
   await clearConfig();
-  return pricingSummary(await getActiveConfig());
+  const fresh = await getActiveConfig();
+  if (kept.length > 0) {
+    fresh.pricingRules = [...fresh.pricingRules, ...kept];
+    await saveActiveConfig(fresh);
+  }
+  return pricingSummary(fresh);
 }
 
 const PricingInputSchema = z.object({
@@ -70,6 +89,9 @@ export async function updatePricing(
 const ScopeSchema = z.object({
   source: z.string().max(64).optional(),
   brand: z.string().max(128).optional(),
+  // The catalog's navigation axes — a rule scoped to a product FAMILY.
+  category: z.string().max(128).optional(),
+  secondaryCategory: z.string().max(128).optional(),
   model: z.string().max(128).optional(),
   sku: z.string().max(64).optional(),
   sizeType: z.string().max(32).optional(),
@@ -114,6 +136,8 @@ function cleanScope(scope: z.infer<typeof ScopeSchema>): ScopedPricingRule["scop
   const out: ScopedPricingRule["scope"] = {};
   if (scope.source?.trim()) out.source = scope.source.trim();
   if (scope.brand?.trim()) out.brand = scope.brand.trim();
+  if (scope.category?.trim()) out.category = scope.category.trim();
+  if (scope.secondaryCategory?.trim()) out.secondaryCategory = scope.secondaryCategory.trim();
   if (scope.model?.trim()) out.model = scope.model.trim();
   if (scope.sku?.trim()) out.sku = scope.sku.trim().toUpperCase();
   if (scope.sizeType?.trim()) out.sizeType = scope.sizeType.trim();
@@ -131,6 +155,103 @@ export interface SaveRulesResult {
 /** The current rule list, for the margins editor. */
 export async function getPricingRules(): Promise<ScopedPricingRule[]> {
   return (await getActiveConfig()).pricingRules;
+}
+
+/** How many catalog products each rule actually sets the margin for. */
+export interface RuleCoverage {
+  ruleId: string;
+  products: number;
+  /** The rule only covers part of each product (it names sizes). */
+  sizeScoped: boolean;
+  /** What the engine really charges for a product this rule owns: ask → shelf price. */
+  examples: { ask: number; price: number | null }[];
+}
+
+/** The asks a rule is previewed at — one per band of the default ladder. */
+const SAMPLE_ASKS = [100, 300, 600];
+
+/**
+ * A product that matches THIS rule and nothing narrower: every axis the scope
+ * constrains is filled from the scope, everything else left generic. Resolving
+ * against it produces the same effective rule a real product of that family
+ * gets — inherited rounding, VAT and safety nets included — so the preview is
+ * the engine's own answer rather than a re-implementation of it.
+ */
+function sampleProductFor(rule: ScopedPricingRule): SourceProduct {
+  const s = rule.scope;
+  return {
+    stockxId: "sample",
+    sku: s.sku ?? "SAMPLE-000",
+    title: s.model ?? "Sample Product",
+    brand: s.brand ?? "Sample",
+    image: "",
+    market: "IT",
+    currency: "EUR",
+    ...(s.source ? { source: s.source } : {}),
+    ...(s.category ? { category: s.category } : {}),
+    ...(s.secondaryCategory ? { secondaryCategory: s.secondaryCategory } : {}),
+    variants: [],
+  };
+}
+
+function sampleVariantFor(rule: ScopedPricingRule, ask: number): SourceVariant {
+  const s = rule.scope;
+  const size = s.sizeMin ?? s.sizeMax ?? 42;
+  return {
+    stockxVariantId: "sample",
+    sizeLabel: String(size),
+    sizeType: s.sizeType ?? "eu",
+    // Deep enough that a minAsks threshold never blanks the preview.
+    offers: [{ deliveryType: "standard", lowestAsk: ask, asks: 999 }],
+  };
+}
+
+/** Run the engine over a synthetic product of the rule's own family. */
+function ruleExamples(
+  rule: ScopedPricingRule,
+  rules: ScopedPricingRule[],
+  cfg: AppConfig,
+): { ask: number; price: number | null }[] {
+  const product = sampleProductFor(rule);
+  const probeConfig: AppConfig = { ...cfg, pricingRules: rules };
+  return SAMPLE_ASKS.map((ask) => {
+    const variant = sampleVariantFor(rule, ask);
+    const effective = resolveEffectiveRule(product, variant, probeConfig);
+    return { ask, price: effective ? computePrice(variant, effective) : null };
+  });
+}
+
+/**
+ * Answer "is this rule doing anything?" against the real catalog. A rule that
+ * covers 0 products is either shadowed by a more specific one or scoped to
+ * something no product matches — and until now both looked exactly like a
+ * working rule. Counted per product on identity alone; the size-scoped ones
+ * are flagged rather than silently counted as whole-product coverage.
+ */
+export async function pricingRuleCoverage(
+  rulesInput?: unknown,
+): Promise<{ total: number; coverage: RuleCoverage[] }> {
+  const cfg = await getActiveConfig();
+  // The editor passes its UNSAVED list so the numbers track what you are
+  // typing; anything unparseable falls back to what is actually stored.
+  const parsed = rulesInput != null ? RulesSchema.safeParse(rulesInput) : null;
+  const rules = (parsed?.success ? (parsed.data as ScopedPricingRule[]) : cfg.pricingRules) ?? [];
+
+  const axes = await listProductScopeAxes(cfg.source.market);
+  const counts = new Map<string, number>();
+  for (const p of axes) {
+    const id = winningMarkupRuleId(p, rules);
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return {
+    total: axes.length,
+    coverage: rules.map((r) => ({
+      ruleId: r.id,
+      products: counts.get(r.id) ?? 0,
+      sizeScoped: scopeTargetsSizes(r.scope),
+      examples: ruleExamples(r, rules, cfg),
+    })),
+  };
 }
 
 /**

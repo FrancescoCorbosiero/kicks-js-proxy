@@ -112,6 +112,26 @@ describe("parseGsPayload", () => {
     expect(gsOffersToSource("JS3801", offers, "IT").image).toBe(url);
   });
 
+  it("derives the family axes from the title, so family-scoped margin rules match", () => {
+    // The feed sends no taxonomy at all. Without this the catalog files a GS
+    // product under "Yeezy › Foam RNNR" while a rule scoped to that same
+    // family skips it — the product is in the family everywhere but pricing.
+    const { offers } = parseGsPayload([
+      { ...SAMPLE[0], product_name: "adidas Yeezy Foam RNNR Sulfur", brand_name: "adidas" },
+    ]);
+    const product = gsOffersToSource("JS3801", offers, "IT");
+    expect(product.category).toBe("Yeezy");
+    expect(product.secondaryCategory).toBe("Foam RNNR");
+  });
+
+  it("leaves the axes unset when the title classifies to nothing", () => {
+    const { offers } = parseGsPayload([
+      { ...SAMPLE[0], product_name: "Prodotto Sconosciuto", brand_name: "" },
+    ]);
+    const product = gsOffersToSource("JS3801", offers, "IT");
+    expect(product.category).toBeUndefined();
+  });
+
   it("collapses duplicate (sku, size) rows preferring the one with stock", () => {
     const dup = [
       { ...SAMPLE[0], id: 1, available_quantity: 0 },
