@@ -111,6 +111,25 @@ async function tick(): Promise<void> {
       errors.push(`metadata backfill: ${message}`);
       console.error(`[scheduler] metadata backfill failed: ${message}`);
     }
+
+    // Classify whatever is still uncategorized from the stored titles (feed
+    // and store-only rows have no API metadata at all — see classify.ts), and
+    // fold case-variant duplicate categories into one bucket.
+    try {
+      const { recategorizeCatalog } = await import("@/server/catalog/repo");
+      const { getActiveConfig } = await import("@/server/config/repo");
+      const market = (await getActiveConfig()).source.market;
+      const recat = await recategorizeCatalog(market);
+      if (recat.classified > 0 || recat.unified > 0) {
+        console.log(
+          `[scheduler] recategorize: ${recat.classified} classified from titles, ${recat.unified} case-duplicates unified`,
+        );
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push(`recategorize: ${message}`);
+      console.error(`[scheduler] recategorize failed: ${message}`);
+    }
   } finally {
     s.running = false;
     s.lastRunAt = Date.now();

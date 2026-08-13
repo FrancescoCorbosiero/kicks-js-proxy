@@ -1,7 +1,12 @@
 "use server";
 
 import { resolveEffectiveRule } from "@core/config";
-import { computePrice, type SourceProduct, type SourceVariant } from "@core/core-spine";
+import {
+  computePrice,
+  medianTierAsk,
+  type SourceProduct,
+  type SourceVariant,
+} from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot } from "@/server/store-json/repo";
 import { getSource } from "@/server/adapters/kicksdb";
@@ -223,7 +228,9 @@ export async function auditPrices(input: { sku: string }): Promise<PriceAuditRes
     const propose = (product: SourceProduct | null, v: SourceVariant | undefined): number | null => {
       if (!product || !v) return null;
       const rule = resolveEffectiveRule(product, v, config);
-      return rule ? computePrice(v, rule) : null;
+      return rule
+        ? computePrice(v, rule, { medianAsk: medianTierAsk(product, rule.sourceDeliveryType) })
+        : null;
     };
 
     // One audit row per variant: union of stored and live variant ids.

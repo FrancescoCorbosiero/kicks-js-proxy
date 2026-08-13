@@ -62,6 +62,20 @@ export function needsWooMirror(local: OrderStatus, wooStatus: string): boolean {
   return accepted != null && !accepted.includes(wooStatus);
 }
 
+/**
+ * The local status a NEVER-SEEN order starts from, derived from its Woo
+ * status. History must arrive already settled — an order completed months ago
+ * on Woo must not show up as "to fulfill". Only genuinely open Woo statuses
+ * (processing / on-hold / pending payment) start in the working pipeline;
+ * null = the "new" default. Applies solely to orders with no workflow row —
+ * the operator's own state is never touched by a pull.
+ */
+export function initialStatusForWoo(wooStatus: string): OrderStatus | null {
+  if (wooStatus === "completed") return "completed";
+  if (["cancelled", "refunded", "failed", "trash"].includes(wooStatus)) return "cancelled";
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Normalized order (what the snapshot rows store)                     */
 /* ------------------------------------------------------------------ */

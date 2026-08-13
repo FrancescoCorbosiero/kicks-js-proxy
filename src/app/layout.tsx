@@ -6,6 +6,8 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { MainNav } from "@/components/MainNav";
 import { I18nProvider } from "@/i18n/provider";
 import { getServerDictionary } from "@/i18n/server";
+import { env } from "@/lib/env";
+import { logout } from "@/server/actions/auth";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getServerDictionary();
@@ -46,6 +48,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 </span>
                 <LanguageSwitcher />
                 <ThemeToggle />
+                {env.APP_PASSWORD && (
+                  <form action={logout}>
+                    <button
+                      type="submit"
+                      className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                    >
+                      {t.login.logout}
+                    </button>
+                  </form>
+                )}
               </div>
             </div>
           </header>

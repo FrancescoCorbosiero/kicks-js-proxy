@@ -348,19 +348,67 @@ export function roundPrice(price: number, rounding: EffectivePricingRule["roundi
 }
 
 /**
+ * Median ask across a product's variants at one delivery tier — the reference
+ * the outlier guard measures against. Null when fewer than 3 sizes carry an
+ * ask: a median of one or two prices is no distribution at all.
+ */
+export function medianTierAsk(product: SourceProduct, deliveryType: DeliveryType): number | null {
+    const asks = product.variants
+        .map((v) => v.offers.find((o) => o.deliveryType === deliveryType)?.lowestAsk ?? 0)
+        .filter((a) => a > 0)
+        .sort((a, b) => a - b);
+    if (asks.length < 3) return null;
+    const mid = Math.floor(asks.length / 2);
+    return asks.length % 2 === 1 ? asks[mid] : (asks[mid - 1] + asks[mid]) / 2;
+}
+
+/** Context a caller can pass to computePrice for product-level guards. */
+export interface PriceContext {
+    /** medianTierAsk() of the product — enables outlierFloorPercent. */
+    medianAsk?: number | null;
+}
+
+/**
  * Returns the proposed retail price for a variant under an effective rule, or
  * null if the rule says "don't price" (no offer for the chosen delivery type,
  * or liquidity below minAsks). Applies, in order: delivery-type selection,
- * minAsks skip, markup (banded by the raw ask when markupBands is set), floor,
- * VAT, rounding. The maxDeltaPercent guardrail is NOT applied here — it is a
- * plan-time compare against the current price.
+ * minAsks skip, the distribution guard (an ask far below the product's median
+ * is treated as bad data and lifted to the floor), markup (banded by the raw
+ * ask when markupBands is set), floor, VAT, rounding. The maxDeltaPercent
+ * guardrail is NOT applied here — it is a plan-time compare against the
+ * current price.
  */
-export function computePrice(variant: SourceVariant, rule: EffectivePricingRule): number | null {
+export function computePrice(
+    variant: SourceVariant,
+    rule: EffectivePricingRule,
+    context: PriceContext = {},
+): number | null {
     const offer = variant.offers.find((o) => o.deliveryType === rule.sourceDeliveryType);
     if (!offer) return null;
     if (rule.minAsks != null && offer.asks < rule.minAsks) return null;
 
-    let price = offer.lowestAsk * (1 + markupForAsk(offer.lowestAsk, rule) / 100);
+    // Distribution guard: one size never wildly undercuts its own product.
+    // Asks ABOVE the median are never touched — expensive sizes are safe.
+    let ask = offer.lowestAsk;
+    if (
+        rule.outlierFloorPercent != null &&
+        rule.outlierFloorPercent > 0 &&
+        context.medianAsk != null &&
+        context.medianAsk > 0
+    ) {
+        ask = Math.max(ask, (context.medianAsk * rule.outlierFloorPercent) / 100);
+    }
+
+    let price =
+        rule.markupFixed != null
+            ? ask + rule.markupFixed
+            : ask * (1 + markupForAsk(ask, rule) / 100);
+    // Guaranteed margin: percent markups under-cover cheap asks (sourcing has
+    // fixed costs — shipping, fees), so the price never sits closer to the
+    // ask than this. Cheap market occasions stay listed, never at a loss.
+    if (rule.minMarginFixed != null && rule.minMarginFixed > 0) {
+        price = Math.max(price, ask + rule.minMarginFixed);
+    }
     if (rule.floor != null) price = Math.max(price, rule.floor);
     if (rule.tax.priceIncludesVat && rule.tax.vatRatePercent) {
         price = price * (1 + rule.tax.vatRatePercent / 100);
@@ -466,7 +514,9 @@ export function buildPlan(
         }
 
         const rule = resolveEffectiveRule(product, v, config);
-        const proposed = rule ? computePrice(v, rule) : null;
+        const proposed = rule
+            ? computePrice(v, rule, { medianAsk: medianTierAsk(product, rule.sourceDeliveryType) })
+            : null;
 
         if (proposed == null) {
             const reason = rule ? "no priceable offer" : "no pricing rule matches";

@@ -31,6 +31,10 @@ const EnvSchema = z.object({
   GS_FEED_URL: z.url().optional(),
   GS_FEED_TOKEN: z.string().optional(),
 
+  // App login: with a password set, every page requires sign-in (shared
+  // password, long-lived session cookie). Unset = open app (local dev).
+  APP_PASSWORD: z.string().min(8, "APP_PASSWORD must be at least 8 characters").optional(),
+
   // Persistence
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),

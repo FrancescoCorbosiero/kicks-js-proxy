@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatAddress, needsWooMirror, normalizeWooOrder } from "./model";
+import { formatAddress, initialStatusForWoo, needsWooMirror, normalizeWooOrder } from "./model";
 
 const RAW = {
   id: 1042,
@@ -95,6 +95,21 @@ describe("formatAddress", () => {
     expect(formatAddress(o.shipping)).toBe(
       "Mario Rossi\nVia Milano 2, Scala B\n29121 Piacenza PC\nIT\n+39 333 1234567",
     );
+  });
+});
+
+describe("initialStatusForWoo", () => {
+  it("settled Woo history starts settled locally", () => {
+    expect(initialStatusForWoo("completed")).toBe("completed");
+    expect(initialStatusForWoo("cancelled")).toBe("cancelled");
+    expect(initialStatusForWoo("refunded")).toBe("cancelled");
+    expect(initialStatusForWoo("failed")).toBe("cancelled");
+  });
+  it("open Woo statuses enter the working pipeline (default new)", () => {
+    expect(initialStatusForWoo("processing")).toBeNull();
+    expect(initialStatusForWoo("on-hold")).toBeNull();
+    expect(initialStatusForWoo("pending")).toBeNull();
+    expect(initialStatusForWoo("")).toBeNull();
   });
 });
 

@@ -71,12 +71,30 @@ export interface ScopedPricingRule {
     // Dynamic markup by ask price. When present it wins over markupPercent,
     // which remains the fallback for asks no band covers.
     markupBands?: MarkupBand[];
+    // Fixed margin in currency units (ask + N€) — the scs-b2b style "Jordan
+    // +3€ fissi". A rule setting it becomes a fixed-margin rule: bands and
+    // percent from less-specific rules stop applying.
+    markupFixed?: number;
+    /**
+     * Never sell below ask + this amount (currency units). Percent markups
+     * under-cover cheap asks — sourcing costs have a FIXED part (shipping,
+     * marketplace fees) that 35% of a 44€ ask doesn't reach. The cheap market
+     * occasion stays listed, but the margin is guaranteed. 0/absent = off.
+     */
+    minMarginFixed?: number;
     floor?: number;
     minAsks?: number;                     // skip if liquidity below this
     rounding?: RoundingConfig;
     tax?: TaxConfig;
     maxDeltaPercent?: number;             // guardrail: reject change bigger than this
     minDeltaPercent?: number;             // skip writes smaller than this (anti-churn)
+    /**
+     * Distribution guard: a variant whose ask falls below this percent of the
+     * PRODUCT's median ask is treated as unreliable data (a bad API row, a
+     * glitched listing) and priced as if it were AT that floor — one size can
+     * never undercut its own product wildly. 0 or absent = off.
+     */
+    outlierFloorPercent?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -123,12 +141,15 @@ export interface EffectivePricingRule {
     sourceDeliveryType: DeliveryType;
     markupPercent: number;               // fallback when no band covers the ask
     markupBands?: MarkupBand[];          // ordered ascending; wins when present
+    markupFixed?: number;                // fixed € margin — wins over percent/bands
+    minMarginFixed?: number;             // price never below ask + this (€)
     floor?: number;
     minAsks?: number;
     rounding: RoundingConfig;
     tax: TaxConfig;
     maxDeltaPercent?: number;
     minDeltaPercent?: number;
+    outlierFloorPercent?: number;
 }
 
 /** Ascending by upTo, unbounded band last — resolution order for markupForAsk. */
@@ -190,32 +211,49 @@ export function resolveEffectiveRule(
     };
     for (const r of matched) {
         if (r.sourceDeliveryType != null) merged.sourceDeliveryType = r.sourceDeliveryType;
-        if (r.markupPercent != null) merged.markupPercent = r.markupPercent;
-        if (r.markupBands != null) merged.markupBands = sortMarkupBands(r.markupBands);
+        // Percent/banded and fixed margins are exclusive ways to decide the
+        // price: whichever the MORE SPECIFIC rule sets replaces the other.
+        if (r.markupPercent != null) {
+            merged.markupPercent = r.markupPercent;
+            merged.markupFixed = undefined;
+        }
+        if (r.markupBands != null) {
+            merged.markupBands = sortMarkupBands(r.markupBands);
+            merged.markupFixed = undefined;
+        }
+        if (r.markupFixed != null) {
+            merged.markupFixed = r.markupFixed;
+            merged.markupBands = undefined;
+        }
         if (r.floor != null) merged.floor = r.floor;
         if (r.minAsks != null) merged.minAsks = r.minAsks;
         if (r.rounding != null) merged.rounding = r.rounding;
         if (r.tax != null) merged.tax = r.tax;
         if (r.maxDeltaPercent != null) merged.maxDeltaPercent = r.maxDeltaPercent;
         if (r.minDeltaPercent != null) merged.minDeltaPercent = r.minDeltaPercent;
+        if (r.outlierFloorPercent != null) merged.outlierFloorPercent = r.outlierFloorPercent;
+        if (r.minMarginFixed != null) merged.minMarginFixed = r.minMarginFixed;
     }
 
-    // A rule must set a markup somehow: flat, or banded (whose top band then
-    // doubles as the flat fallback for anything the bands miss).
-    if (merged.markupPercent == null) {
+    // A rule must set a markup somehow: fixed, flat, or banded (whose top band
+    // then doubles as the flat fallback for anything the bands miss).
+    if (merged.markupPercent == null && merged.markupFixed == null) {
         const bands = merged.markupBands;
         if (!bands || bands.length === 0) return null;
         merged.markupPercent = bands[bands.length - 1].percent;
     }
     return {
         sourceDeliveryType: merged.sourceDeliveryType!,
-        markupPercent: merged.markupPercent,
+        markupPercent: merged.markupPercent ?? 0,
         markupBands: merged.markupBands,
+        markupFixed: merged.markupFixed,
         floor: merged.floor,
         minAsks: merged.minAsks,
         rounding: merged.rounding ?? { mode: "none" },
         tax: merged.tax ?? { priceIncludesVat: false, vatRatePercent: 0 },
         maxDeltaPercent: merged.maxDeltaPercent,
         minDeltaPercent: merged.minDeltaPercent,
+        outlierFloorPercent: merged.outlierFloorPercent,
+        minMarginFixed: merged.minMarginFixed,
     };
 }

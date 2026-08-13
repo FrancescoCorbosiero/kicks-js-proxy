@@ -24,12 +24,40 @@ export async function getActiveConfig(): Promise<AppConfig> {
   // Overlay env secrets onto the stored (secret-free) config. The GS
   // passthrough rule is ensured at read time so configs stored before the
   // feed existed keep working without a manual Reset.
-  return { ...rows[0].data, pricingRules: ensureGsRule(rows[0].data.pricingRules), connection };
+  return {
+    ...rows[0].data,
+    pricingRules: ensureOutlierGuard(ensureGsRule(rows[0].data.pricingRules)),
+    connection,
+  };
 }
 
 function ensureGsRule(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
   const hasGs = rules.some((r) => r.scope.source === "goldensneakers");
   return hasGs ? rules : [...rules, goldenSneakersPassthroughRule()];
+}
+
+/**
+ * Same read-time retrofit for the pricing safety nets: configs stored before
+ * minMarginFixed / outlierFloorPercent existed get the defaults on their
+ * catch-all rule (guaranteed 20€ margin over the ask; bad-data net at 40% of
+ * the product median) and explicit 0 on GS rules — supplier presented prices
+ * are final, margin included upstream. An operator's explicit value,
+ * including 0, is always respected.
+ */
+function ensureOutlierGuard(rules: AppConfig["pricingRules"]): AppConfig["pricingRules"] {
+  return rules.map((r) => {
+    const out = { ...r };
+    if (r.scope.source === "goldensneakers") {
+      out.outlierFloorPercent = r.outlierFloorPercent ?? 0;
+      out.minMarginFixed = r.minMarginFixed ?? 0;
+      return out;
+    }
+    if (Object.keys(r.scope).length === 0) {
+      out.outlierFloorPercent = r.outlierFloorPercent ?? 40;
+      out.minMarginFixed = r.minMarginFixed ?? 20;
+    }
+    return out;
+  });
 }
 
 /** Never persist secrets: blank out the ConnectionConfig before writing to DB. */
