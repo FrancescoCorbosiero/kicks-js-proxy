@@ -656,6 +656,27 @@ export const it = {
     scopeHint: "Campo vuoto = qualsiasi. Vince sempre la regola che descrive meno prodotti: SKU › sotto-famiglia e nome › famiglia › brand › sorgente.",
     scopeSource: "Sorgente",
     scopeSourceAny: "Qualsiasi",
+    scopeAny: "Qualsiasi",
+    scopeUseTyped: (v: string) => `Usa «${v}»`,
+    scopeNoMatch: "Nessuna corrispondenza a catalogo — puoi comunque scriverlo",
+    scopeSizes: "Taglie",
+    scopeSubNeedsFamily: "Scegli prima una famiglia",
+    scopeModelHint: "Testo libero: cerca dentro il nome del prodotto",
+    scopeSummaryLabel: "Copre:",
+    sumEverything: "tutti i prodotti (nessun filtro)",
+    sumJoin: (bits: string[]) => bits.join(", "),
+    sumSource: (v: string) => `sorgente ${v}`,
+    sumBrand: (v: string) => `brand «${v}»`,
+    sumFamily: (v: string) => `famiglia «${v}»`,
+    sumFamilyPair: (a: string, b: string) => `famiglia «${a} › ${b}»`,
+    sumName: (v: string) => `nome che contiene «${v}»`,
+    sumSku: (v: string) => `SKU ${v}`,
+    sumSizes: (min: number | null, max: number | null) =>
+      min != null && max != null
+        ? `taglie da ${min} a ${max}`
+        : min != null
+          ? `taglie da ${min} in su`
+          : `taglie fino a ${max}`,
     scopeBrand: "Brand",
     scopeCategory: "Famiglia",
     scopeSecondaryCategory: "Sotto-famiglia",

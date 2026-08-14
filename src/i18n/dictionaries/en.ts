@@ -638,6 +638,27 @@ export const en: Dictionary = {
     scopeHint: "Empty field = anything. The rule describing the fewest products always wins: SKU › sub-family and name › family › brand › source.",
     scopeSource: "Source",
     scopeSourceAny: "Any",
+    scopeAny: "Any",
+    scopeUseTyped: (v: string) => `Use “${v}”`,
+    scopeNoMatch: "No match in the catalog — you can still type it",
+    scopeSizes: "Sizes",
+    scopeSubNeedsFamily: "Pick a family first",
+    scopeModelHint: "Free text: searches inside the product name",
+    scopeSummaryLabel: "Covers:",
+    sumEverything: "every product (no filter)",
+    sumJoin: (bits: string[]) => bits.join(", "),
+    sumSource: (v: string) => `source ${v}`,
+    sumBrand: (v: string) => `brand “${v}”`,
+    sumFamily: (v: string) => `family “${v}”`,
+    sumFamilyPair: (a: string, b: string) => `family “${a} › ${b}”`,
+    sumName: (v: string) => `name containing “${v}”`,
+    sumSku: (v: string) => `SKU ${v}`,
+    sumSizes: (min: number | null, max: number | null) =>
+      min != null && max != null
+        ? `sizes ${min} to ${max}`
+        : min != null
+          ? `sizes ${min} and up`
+          : `sizes up to ${max}`,
     scopeBrand: "Brand",
     scopeCategory: "Family",
     scopeSecondaryCategory: "Sub-family",
