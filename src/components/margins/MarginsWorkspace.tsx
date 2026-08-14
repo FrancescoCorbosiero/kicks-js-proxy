@@ -7,6 +7,7 @@ import { pricingRuleCoverage, savePricingRules, type RuleCoverage } from "@/serv
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 
 /**
  * The margins admin: the whole rule list edited in place, saved as one
@@ -29,6 +30,62 @@ export interface FamilyOption {
   count: number;
 }
 
+/** A brand the catalog actually holds, with how many products carry it. */
+export interface BrandOption {
+  brand: string;
+  count: number;
+}
+
+/** A labelled form field — the label stays visible, unlike a placeholder. */
+function Field({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <div className="mb-1 text-[11px] font-medium text-muted">{label}</div>
+      {children}
+      {hint && <p className="mt-0.5 text-[10px] leading-snug text-faint">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * The scope as a sentence. A rule is a claim about which products it governs,
+ * and reading that claim off six separate inputs is exactly the step where an
+ * operator mistakes a name filter for a family one.
+ */
+function scopeSummary(
+  scope: ScopedPricingRule["scope"],
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  const bits: string[] = [];
+  if (scope.source) bits.push(t.margins.sumSource(scope.source));
+  if (scope.brand) bits.push(t.margins.sumBrand(scope.brand));
+  if (scope.category) {
+    bits.push(
+      scope.secondaryCategory
+        ? t.margins.sumFamilyPair(scope.category, scope.secondaryCategory)
+        : t.margins.sumFamily(scope.category),
+    );
+  } else if (scope.secondaryCategory) {
+    bits.push(t.margins.sumFamily(scope.secondaryCategory));
+  }
+  if (scope.model) bits.push(t.margins.sumName(scope.model));
+  if (scope.sku) bits.push(t.margins.sumSku(scope.sku));
+  if (scope.sizeMin != null || scope.sizeMax != null) {
+    bits.push(t.margins.sumSizes(scope.sizeMin ?? null, scope.sizeMax ?? null));
+  }
+  return bits.length === 0 ? t.margins.sumEverything : t.margins.sumJoin(bits);
+}
+
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
 /** Parse a locale-tolerant number input; "" -> undefined. */
@@ -46,9 +103,11 @@ const SELECT =
 export function MarginsWorkspace({
   initialRules,
   families = [],
+  brands = [],
 }: {
   initialRules: ScopedPricingRule[];
   families?: FamilyOption[];
+  brands?: BrandOption[];
 }) {
   const { t } = useI18n();
   const [rules, setRules] = React.useState<ScopedPricingRule[]>(initialRules);
@@ -127,6 +186,7 @@ export function MarginsWorkspace({
             rule={rule}
             index={i}
             families={families}
+            brands={brands}
             coverage={coverage.get(rule.id) ?? null}
             onPatch={(p) => patchRule(i, p)}
             onRemove={() => removeRule(i)}
@@ -177,6 +237,7 @@ function RuleCard({
   rule,
   index,
   families,
+  brands,
   coverage,
   onPatch,
   onRemove,
@@ -184,6 +245,7 @@ function RuleCard({
   rule: ScopedPricingRule;
   index: number;
   families: FamilyOption[];
+  brands: BrandOption[];
   coverage: RuleCoverage | null;
   onPatch: (patch: Partial<ScopedPricingRule>) => void;
   onRemove: () => void;
@@ -207,12 +269,28 @@ function RuleCard({
     return byCategory;
   }, [families]);
 
-  const subCategories = React.useMemo(() => {
+  const categoryOptions = React.useMemo<ComboboxOption[]>(
+    () =>
+      [...categories.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([value, entry]) => ({ value, count: entry.count })),
+    [categories],
+  );
+
+  const subCategoryOptions = React.useMemo<ComboboxOption[]>(() => {
     const chosen = rule.scope.category;
     if (!chosen) return [];
     const entry = categories.get(chosen);
-    return entry ? [...entry.subs.entries()].sort((a, b) => a[0].localeCompare(b[0])) : [];
+    if (!entry) return [];
+    return [...entry.subs.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([value, count]) => ({ value, count }));
   }, [categories, rule.scope.category]);
+
+  const brandOptions = React.useMemo<ComboboxOption[]>(
+    () => brands.map((b) => ({ value: b.brand, count: b.count })),
+    [brands],
+  );
 
   function setType(next: MarginType) {
     // One margin mechanism per rule: switching clears the others.
@@ -272,103 +350,123 @@ function RuleCard({
       </div>
 
       <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
-        {/* Scope */}
+        {/* Scope — one labelled field per axis. The old wrapping row of bare
+            placeholders made "Yeezy Foam" ambiguous the moment it was typed:
+            brand? model? SKU? Labels stay visible, and every axis the catalog
+            knows the values of is a picker rather than a guess. */}
         <div>
           <div className="text-xs font-semibold">{t.margins.scopeTitle}</div>
-          <p className="mb-2 mt-0.5 text-[11px] leading-snug text-muted">{t.margins.scopeHint}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label={t.margins.scopeSource}
-              className={SELECT}
-              value={rule.scope.source ?? ""}
-              onChange={(e) => patchScope({ source: e.target.value || undefined })}
-            >
-              <option value="">{t.margins.scopeSource}: {t.margins.scopeSourceAny}</option>
-              <option value="kicksdb">kicksdb</option>
-              <option value="goldensneakers">goldensneakers</option>
-            </select>
-            <Input
-              aria-label={t.margins.scopeBrand}
-              placeholder={t.margins.scopeBrand}
-              className="h-8 w-32 text-xs"
-              value={rule.scope.brand ?? ""}
-              onChange={(e) => patchScope({ brand: e.target.value || undefined })}
-            />
-            {/* The catalog's own family tree — the same axes the sidebar
-                browses by, so "Yeezy › Foam RNNR" is picked, never typed. */}
-            <select
-              aria-label={t.margins.scopeCategory}
-              className={SELECT}
-              value={rule.scope.category ?? ""}
-              onChange={(e) =>
-                patchScope({
-                  category: e.target.value || undefined,
-                  // A sub-family only means something inside its family.
-                  secondaryCategory: undefined,
-                })
-              }
-            >
-              <option value="">
-                {t.margins.scopeCategory}: {t.margins.scopeSourceAny}
-              </option>
-              {[...categories.entries()]
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([name, entry]) => (
-                  <option key={name} value={name}>
-                    {name} ({entry.count})
-                  </option>
-                ))}
-            </select>
-            {rule.scope.category && subCategories.length > 0 && (
+          <p className="mb-3 mt-0.5 text-[11px] leading-snug text-muted">{t.margins.scopeHint}</p>
+
+          <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2">
+            <Field label={t.margins.scopeSource}>
               <select
-                aria-label={t.margins.scopeSecondaryCategory}
-                className={SELECT}
-                value={rule.scope.secondaryCategory ?? ""}
-                onChange={(e) => patchScope({ secondaryCategory: e.target.value || undefined })}
+                aria-label={t.margins.scopeSource}
+                className={`${SELECT} w-full`}
+                value={rule.scope.source ?? ""}
+                onChange={(e) => patchScope({ source: e.target.value || undefined })}
               >
-                <option value="">
-                  {t.margins.scopeSecondaryCategory}: {t.margins.scopeSourceAny}
-                </option>
-                {subCategories.map(([name, count]) => (
-                  <option key={name} value={name}>
-                    {name} ({count})
-                  </option>
-                ))}
+                <option value="">{t.margins.scopeSourceAny}</option>
+                <option value="kicksdb">kicksdb</option>
+                <option value="goldensneakers">goldensneakers</option>
               </select>
-            )}
-            <Input
-              aria-label={t.margins.scopeModel}
-              placeholder={t.margins.scopeModel}
-              className="h-8 w-36 text-xs"
-              value={rule.scope.model ?? ""}
-              onChange={(e) => patchScope({ model: e.target.value || undefined })}
-            />
-            <Input
-              aria-label={t.margins.scopeSku}
-              placeholder={t.margins.scopeSku}
-              className="h-8 w-32 font-mono text-xs"
-              value={rule.scope.sku ?? ""}
-              onChange={(e) => patchScope({ sku: e.target.value || undefined })}
-            />
-            <div className="flex items-center gap-1 text-[11px] text-muted">
-              <Input
-                aria-label={t.margins.scopeSizeMin}
-                placeholder={t.margins.scopeSizeMin}
-                inputMode="decimal"
-                className="h-8 w-20 text-xs"
-                value={rule.scope.sizeMin != null ? String(rule.scope.sizeMin) : ""}
-                onChange={(e) => patchScope({ sizeMin: num(e.target.value) })}
+            </Field>
+
+            <Field label={t.margins.scopeBrand}>
+              <Combobox
+                aria-label={t.margins.scopeBrand}
+                value={rule.scope.brand ?? ""}
+                onChange={(v) => patchScope({ brand: v || undefined })}
+                options={brandOptions}
+                anyLabel={t.margins.scopeAny}
+                placeholder={t.margins.scopeAny}
+                customLabel={t.margins.scopeUseTyped}
+                emptyLabel={t.margins.scopeNoMatch}
               />
-              <span>{t.margins.scopeSizeMax}</span>
-              <Input
-                aria-label={t.margins.scopeSizeMax}
-                inputMode="decimal"
-                className="h-8 w-20 text-xs"
-                value={rule.scope.sizeMax != null ? String(rule.scope.sizeMax) : ""}
-                onChange={(e) => patchScope({ sizeMax: num(e.target.value) })}
+            </Field>
+
+            <Field label={t.margins.scopeCategory}>
+              <Combobox
+                aria-label={t.margins.scopeCategory}
+                value={rule.scope.category ?? ""}
+                onChange={(v) =>
+                  // A sub-family only means something inside its family.
+                  patchScope({ category: v || undefined, secondaryCategory: undefined })
+                }
+                options={categoryOptions}
+                anyLabel={t.margins.scopeAny}
+                placeholder={t.margins.scopeAny}
+                customLabel={t.margins.scopeUseTyped}
+                emptyLabel={t.margins.scopeNoMatch}
               />
-            </div>
+            </Field>
+
+            <Field
+              label={t.margins.scopeSecondaryCategory}
+              hint={!rule.scope.category ? t.margins.scopeSubNeedsFamily : undefined}
+            >
+              <Combobox
+                aria-label={t.margins.scopeSecondaryCategory}
+                value={rule.scope.secondaryCategory ?? ""}
+                onChange={(v) => patchScope({ secondaryCategory: v || undefined })}
+                options={subCategoryOptions}
+                disabled={!rule.scope.category}
+                anyLabel={t.margins.scopeAny}
+                placeholder={t.margins.scopeAny}
+                customLabel={t.margins.scopeUseTyped}
+                emptyLabel={t.margins.scopeNoMatch}
+              />
+            </Field>
+
+            <Field label={t.margins.scopeModel} hint={t.margins.scopeModelHint}>
+              <Input
+                aria-label={t.margins.scopeModel}
+                placeholder={t.margins.scopeAny}
+                className="h-8 w-full text-xs"
+                value={rule.scope.model ?? ""}
+                onChange={(e) => patchScope({ model: e.target.value || undefined })}
+              />
+            </Field>
+
+            <Field label={t.margins.scopeSku}>
+              <Input
+                aria-label={t.margins.scopeSku}
+                placeholder={t.margins.scopeAny}
+                className="h-8 w-full font-mono text-xs uppercase"
+                value={rule.scope.sku ?? ""}
+                onChange={(e) => patchScope({ sku: e.target.value || undefined })}
+              />
+            </Field>
+
+            <Field label={t.margins.scopeSizes} className="sm:col-span-2">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  aria-label={t.margins.scopeSizeMin}
+                  placeholder={t.margins.scopeSizeMin}
+                  inputMode="decimal"
+                  className="h-8 w-20 text-xs"
+                  value={rule.scope.sizeMin != null ? String(rule.scope.sizeMin) : ""}
+                  onChange={(e) => patchScope({ sizeMin: num(e.target.value) })}
+                />
+                <span className="text-[11px] text-faint">{t.margins.scopeSizeMax}</span>
+                <Input
+                  aria-label={t.margins.scopeSizeMax}
+                  placeholder={t.margins.scopeAny}
+                  inputMode="decimal"
+                  className="h-8 w-20 text-xs"
+                  value={rule.scope.sizeMax != null ? String(rule.scope.sizeMax) : ""}
+                  onChange={(e) => patchScope({ sizeMax: num(e.target.value) })}
+                />
+              </div>
+            </Field>
           </div>
+
+          {/* The scope as a sentence — the answer to "so what does this rule
+              actually cover?", which a grid of fields never quite gives. */}
+          <p className="mt-3 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] leading-snug text-muted">
+            <span className="font-semibold text-ink">{t.margins.scopeSummaryLabel}</span>{" "}
+            {scopeSummary(rule.scope, t)}
+          </p>
         </div>
 
         {/* Margin */}
