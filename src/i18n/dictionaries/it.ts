@@ -459,6 +459,11 @@ export const it = {
       hint: "Ogni prodotto viene confrontato con la SUA fonte (KicksDB o GoldenSneakers) dalle cache locali: prezzi, stock e taglie. Vengono calcolate solo le differenze e ti viene mostrata la prova completa — non viene scritto NULLA sullo store finché non premi Applica. SEO, media, descrizioni e categorie non vengono mai toccati.",
       ready: "Prova pronta qui sotto — controlla il riepilogo e premi Applica.",
     },
+    scope: {
+      unpublished: (n: number) =>
+        `Il sync riprezza solo ciò che è già sul negozio. ${n} ${n === 1 ? "prodotto è" : "prodotti sono"} a catalogo ma non ancora pubblicati: creali dalla scheda Pubblica.`,
+      publishLink: "Vai a Pubblica",
+    },
     pull: {
       title: "Stato dello store",
       none: "Nessuno stato dello store — esegui un pull per iniziare.",
@@ -760,6 +765,7 @@ export const it = {
     publishNow: (n: number) => `Pubblica ${n} sul negozio`,
     dryRunFirst: "Fai prima una prova a vuoto della selezione attuale.",
     running: "In corso…",
+    progress: (done: number, total: number) => `In corso… ${done}/${total}`,
     failed: "Pubblicazione fallita",
     dryRunTitle: "Prova a vuoto — nulla è stato scritto",
     liveTitle: "Pubblicazione eseguita",
@@ -775,7 +781,8 @@ export const it = {
     openOnStore: "Apri sul negozio",
     empty:
       "Nessun prodotto da pubblicare: tutto il catalogo è già sul negozio.",
-    truncated: (n: number) => `Mostrati i primi 300 di ${n} — usa la ricerca per restringere.`,
+    truncated: (n: number) =>
+      `Mostrati i primi 300 di ${n} — "Seleziona tutti" li prende comunque tutti e ${n}.`,
   },
   login: {
     heading: "Accedi",

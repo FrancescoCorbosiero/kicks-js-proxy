@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { countCatalog, countStale } from "@/server/catalog/repo";
 import { refreshStaleCatalog } from "@/server/catalog/refresh";
 import {
@@ -165,6 +165,11 @@ export async function runKicksdbRefresh(
 ): Promise<FeedRunResult> {
   const parsed = RunSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
+  // Nothing to refresh on a supplier-feed-only instance: report an empty round
+  // instead of hammering KicksDB with an absent key (and failing the cron).
+  if (!kicksdbConfigured()) {
+    return { ok: true, requested: 0, refreshed: 0, missed: 0, remainingStale: 0 };
+  }
 
   const config = await getActiveConfig();
   const market = config.source.market;

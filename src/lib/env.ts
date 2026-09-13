@@ -6,9 +6,22 @@ import { z } from "zod";
  * or the derived `connectionFromEnv()`. Validated once at module load; a missing
  * or malformed secret fails fast instead of surfacing as a confusing runtime 401.
  */
+/**
+ * An optional secret, tolerant of the way hosting panels and compose files
+ * pass "unset": KICKS_SECRET= with nothing after it is absent, not a
+ * zero-length key that should crash the app at boot.
+ */
+const optionalSecret = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().min(1).optional(),
+);
+
 const EnvSchema = z.object({
   // KicksDB
-  KICKS_SECRET: z.string().min(1, "KICKS_SECRET is required"),
+  // Optional: a shop that sells only supplier-feed products (GoldenSneakers)
+  // has no KicksDB account. Without it every KicksDB-backed path degrades to
+  // "no data from this source" instead of failing the app.
+  KICKS_SECRET: optionalSecret,
   KICKS_BASE_URL: z.url().default("https://api.kicks.dev/v3"),
 
   // WooCommerce REST — powers the live sync (pull store state, push prices).
@@ -64,7 +77,7 @@ export const env: Env = loadEnv();
  */
 export function connectionFromEnv() {
   return {
-    kicksDbApiKey: env.KICKS_SECRET,
+    kicksDbApiKey: env.KICKS_SECRET ?? "",
     woo: {
       baseUrl: env.WOO_BASE_URL ?? "",
       consumerKey: env.WOO_CONSUMER_KEY ?? "",

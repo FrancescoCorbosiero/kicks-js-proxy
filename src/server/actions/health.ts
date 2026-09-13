@@ -1,7 +1,7 @@
 "use server";
 
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 
 export interface KicksPingResult {
   ok: boolean;
@@ -14,6 +14,9 @@ export interface KicksPingResult {
  * a clear message (e.g. 401 invalid key) without touching the store.
  */
 export async function pingKicksDb(): Promise<KicksPingResult> {
+  if (!kicksdbConfigured()) {
+    return { ok: false, message: "KICKS_SECRET is not set — this instance runs on supplier feeds only." };
+  }
   try {
     const config = await getActiveConfig();
     const source = getSource(config);

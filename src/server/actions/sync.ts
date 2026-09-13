@@ -86,16 +86,26 @@ export interface SyncPageState {
   wooConfigured: boolean;
   runningPull: PullProgress | null;
   history: ApplyHistoryEntry[];
+  /**
+   * Catalog products the store does NOT carry yet. The sync reprices what is
+   * on the store, so on a fresh shop it legitimately has almost nothing to do
+   * while hundreds of feed products wait in Publish — a state that reads as a
+   * broken sync unless the page says so out loud.
+   */
+  unpublished: number;
 }
 
 /** Everything the sync page header needs (also used to refresh after actions). */
 export async function getSyncState(): Promise<SyncPageState> {
-  const [latest, history] = await Promise.all([
+  const { listPublishTargets } = await import("@/server/woo/publish");
+  const [latest, history, targets] = await Promise.all([
     getLatestPullRun().catch(() => null),
     listApplyHistory().catch(() => [] as ApplyHistoryEntry[]),
+    listPublishTargets().catch(() => ({ candidates: [] })),
   ]);
   return {
     wooConfigured: wooConfigured(),
+    unpublished: targets.candidates.filter((c) => !c.onStore).length,
     runningPull:
       latest && latest.status === "running"
         ? {

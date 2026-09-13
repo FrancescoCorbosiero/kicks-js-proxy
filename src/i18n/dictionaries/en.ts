@@ -446,6 +446,11 @@ export const en: Dictionary = {
       hint: "Every product is compared against ITS source (KicksDB or GoldenSneakers) from the local caches: prices, stock and sizes. Only the differences are computed and the full dry run is shown — NOTHING is written to the store until you press Apply. SEO, media, descriptions and categories are never touched.",
       ready: "Dry run ready below — review the summary and press Apply.",
     },
+    scope: {
+      unpublished: (n: number) =>
+        `The sync only reprices what the store already carries. ${n} catalog product${n === 1 ? " is" : "s are"} not on the store yet — create them from the Publish tab.`,
+      publishLink: "Go to Publish",
+    },
     pull: {
       title: "Store state",
       none: "No store state yet — run a pull to get started.",
@@ -741,6 +746,7 @@ export const en: Dictionary = {
     publishNow: (n: number) => `Publish ${n} to the store`,
     dryRunFirst: "Dry-run the current selection first.",
     running: "Running…",
+    progress: (done: number, total: number) => `Running… ${done}/${total}`,
     failed: "Publish failed",
     dryRunTitle: "Dry run — nothing was written",
     liveTitle: "Published",
@@ -755,7 +761,8 @@ export const en: Dictionary = {
     unpriced: (n: number) => `${n} unpriced`,
     openOnStore: "Open on the store",
     empty: "Nothing to publish: the whole catalog is already on the store.",
-    truncated: (n: number) => `Showing the first 300 of ${n} — use search to narrow down.`,
+    truncated: (n: number) =>
+      `Showing the first 300 of ${n} — "Select all" still takes all ${n}.`,
   },
   login: {
     heading: "Sign in",

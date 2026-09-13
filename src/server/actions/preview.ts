@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { buildPlan } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { getActiveSnapshot } from "@/server/store-json/repo";
 import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
 import { savePlan, prunePlans } from "@/server/plans/repo";
@@ -11,7 +11,8 @@ import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
-import { overlayGsOwnership } from "@/server/feeds/owner";
+import { gsOwnedProducts, overlayGsOwnership } from "@/server/feeds/owner";
+import { fetchSecondarySource, mergeGsOwned } from "@/server/feeds/ownership";
 import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
@@ -49,6 +50,12 @@ export interface FetchStats {
 export interface PreviewResult {
   ok: boolean;
   error?: string;
+  /**
+   * The run succeeded but a source was degraded — e.g. KicksDB is unreachable
+   * or unconfigured while the feed-owned products came through fine. Shown as
+   * a warning; `ok` stays true because the plans below are real.
+   */
+  warning?: string;
   plans: PreviewPlan[];
   stats?: FetchStats;
 }
@@ -143,10 +150,16 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const ttl = config.source.cacheTtlSeconds;
 
   try {
+    // Without a KicksDB account there is nothing to resolve there: the feed
+    // overlay below is the whole answer, and a query (which only KicksDB can
+    // serve) is simply empty rather than an error.
+    const empty: { products: import("@core/core-spine").SourceProduct[]; fromCache: number; fetched: number; notFound: string[] } =
+      { products: [], fromCache: 0, fetched: 0, notFound: [] };
     // SKU mode resolves through the persistent catalog (smart cache, upsert on
     // fresh fetch). Query mode uses the Redis whole-result cache.
-    const result =
-      parsed.data.mode === "skus"
+    const result = !kicksdbConfigured()
+      ? { ...empty, notFound: parsed.data.mode === "skus" ? [...parsed.data.skus!] : [] }
+      : parsed.data.mode === "skus"
         ? await resolveSkusViaCatalog(source, dbCatalogStore, parsed.data.skus!, market, ttl)
         : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
 
@@ -224,10 +237,26 @@ export async function previewFromStore(
   const overrides = await getOverrides();
 
   try {
+    // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
+    // from the local feed tables, so asking KicksDB about it is pointless at
+    // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
+    // heard of, and a failing batch used to throw and take the whole sync down
+    // with it — the feed sitting right there in the DB, unread.
+    const owned = await gsOwnedProducts(skus, market, overrides);
+    const kicksSkus = skus.filter((s) => !owned.has(skuKey(s)));
+
     // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
     // 50 SKUs -> a 1000-SKU file is ~20 calls, cold or warm. Product names come
     // from the snapshot (the bulk response carries no title/brand).
-    const fetched = await source.getPricesBatch(skus, market);
+    const secondary = await fetchSecondarySource(kicksSkus, {
+      ownedCount: owned.size,
+      configured: kicksdbConfigured(),
+      fetch: (part) => source.getPricesBatch(part, market),
+      describeError: errMessage,
+    });
+    const fetched = secondary.products;
+    const warning = secondary.warning;
+
     const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
     for (const p of fetched) {
       const name = nameBySku.get(skuKey(p.sku));
@@ -236,7 +265,7 @@ export async function previewFromStore(
 
     // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
     // carry is covered by the feed, not missing.
-    const overlaid = await overlayGsOwnership(fetched, skus, market, overrides);
+    const overlaid = mergeGsOwned(fetched, owned);
     const products = overlaid.products;
 
     const returned = new Set(products.map((p) => skuKey(p.sku)));
@@ -262,6 +291,7 @@ export async function previewFromStore(
     const plans = await assemblePlans(products, config, snapshot, market, null, overrides);
     return {
       ok: true,
+      warning,
       plans,
       stats: { products: products.length, fromCache: 0, fetched: products.length, notFound, catalog },
     };
