@@ -28,9 +28,12 @@ interface RunState {
 export function ImportWorkspace({
   defaultMarket,
   initialHistory,
+  kicksdbConfigured,
 }: {
   defaultMarket: string;
   initialHistory: IngestionHistoryEntry[];
+  /** The whole tab is a KicksDB verifier: without a key it has no job. */
+  kicksdbConfigured: boolean;
 }) {
   const { t } = useI18n();
   const [market, setMarket] = React.useState(defaultMarket);
@@ -96,6 +99,14 @@ export function ImportWorkspace({
     } finally {
       setRunning(false);
     }
+  }
+
+  if (!kicksdbConfigured) {
+    return (
+      <div className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-muted">
+        {t.importPage.needsKicksdb}
+      </div>
+    );
   }
 
   return (

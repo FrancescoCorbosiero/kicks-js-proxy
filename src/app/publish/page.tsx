@@ -6,6 +6,10 @@ import { wooSiteUrl } from "@/server/woo/client";
 import { PublishWorkspace } from "@/components/publish/PublishWorkspace";
 
 export const dynamic = "force-dynamic";
+// Publishing is slow work (a parent create + one call per size + media
+// sideload, per product), and the client sends it in batches through a server
+// action hosted by this page — which inherits this page's limit.
+export const maxDuration = 300;
 
 /**
  * The Publish tab — the catalog→store direction the app was missing.

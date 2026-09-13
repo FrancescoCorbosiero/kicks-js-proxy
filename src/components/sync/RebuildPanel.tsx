@@ -25,7 +25,7 @@ interface BulkProgress {
 
 /**
  * The destructive standardization tool: obliterate + re-create the variation
- * sets of chosen products from the KicksDB catalog. Guarded three times: a
+ * sets of chosen products from each product's own source (feed or catalog). Guarded three times: a
  * dry-run gate (live unlocks only for the exact same SKU set), an explicit
  * acknowledgement checkbox, and per-product failure isolation server-side.
  */

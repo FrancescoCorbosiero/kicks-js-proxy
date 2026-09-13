@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PlanItem } from "@core/core-spine";
 import { previewFromStore, type PreviewResult, type FetchStats } from "@/server/actions/preview";
@@ -68,6 +69,9 @@ export function SyncWorkspace({
   // ----- preview -----
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  // A source was degraded but the run still produced real plans (e.g. KicksDB
+  // down or absent while the feed-owned products came through).
+  const [warning, setWarning] = React.useState<string | null>(null);
   const [plans, setPlans] = React.useState<PreviewPlan[]>([]);
   const [stats, setStats] = React.useState<FetchStats | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
@@ -138,6 +142,7 @@ export function SyncWorkspace({
 
   /** Apply a preview result to state, pre-selecting all actionable rows. */
   function applyResult(res: PreviewResult) {
+    setWarning(res.warning ?? null);
     if (!res.ok) {
       setError(res.error ?? "Unknown error");
       setPlans([]);
@@ -542,6 +547,26 @@ export function SyncWorkspace({
       {error && (
         <p className="rounded-lg border border-skip/25 bg-skip/10 px-4 py-3 text-sm text-skip animate-fade-up">
           {error}
+        </p>
+      )}
+
+      {warning && (
+        <p className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm text-warn animate-fade-up">
+          {warning}
+        </p>
+      )}
+
+      {/* The sync's scope is the store, not the catalog: without this line an
+          almost-empty store looks like a broken sync. */}
+      {initialState.unpublished > 0 && (
+        <p className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 px-4 py-3 text-xs text-muted">
+          {t.sync.scope.unpublished(initialState.unpublished)}
+          <Link
+            href="/publish"
+            className="font-semibold text-accent-text underline-offset-2 hover:underline"
+          >
+            {t.sync.scope.publishLink} →
+          </Link>
         </p>
       )}
 

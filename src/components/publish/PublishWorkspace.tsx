@@ -50,6 +50,7 @@ export function PublishWorkspace({
   const [showOnStore, setShowOnStore] = React.useState(false);
   const [busy, startRun] = React.useTransition();
   const [outcome, setOutcome] = React.useState<PublishOutcome | null>(null);
+  const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const missing = React.useMemo(() => candidates.filter((c) => !c.onStore), [candidates]);
@@ -65,11 +66,17 @@ export function PublishWorkspace({
     return { all: pool.length, goldensneakers: gs, kicksdb: kicks };
   }, [candidates, missing, showOnStore]);
 
+  // Both sources represented? Everything provider-specific in this tab hangs
+  // off this: on a single-source shop the labels are noise, not information.
+  const mixedSources = counts.goldensneakers > 0 && counts.kicksdb > 0;
+
   const visible = React.useMemo(() => {
     const q = term.trim().toLowerCase();
     return (showOnStore ? candidates : missing).filter((c) => {
-      if (source === "goldensneakers" && c.source !== "goldensneakers") return false;
-      if (source === "kicksdb" && c.source === "goldensneakers") return false;
+      // With the lens hidden the filter must not linger: a stale "kicksdb"
+      // selection would empty the list with no control left to clear it.
+      if (mixedSources && source === "goldensneakers" && c.source !== "goldensneakers") return false;
+      if (mixedSources && source === "kicksdb" && c.source === "goldensneakers") return false;
       if (!q) return true;
       return (
         c.sku.toLowerCase().includes(q) ||
@@ -77,7 +84,7 @@ export function PublishWorkspace({
         c.brand.toLowerCase().includes(q)
       );
     });
-  }, [candidates, missing, showOnStore, source, term]);
+  }, [candidates, missing, mixedSources, showOnStore, source, term]);
 
   function toggle(sku: string) {
     setOutcome(null);
@@ -91,9 +98,9 @@ export function PublishWorkspace({
 
   function selectAllVisible() {
     setOutcome(null);
-    // Capped at the server's batch limit so the button can never build a
-    // selection the action will reject.
-    setSelected(new Set(visible.slice(0, 200).map((c) => c.sku)));
+    // Everything visible, however many: a selection larger than one server
+    // batch is split into BATCH_SIZE calls by run() below.
+    setSelected(new Set(visible.map((c) => c.sku)));
   }
 
   function clearSelection() {
@@ -101,29 +108,54 @@ export function PublishWorkspace({
     setSelected(new Set());
   }
 
+  /**
+   * One publish call per BATCH_SIZE SKUs. The server action caps a batch at
+   * 200 (and creating hundreds of products in a single request would outlive
+   * the request anyway), so a whole-catalog selection runs as a sequence of
+   * batches whose reports are merged into one outcome. A batch that fails
+   * stops the run and keeps what already went through — the products created
+   * so far are real, and hiding them would send the operator back to wp-admin.
+   */
+  const BATCH_SIZE = 25;
+
   function run(dryRun: boolean) {
     setError(null);
+    const skus = [...selected];
+    setProgress(skus.length > BATCH_SIZE ? { done: 0, total: skus.length } : null);
     startRun(async () => {
-      const res = await runPublish({
-        skus: [...selected],
-        dryRun,
-        includeGallery,
-        force,
-        replaceMedia,
-      });
-      if (!res.ok || !res.outcome) {
-        setError(res.error ?? t.publish.failed);
-        return;
+      let merged: PublishOutcome | null = null;
+      for (let i = 0; i < skus.length; i += BATCH_SIZE) {
+        const batch = skus.slice(i, i + BATCH_SIZE);
+        const res = await runPublish({
+          skus: batch,
+          dryRun,
+          includeGallery,
+          force,
+          replaceMedia,
+        });
+        if (!res.ok || !res.outcome) {
+          setError(res.error ?? t.publish.failed);
+          break;
+        }
+        merged = merged ? mergeOutcomes(merged, res.outcome) : res.outcome;
+        setOutcome(merged);
+        if (skus.length > BATCH_SIZE) {
+          setProgress({ done: Math.min(i + BATCH_SIZE, skus.length), total: skus.length });
+        }
       }
-      setOutcome(res.outcome);
+      setProgress(null);
       // A live run changed the store: re-read the delta so published products
       // leave the list instead of lingering as phantom candidates.
-      if (!dryRun) {
+      if (!dryRun && merged) {
         setSelected(new Set());
         router.refresh();
       }
     });
   }
+
+  const runningLabel = progress
+    ? t.publish.progress(progress.done, progress.total)
+    : t.publish.running;
 
   // The live button unlocks only after a dry run of the CURRENT selection.
   const dryRunSeen =
@@ -150,20 +182,24 @@ export function PublishWorkspace({
       {/* Delta summary + source lens */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
         <span className="text-sm font-semibold">{t.publish.deltaTitle(missing.length)}</span>
-        <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-2 p-0.5">
-          {(["all", "goldensneakers", "kicksdb"] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSource(key)}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                source === key ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
-              }`}
-            >
-              {t.publish.sourceTabs[key]} ({counts[key]})
-            </button>
-          ))}
-        </div>
+        {/* A lens over the sources this shop actually has: a single-source
+            catalog gets no "StockX (0)" tab to filter by. */}
+        {mixedSources && (
+          <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-2 p-0.5">
+            {(["all", "goldensneakers", "kicksdb"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSource(key)}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  source === key ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
+                }`}
+              >
+                {t.publish.sourceTabs[key]} ({counts[key]})
+              </button>
+            ))}
+          </div>
+        )}
         <Input
           aria-label={t.publish.searchPlaceholder}
           placeholder={t.publish.searchPlaceholder}
@@ -241,7 +277,7 @@ export function PublishWorkspace({
             onClick={() => run(true)}
             disabled={busy || selected.size === 0}
           >
-            {busy ? t.publish.running : t.publish.dryRun(selected.size)}
+            {busy ? runningLabel : t.publish.dryRun(selected.size)}
           </Button>
           <Button
             type="button"
@@ -250,7 +286,7 @@ export function PublishWorkspace({
             disabled={busy || selected.size === 0 || !dryRunSeen}
             title={!dryRunSeen ? t.publish.dryRunFirst : undefined}
           >
-            {busy ? t.publish.running : t.publish.publishNow(selected.size)}
+            {busy ? runningLabel : t.publish.publishNow(selected.size)}
           </Button>
           {!dryRunSeen && selected.size > 0 && (
             <span className="text-[11px] text-faint">{t.publish.dryRunFirst}</span>
@@ -302,9 +338,11 @@ export function PublishWorkspace({
                   <div>{t.publish.sizes(c.variantCount)}</div>
                   {c.minAsk != null && <div className="text-faint">{t.publish.from(eur.format(c.minAsk))}</div>}
                 </div>
-                <Badge variant={c.source === "goldensneakers" ? "create" : "update"}>
-                  {c.source === "goldensneakers" ? "GS" : "StockX"}
-                </Badge>
+                {mixedSources && (
+                  <Badge variant={c.source === "goldensneakers" ? "create" : "update"}>
+                    {c.source === "goldensneakers" ? "GS" : "StockX"}
+                  </Badge>
+                )}
                 {c.onStore && <Badge variant="skip">{t.publish.alreadyOnStore}</Badge>}
               </label>
             </li>
@@ -316,6 +354,24 @@ export function PublishWorkspace({
       )}
     </div>
   );
+}
+
+/**
+ * Fold a batch's outcome into the running one: reports concatenate, counters
+ * add up, and the audit id shown is the first batch's (each batch writes its
+ * own audit row — the operator sees one list, the history keeps the detail).
+ */
+function mergeOutcomes(a: PublishOutcome, b: PublishOutcome): PublishOutcome {
+  return {
+    ...a,
+    status: b.status === "failed" || a.status === "failed" ? "failed" : a.status,
+    products: [...a.products, ...b.products],
+    created: a.created + b.created,
+    reimported: a.reimported + b.reimported,
+    variations: a.variations + b.variations,
+    skipped: a.skipped + b.skipped,
+    failed: a.failed + b.failed,
+  };
 }
 
 /** What a run did (or would do), product by product. */

@@ -5,14 +5,15 @@ import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 
 interface Props {
-  foundSkus: string[]; // the actual KicksDB products (clean list, without the misses)
-  notFound: string[]; // SKUs from the file that aren't fetchable on StockX
+  foundSkus: string[]; // SKUs a source could price (clean list, without the misses)
+  notFound: string[]; // SKUs no configured source covers
 }
 
 /**
- * Replaces the old "Non trovati su StockX: <giant comma list>" banner: a compact
- * card with the counts and copy buttons, so a 1000-SKU file doesn't dump hundreds
- * of codes into the page.
+ * A compact card with the counts and copy buttons, so a 1000-SKU file doesn't
+ * dump hundreds of codes into the page. Deliberately source-neutral: a miss
+ * means no CONFIGURED source covers the SKU — which on a supplier-only shop
+ * has nothing to do with StockX.
  */
 export function NotFoundCard({ foundSkus, notFound }: Props) {
   const { t } = useI18n();

@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { countCatalog, countStale } from "@/server/catalog/repo";
 import { refreshStaleCatalog } from "@/server/catalog/refresh";
 import {
@@ -34,6 +34,8 @@ export interface FeedsState {
   catalogTotal: number;
   staleCount: number;
   ttlSeconds: number;
+  /** False on a supplier-feed-only instance: the KicksDB card is inert. */
+  kicksdbConfigured: boolean;
   lastRuns: IngestionHistoryEntry[];
   gs: GsFeedState;
   scheduler: import("@/server/scheduler").SchedulerStatus;
@@ -59,6 +61,7 @@ export async function getFeedsState(): Promise<FeedsState> {
     catalogTotal,
     staleCount,
     ttlSeconds: ttl,
+    kicksdbConfigured: kicksdbConfigured(),
     lastRuns,
     gs: {
       configured: gsConfigured(),
@@ -165,6 +168,11 @@ export async function runKicksdbRefresh(
 ): Promise<FeedRunResult> {
   const parsed = RunSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
+  // Nothing to refresh on a supplier-feed-only instance: report an empty round
+  // instead of hammering KicksDB with an absent key (and failing the cron).
+  if (!kicksdbConfigured()) {
+    return { ok: true, requested: 0, refreshed: 0, missed: 0, remainingStale: 0 };
+  }
 
   const config = await getActiveConfig();
   const market = config.source.market;

@@ -11,6 +11,7 @@ import {
   ownerPinFor,
 } from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
+import { kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { getActiveSnapshot } from "@/server/store-json/repo";
 import {
   hasActiveSale,
@@ -82,6 +83,12 @@ export interface DrawerData {
   gsCovered: boolean;
   /** The operator pinned this product back to StockX/KicksDB pricing. */
   pinnedToKicksdb: boolean;
+  /**
+   * KicksDB is configured on this instance. Without it, pinning a product
+   * away from the feed would leave it with NO source at all — the switch has
+   * to say so instead of offering a one-way trip.
+   */
+  kicksdbAvailable: boolean;
   variants: DrawerVariant[];
   /** The margin rule the proposed prices come from; null when nothing prices it. */
   appliedRule: AppliedRule | null;
@@ -235,6 +242,7 @@ export async function loadDrawerData(
     owner: gs ? "goldensneakers" : storeOnly ? "woo" : "kicksdb",
     gsCovered: covered != null,
     pinnedToKicksdb: pin === "kicksdb",
+    kicksdbAvailable: kicksdbConfigured(),
     variants,
     appliedRule: (() => {
       // With several rules in play, name the most specific one — that is the

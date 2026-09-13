@@ -1,6 +1,6 @@
 import "server-only";
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { skuKey } from "@/lib/skus";
 import { listSkusMissingMetadata, touchCatalogSkus, upsertCatalog } from "./repo";
 
@@ -23,6 +23,9 @@ export interface EnrichOutcome {
 const CONCURRENCY = 4;
 
 export async function backfillCatalogMetadata(limit: number): Promise<EnrichOutcome> {
+  // The backfill reads product metadata off KicksDB; with no key there is
+  // nothing to enrich from (feed rows arrive complete).
+  if (!kicksdbConfigured()) return { scanned: 0, enriched: 0, missed: 0 };
   const config = await getActiveConfig();
   const market = config.source.market;
 

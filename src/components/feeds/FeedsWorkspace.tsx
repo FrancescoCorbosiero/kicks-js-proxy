@@ -63,7 +63,11 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
       {/* Registry: the built-in feed */}
       <section className="rounded-xl border border-line bg-surface p-4 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-text">
+          <span
+            className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+              state.kicksdbConfigured ? "bg-accent/15 text-accent-text" : "bg-surface-2 text-faint"
+            }`}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[18px] w-[18px]">
               <path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" />
               <circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none" />
@@ -87,7 +91,7 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
               type="button"
               variant="accent"
               onClick={runNow}
-              disabled={running || state.staleCount === 0}
+              disabled={running || state.staleCount === 0 || !state.kicksdbConfigured}
             >
               {running ? (
                 <>
@@ -101,6 +105,9 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
           </div>
         </div>
 
+        {!state.kicksdbConfigured && (
+          <p className="mt-2 text-xs text-faint">{t.feeds.kicksdb.notConfigured}</p>
+        )}
         {progress && (
           <div className="mt-3 flex items-center gap-3 border-t border-line pt-3 text-xs text-muted tnum animate-fade-up">
             <span className="text-up">{t.feeds.progressRefreshed(progress.refreshed)}</span>

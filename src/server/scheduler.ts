@@ -1,12 +1,13 @@
 import { env } from "@/lib/env";
 import { runKicksdbRefresh } from "@/server/actions/feeds";
+import { kicksdbConfigured } from "@/server/adapters/kicksdb";
 
 /**
  * In-app scheduler: the app syncs itself, no external cron needed.
  * Started once per server boot from src/instrumentation.ts. Once a day
  * (first tick a minute after boot) it runs the GoldenSneakers complete
- * sync, then a KicksDB re-pricing pass so whatever the sync registered
- * gets priced immediately.
+ * sync, then — where KicksDB is configured — a re-pricing pass so whatever
+ * the sync registered gets priced immediately.
  *
  * On by default in production, off in dev; SCHEDULER=on|off overrides.
  * Needs a long-running server (`next start`, Docker) — a serverless
@@ -91,9 +92,15 @@ async function tick(): Promise<void> {
         console.error(`[scheduler] GS sync failed: ${message}`);
       }
     }
-    const refresh = await refreshCatalog();
-    s.lastRefreshed = refresh.refreshed;
-    if (refresh.error) errors.push(`KicksDB refresh: ${refresh.error}`);
+    // The re-pricing pass exists only where KicksDB does; a supplier-feed-only
+    // instance gets its prices from the feed sync above and nothing else.
+    if (kicksdbConfigured()) {
+      const refresh = await refreshCatalog();
+      s.lastRefreshed = refresh.refreshed;
+      if (refresh.error) errors.push(`KicksDB refresh: ${refresh.error}`);
+    } else {
+      s.lastRefreshed = null;
+    }
 
     // Drain a slice of the metadata-backfill queue (rows imported before the
     // catalog stored category/gender/gallery). Bounded so one tick never

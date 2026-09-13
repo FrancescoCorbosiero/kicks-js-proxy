@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { listCatalogEntries, upsertCatalog } from "@/server/catalog/repo";
 import { skuKey } from "@/lib/skus";
 import type { CatalogItem } from "@/lib/catalog";
@@ -56,6 +56,9 @@ export async function refreshCatalogProduct(
   const parsed = RefreshSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
 
+  if (!kicksdbConfigured()) {
+    return { ok: false, error: "KicksDB is not configured on this instance — this product's truth is its supplier feed." };
+  }
   try {
     const config = await getActiveConfig();
     const source = getSource(config);

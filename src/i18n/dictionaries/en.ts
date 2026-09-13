@@ -173,10 +173,10 @@ export const en: Dictionary = {
     updates: (n) => `Updates (${n})`,
     new: (n) => `New (${n})`,
     exactMatch: "Exact match",
-    notFound: "Not found on StockX:",
+    notFound: "No source:",
     notFoundCard: {
-      title: "SKUs not found on StockX",
-      desc: "These SKUs from the file aren't on KicksDB and were excluded from the preview.",
+      title: "SKUs with no source",
+      desc: "No configured source covers these SKUs — neither the supplier feed nor KicksDB — so they are excluded from the preview.",
       found: (n) => `${n} fetched`,
       missing: (n) => `${n} not found`,
       copyClean: (n) => `Copy fetched SKUs (${n})`,
@@ -377,6 +377,8 @@ export const en: Dictionary = {
     sourceTitle: "Who decides this product's prices",
     sourceGs: "Supplier",
     sourceKicksdb: "StockX",
+    sourceKicksdbUnavailable:
+      "KICKS_SECRET is not set: without KicksDB this product would be left with no prices.",
     sourceGsHint:
       "Sizes, prices and stock come from the GoldenSneakers supplier price list (automatic).",
     sourceKicksdbHint:
@@ -446,6 +448,11 @@ export const en: Dictionary = {
       hint: "Every product is compared against ITS source (KicksDB or GoldenSneakers) from the local caches: prices, stock and sizes. Only the differences are computed and the full dry run is shown — NOTHING is written to the store until you press Apply. SEO, media, descriptions and categories are never touched.",
       ready: "Dry run ready below — review the summary and press Apply.",
     },
+    scope: {
+      unpublished: (n: number) =>
+        `The sync only reprices what the store already carries. ${n} catalog product${n === 1 ? " is" : "s are"} not on the store yet — create them from the Publish tab.`,
+      publishLink: "Go to Publish",
+    },
     pull: {
       title: "Store state",
       none: "No store state yet — run a pull to get started.",
@@ -498,7 +505,7 @@ export const en: Dictionary = {
     rebuild: {
       title: "Product rebuild",
       tag: "destructive — deletes and re-creates variations",
-      desc: "For unrecoverable products: deletes ALL existing variations and re-creates them from the KicksDB catalog (canonical sizes, standard SKUs, GTINs, banded prices). The parent product is untouched: SEO, media, categories and swatches stay. Existing variation meta is carried over to the matching size; the parent's pa_taglia attribute is reconstructed even when empty.",
+      desc: "For unrecoverable products: deletes ALL existing variations and re-creates them from the product's own source — the supplier feed when it covers the product, the catalog otherwise (canonical sizes, standard SKUs, GTINs, banded prices). The parent product is untouched: SEO, media, categories and swatches stay. Existing variation meta is carried over to the matching size; the parent's pa_taglia attribute is reconstructed even when empty.",
       usePreview: (n) => `Use the ${n} previewed products`,
       rebuild: (n) => `Rebuild ${n} ${n === 1 ? "product" : "products"}`,
       rebuilding: "Rebuilding…",
@@ -560,7 +567,7 @@ export const en: Dictionary = {
     scheduler: {
       name: "Automatic sync",
       tag: "1×/day",
-      desc: "The server syncs itself once a day: complete GoldenSneakers feed, then a KicksDB re-pricing pass.",
+      desc: "The server syncs itself once a day: every configured feed, then a re-pricing pass for the sources that have one.",
       on: "On",
       off: "Off",
       offHint: "Turns on in production with the server; SCHEDULER=on forces it in dev too.",
@@ -572,6 +579,8 @@ export const en: Dictionary = {
     },
     kicksdb: {
       name: "KicksDB refresh",
+      notConfigured:
+        "KICKS_SECRET is not set — this instance runs on supplier feeds only. Set the key to enable StockX prices.",
       desc: (ttl) =>
         `Re-prices catalog entries older than ${Math.round(ttl / 60)} minutes via the bulk endpoint (50 SKUs per call).`,
       stale: (stale, total) => `${stale} of ${total} stale`,
@@ -598,6 +607,8 @@ export const en: Dictionary = {
     },
   },
   importPage: {
+    needsKicksdb:
+      "This tab verifies every SKU on KicksDB before adding it, but KICKS_SECRET is not set. On a supplier-feed-only instance the catalog grows by itself on every feed sync — there is nothing to import here.",
     title: "Import",
     desc: "Add SKUs to the catalog: manual entry or a file. Every new SKU is verified on KicksDB before it joins — the catalog only ever grows with fetchable products.",
     manualTitle: "Manual entry",
@@ -741,6 +752,7 @@ export const en: Dictionary = {
     publishNow: (n: number) => `Publish ${n} to the store`,
     dryRunFirst: "Dry-run the current selection first.",
     running: "Running…",
+    progress: (done: number, total: number) => `Running… ${done}/${total}`,
     failed: "Publish failed",
     dryRunTitle: "Dry run — nothing was written",
     liveTitle: "Published",
@@ -755,7 +767,8 @@ export const en: Dictionary = {
     unpriced: (n: number) => `${n} unpriced`,
     openOnStore: "Open on the store",
     empty: "Nothing to publish: the whole catalog is already on the store.",
-    truncated: (n: number) => `Showing the first 300 of ${n} — use search to narrow down.`,
+    truncated: (n: number) =>
+      `Showing the first 300 of ${n} — "Select all" still takes all ${n}.`,
   },
   login: {
     heading: "Sign in",

@@ -3,6 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import { ownerPinFor, type StoreOverrides } from "@/server/overrides/model";
 import { skuKey } from "@/lib/skus";
 import { gsOffersToSource, type GsOffer } from "./goldensneakers-model";
+import { mergeGsOwned, type GsOwnedProduct } from "./ownership";
 import { GS_FEED, knownOffersBySku } from "./repo";
 import type { FeedItemRow } from "@/server/db/schema";
 
@@ -32,14 +33,6 @@ function rowToOffer(r: FeedItemRow): GsOffer {
     image: r.image,
     raw: r.raw,
   };
-}
-
-export interface GsOwnedProduct {
-  product: SourceProduct;
-  /** euNorm → available quantity (real stock, unlike KicksDB's sell-on-demand). */
-  stockBySize: Record<string, number>;
-  /** Every size GS has EVER listed for this SKU — the takeover keep-set. */
-  knownSizes: Set<string>;
 }
 
 /**
@@ -72,9 +65,8 @@ export async function gsOwnedProducts(
 }
 
 /**
- * Overlay ownership onto a fetched product list: GS-owned SKUs replace their
- * KicksDB product (or are appended when KicksDB had nothing). Returns the new
- * list plus the owned set for reporting.
+ * Resolve ownership for `skus` and overlay it onto a fetched product list.
+ * Convenience for callers that query KicksDB before knowing who owns what.
  */
 export async function overlayGsOwnership(
   products: SourceProduct[],
@@ -82,29 +74,8 @@ export async function overlayGsOwnership(
   market: string,
   overrides: StoreOverrides | null,
 ): Promise<{ products: SourceProduct[]; gsSkus: Set<string> }> {
-  const owned = await gsOwnedProducts(skus, market, overrides);
-  if (owned.size === 0) return { products, gsSkus: new Set() };
-
-  const out: SourceProduct[] = [];
-  const replaced = new Set<string>();
-  for (const p of products) {
-    const gs = owned.get(skuKey(p.sku));
-    if (gs) {
-      // Keep the richer KicksDB identity (title/brand/image) when present —
-      // only the VARIANTS and pricing source come from the feed.
-      out.push({
-        ...gs.product,
-        title: p.title || gs.product.title,
-        brand: p.brand || gs.product.brand,
-        image: p.image || gs.product.image,
-      });
-      replaced.add(skuKey(p.sku));
-    } else {
-      out.push(p);
-    }
-  }
-  for (const [sku, gs] of owned) {
-    if (!replaced.has(sku)) out.push(gs.product); // GS-only: KicksDB had nothing
-  }
-  return { products: out, gsSkus: new Set(owned.keys()) };
+  return mergeGsOwned(products, await gsOwnedProducts(skus, market, overrides));
 }
+
+export { mergeGsOwned, fetchSecondarySource } from "./ownership";
+export type { GsOwnedProduct } from "./ownership";
