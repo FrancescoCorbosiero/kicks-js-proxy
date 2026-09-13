@@ -210,19 +210,26 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
               re-sync, no sale rule, no plan-based sync). */}
           {data.owner !== "woo" && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
-            <Button type="button" variant="accent" size="sm" onClick={resync} disabled={refreshing}>
-              {refreshing ? (
-                <>
-                  <span className="spin h-3.5 w-3.5 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
-                  {t.drawer.refreshing}
-                </>
-              ) : (
-                t.drawer.refresh
-              )}
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={runAudit} disabled={auditing}>
-              {auditing ? t.drawer.auditRunning : t.drawer.audit}
-            </Button>
+            {/* Re-syncing pulls from KicksDB: without it the button could
+                only ever fail, so it is not offered. */}
+            {data.kicksdbAvailable && (
+              <Button type="button" variant="accent" size="sm" onClick={resync} disabled={refreshing}>
+                {refreshing ? (
+                  <>
+                    <span className="spin h-3.5 w-3.5 rounded-full border-2 border-accent-fg/30 border-t-accent-fg" />
+                    {t.drawer.refreshing}
+                  </>
+                ) : (
+                  t.drawer.refresh
+                )}
+              </Button>
+            )}
+            {/* The audit compares against live KicksDB endpoints. */}
+            {data.kicksdbAvailable && (
+              <Button type="button" variant="outline" size="sm" onClick={runAudit} disabled={auditing}>
+                {auditing ? t.drawer.auditRunning : t.drawer.audit}
+              </Button>
+            )}
             <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted" title={t.product.saleRuleHint}>
               <input
                 type="checkbox"
@@ -248,9 +255,11 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
           {/* Price audit: live per-size comparison of every price source. */}
           {audit && <AuditPanel audit={audit} />}
 
-          {/* Price source: who decides this product's prices. Only shown when
-              the supplier feed actually covers the SKU, so the choice is real. */}
-          {data.gsCovered && (
+          {/* Price source: who decides this product's prices. Shown when the
+              supplier feed covers the SKU AND there is a second source to
+              switch to — or when the product is already pinned to one, so the
+              operator can always switch back. */}
+          {data.gsCovered && (data.kicksdbAvailable || data.pinnedToKicksdb) && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold">{t.drawer.sourceTitle}</div>
@@ -271,8 +280,9 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
                 </button>
                 <button
                   type="button"
-                  disabled={pinSaving}
-                  onClick={() => !data.pinnedToKicksdb && savePin("kicksdb")}
+                  disabled={pinSaving || !data.kicksdbAvailable}
+                  title={!data.kicksdbAvailable ? t.drawer.sourceKicksdbUnavailable : undefined}
+                  onClick={() => !data.pinnedToKicksdb && data.kicksdbAvailable && savePin("kicksdb")}
                   className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                     data.pinnedToKicksdb ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
                   }`}

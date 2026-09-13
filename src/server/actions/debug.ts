@@ -9,7 +9,7 @@ import {
 } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot } from "@/server/store-json/repo";
-import { getSource } from "@/server/adapters/kicksdb";
+import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { getCatalogEntry } from "@/server/catalog/repo";
 import {
   parsePrice,
@@ -168,6 +168,11 @@ interface RawBulkRow {
 export async function auditPrices(input: { sku: string }): Promise<PriceAuditResult> {
   const sku = (input?.sku ?? "").trim();
   if (!sku) return { ok: false, error: "missing sku" };
+  // The audit's whole point is comparing the store against the LIVE KicksDB
+  // endpoints; with no key there is nothing to compare against.
+  if (!kicksdbConfigured()) {
+    return { ok: false, error: "KicksDB is not configured on this instance — there are no live StockX prices to audit against." };
+  }
 
   try {
     const config = await getActiveConfig();

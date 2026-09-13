@@ -66,11 +66,17 @@ export function PublishWorkspace({
     return { all: pool.length, goldensneakers: gs, kicksdb: kicks };
   }, [candidates, missing, showOnStore]);
 
+  // Both sources represented? Everything provider-specific in this tab hangs
+  // off this: on a single-source shop the labels are noise, not information.
+  const mixedSources = counts.goldensneakers > 0 && counts.kicksdb > 0;
+
   const visible = React.useMemo(() => {
     const q = term.trim().toLowerCase();
     return (showOnStore ? candidates : missing).filter((c) => {
-      if (source === "goldensneakers" && c.source !== "goldensneakers") return false;
-      if (source === "kicksdb" && c.source === "goldensneakers") return false;
+      // With the lens hidden the filter must not linger: a stale "kicksdb"
+      // selection would empty the list with no control left to clear it.
+      if (mixedSources && source === "goldensneakers" && c.source !== "goldensneakers") return false;
+      if (mixedSources && source === "kicksdb" && c.source === "goldensneakers") return false;
       if (!q) return true;
       return (
         c.sku.toLowerCase().includes(q) ||
@@ -78,7 +84,7 @@ export function PublishWorkspace({
         c.brand.toLowerCase().includes(q)
       );
     });
-  }, [candidates, missing, showOnStore, source, term]);
+  }, [candidates, missing, mixedSources, showOnStore, source, term]);
 
   function toggle(sku: string) {
     setOutcome(null);
@@ -176,20 +182,24 @@ export function PublishWorkspace({
       {/* Delta summary + source lens */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
         <span className="text-sm font-semibold">{t.publish.deltaTitle(missing.length)}</span>
-        <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-2 p-0.5">
-          {(["all", "goldensneakers", "kicksdb"] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSource(key)}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                source === key ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
-              }`}
-            >
-              {t.publish.sourceTabs[key]} ({counts[key]})
-            </button>
-          ))}
-        </div>
+        {/* A lens over the sources this shop actually has: a single-source
+            catalog gets no "StockX (0)" tab to filter by. */}
+        {mixedSources && (
+          <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-2 p-0.5">
+            {(["all", "goldensneakers", "kicksdb"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSource(key)}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  source === key ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
+                }`}
+              >
+                {t.publish.sourceTabs[key]} ({counts[key]})
+              </button>
+            ))}
+          </div>
+        )}
         <Input
           aria-label={t.publish.searchPlaceholder}
           placeholder={t.publish.searchPlaceholder}
@@ -328,9 +338,11 @@ export function PublishWorkspace({
                   <div>{t.publish.sizes(c.variantCount)}</div>
                   {c.minAsk != null && <div className="text-faint">{t.publish.from(eur.format(c.minAsk))}</div>}
                 </div>
-                <Badge variant={c.source === "goldensneakers" ? "create" : "update"}>
-                  {c.source === "goldensneakers" ? "GS" : "StockX"}
-                </Badge>
+                {mixedSources && (
+                  <Badge variant={c.source === "goldensneakers" ? "create" : "update"}>
+                    {c.source === "goldensneakers" ? "GS" : "StockX"}
+                  </Badge>
+                )}
                 {c.onStore && <Badge variant="skip">{t.publish.alreadyOnStore}</Badge>}
               </label>
             </li>

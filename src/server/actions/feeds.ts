@@ -34,6 +34,8 @@ export interface FeedsState {
   catalogTotal: number;
   staleCount: number;
   ttlSeconds: number;
+  /** False on a supplier-feed-only instance: the KicksDB card is inert. */
+  kicksdbConfigured: boolean;
   lastRuns: IngestionHistoryEntry[];
   gs: GsFeedState;
   scheduler: import("@/server/scheduler").SchedulerStatus;
@@ -59,6 +61,7 @@ export async function getFeedsState(): Promise<FeedsState> {
     catalogTotal,
     staleCount,
     ttlSeconds: ttl,
+    kicksdbConfigured: kicksdbConfigured(),
     lastRuns,
     gs: {
       configured: gsConfigured(),

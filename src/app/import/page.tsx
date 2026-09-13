@@ -4,6 +4,7 @@ import { assertSchemaCurrent } from "@/server/db/probe";
 import { getActiveConfig } from "@/server/config/repo";
 import { listIngestionRuns } from "@/server/ingestion/repo";
 import { getServerDictionary } from "@/i18n/server";
+import { kicksdbConfigured } from "@/server/adapters/kicksdb";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,11 @@ export default async function ImportPage() {
         <h1 className="mt-1 text-2xl font-bold tracking-tight">{t.importPage.title}</h1>
         <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">{t.importPage.desc}</p>
       </div>
-      <ImportWorkspace defaultMarket={config.source.market} initialHistory={history} />
+      <ImportWorkspace
+        defaultMarket={config.source.market}
+        initialHistory={history}
+        kicksdbConfigured={kicksdbConfigured()}
+      />
     </main>
   );
 }

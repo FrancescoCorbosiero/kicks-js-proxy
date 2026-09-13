@@ -294,27 +294,36 @@ export default async function CatalogPage({
                 label={t.discovery.tabs.all}
                 count={ownerCounts.total}
               />
-              <SourceTab
-                href={ownerLink("kicksdb")}
-                active={activeOwner === "kicksdb"}
-                label={t.discovery.tabs.kicksdb}
-                count={ownerCounts.kicksdb}
-                hint={t.discovery.tabs.kicksdbHint}
-              />
-              <SourceTab
-                href={ownerLink("goldensneakers")}
-                active={activeOwner === "goldensneakers"}
-                label={t.discovery.tabs.goldensneakers}
-                count={ownerCounts.goldensneakers}
-                hint={t.discovery.tabs.goldensneakersHint}
-              />
-              <SourceTab
-                href={ownerLink("woo")}
-                active={activeOwner === "woo"}
-                label={t.discovery.tabs.woo}
-                count={ownerCounts.woo}
-                hint={t.discovery.tabs.wooHint}
-              />
+              {/* A lens per source the catalog actually holds. An empty one
+                  filters to nothing, so it is only kept when it is the active
+                  selection (otherwise the URL would point at a missing tab). */}
+              {(ownerCounts.kicksdb > 0 || activeOwner === "kicksdb") && (
+                <SourceTab
+                  href={ownerLink("kicksdb")}
+                  active={activeOwner === "kicksdb"}
+                  label={t.discovery.tabs.kicksdb}
+                  count={ownerCounts.kicksdb}
+                  hint={t.discovery.tabs.kicksdbHint}
+                />
+              )}
+              {(ownerCounts.goldensneakers > 0 || activeOwner === "goldensneakers") && (
+                <SourceTab
+                  href={ownerLink("goldensneakers")}
+                  active={activeOwner === "goldensneakers"}
+                  label={t.discovery.tabs.goldensneakers}
+                  count={ownerCounts.goldensneakers}
+                  hint={t.discovery.tabs.goldensneakersHint}
+                />
+              )}
+              {(ownerCounts.woo > 0 || activeOwner === "woo") && (
+                <SourceTab
+                  href={ownerLink("woo")}
+                  active={activeOwner === "woo"}
+                  label={t.discovery.tabs.woo}
+                  count={ownerCounts.woo}
+                  hint={t.discovery.tabs.wooHint}
+                />
+              )}
             </div>
             {genders.length > 0 && (
               <div className="flex items-center gap-1.5" aria-label={t.discovery.genderLabel}>

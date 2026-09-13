@@ -181,10 +181,10 @@ export const it = {
     updates: (n: number) => `Aggiornamenti (${n})`,
     new: (n: number) => `Nuovi (${n})`,
     exactMatch: "Match esatto",
-    notFound: "Non trovati su StockX:",
+    notFound: "Senza fonte:",
     notFoundCard: {
-      title: "SKU non trovati su StockX",
-      desc: "Questi SKU del file non risultano su KicksDB e sono stati esclusi dall'anteprima.",
+      title: "SKU senza fonte",
+      desc: "Nessuna fonte configurata copre questi SKU — né il listino fornitore né KicksDB — quindi sono esclusi dall'anteprima.",
       found: (n: number) => `${n} recuperati`,
       missing: (n: number) => `${n} non trovati`,
       copyClean: (n: number) => `Copia SKU recuperati (${n})`,
@@ -386,6 +386,8 @@ export const it = {
     sourceTitle: "Chi decide i prezzi di questo prodotto",
     sourceGs: "Fornitore",
     sourceKicksdb: "StockX",
+    sourceKicksdbUnavailable:
+      "KICKS_SECRET non impostata: senza KicksDB questo prodotto resterebbe senza prezzi.",
     sourceGsHint:
       "Taglie, prezzi e stock arrivano dal listino del fornitore GoldenSneakers (automatico).",
     sourceKicksdbHint:
@@ -517,7 +519,7 @@ export const it = {
     rebuild: {
       title: "Ricostruzione prodotti",
       tag: "distruttiva — elimina e ricrea le varianti",
-      desc: "Per i prodotti irrecuperabili: elimina TUTTE le varianti esistenti e le ricrea dal catalogo KicksDB (taglie canoniche, SKU standard, GTIN, prezzi a fasce). Il prodotto padre non viene toccato: SEO, media, categorie e swatch restano. I meta delle varianti esistenti vengono riportati sulla taglia corrispondente; l'attributo pa_taglia del padre viene ricostruito anche se vuoto.",
+      desc: "Per i prodotti irrecuperabili: elimina TUTTE le varianti esistenti e le ricrea dalla fonte del prodotto — il listino fornitore se lo copre, altrimenti il catalogo (taglie canoniche, SKU standard, GTIN, prezzi a fasce). Il prodotto padre non viene toccato: SEO, media, categorie e swatch restano. I meta delle varianti esistenti vengono riportati sulla taglia corrispondente; l'attributo pa_taglia del padre viene ricostruito anche se vuoto.",
       usePreview: (n: number) => `Usa i ${n} prodotti in anteprima`,
       rebuild: (n: number) => `Ricostruisci ${n} ${n === 1 ? "prodotto" : "prodotti"}`,
       rebuilding: "Ricostruzione…",
@@ -580,7 +582,7 @@ export const it = {
     scheduler: {
       name: "Sincronizzazione automatica",
       tag: "1×/giorno",
-      desc: "Il server esegue da solo una sincronizzazione al giorno: feed GoldenSneakers completo, poi ri-prezzatura KicksDB.",
+      desc: "Il server esegue da solo una sincronizzazione al giorno: tutti i listini configurati, poi la ri-prezzatura delle fonti che la prevedono.",
       on: "Attiva",
       off: "Spenta",
       offHint:
@@ -593,6 +595,8 @@ export const it = {
     },
     kicksdb: {
       name: "Aggiornamento KicksDB",
+      notConfigured:
+        "KICKS_SECRET non impostata — questa istanza lavora solo sui listini fornitore. Imposta la chiave per attivare i prezzi StockX.",
       desc: (ttl: number) =>
         `Ri-prezza le voci del catalogo più vecchie di ${Math.round(ttl / 60)} minuti tramite l'endpoint bulk (50 SKU per chiamata).`,
       stale: (stale: number, total: number) => `${stale} di ${total} da aggiornare`,
@@ -620,6 +624,8 @@ export const it = {
     },
   },
   importPage: {
+    needsKicksdb:
+      "Questa scheda verifica ogni SKU su KicksDB prima di aggiungerlo, ma KICKS_SECRET non è impostata. Su un'istanza a soli listini fornitore il catalogo cresce da solo a ogni sincronizzazione del feed — non serve importare nulla qui.",
     title: "Importa",
     desc: "Aggiungi SKU al catalogo: inserimento manuale o file. Ogni SKU nuovo viene verificato su KicksDB prima di entrare — il catalogo cresce soltanto con prodotti recuperabili.",
     manualTitle: "Inserimento manuale",

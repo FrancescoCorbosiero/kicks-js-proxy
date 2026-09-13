@@ -85,8 +85,16 @@ export default async function Home() {
           cta={d.catalogCardCta}
           lines={[
             `${data.catalog.total} ${d.statCatalog.toLowerCase()}`,
-            `${data.catalog.kicksdb} ${d.statKicksdb} · ${data.catalog.goldensneakers} ${d.statGs} · ${data.catalog.woo} ${d.statWoo}`,
-          ]}
+            // Only the sources this shop actually has: a supplier-only
+            // catalog has no reason to report "0 with StockX prices".
+            [
+              data.catalog.kicksdb > 0 ? `${data.catalog.kicksdb} ${d.statKicksdb}` : "",
+              data.catalog.goldensneakers > 0 ? `${data.catalog.goldensneakers} ${d.statGs}` : "",
+              data.catalog.woo > 0 ? `${data.catalog.woo} ${d.statWoo}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          ].filter(Boolean)}
         />
         <ActionCard
           href="/import"
