@@ -78,12 +78,46 @@ describe("resolveGsImage", () => {
     );
   });
 
+  it("completes a site-relative folder path against the GS origin", () => {
+    // The row from the screenshot: image_full_url is a bare path, image_name
+    // the file. Before the fix new URL() threw → "" → product with no picture.
+    expect(
+      resolveGsImage("/images/IH6001/main/", "Screenshot_2026-08-24_at_12.25.46.png"),
+    ).toBe(
+      "https://www.goldensneakers.net/images/IH6001/main/Screenshot_2026-08-24_at_12.25.46.png",
+    );
+  });
+
+  it("completes a site-relative path with no leading slash, and one that is already the file", () => {
+    expect(resolveGsImage("images/IH6001/main/", "front.png")).toBe(
+      "https://www.goldensneakers.net/images/IH6001/main/front.png",
+    );
+    // Relative AND complete: the filename must not be doubled here either.
+    expect(resolveGsImage("/images/IH6001/main/front.png", "front.png")).toBe(
+      "https://www.goldensneakers.net/images/IH6001/main/front.png",
+    );
+  });
+
+  it("reads a protocol-relative URL as https", () => {
+    expect(resolveGsImage("//media.goldensneakers.net/i/a.png", "a.png")).toBe(
+      "https://media.goldensneakers.net/i/a.png",
+    );
+  });
+
+  it("still applies the domain gate after completing a relative path", () => {
+    // A base pointing off-domain must not launder third-party images through.
+    expect(resolveGsImage("/i/a.png", "a.png", "https://evil.com")).toBe("");
+    expect(resolveGsImage("//evil.com/i/a.png", "a.png")).toBe("");
+  });
+
   it("rejects lookalike, third-party and non-https hosts", () => {
     expect(resolveGsImage("https://evilgoldensneakers.net/i/a.png", "a.png")).toBe("");
     expect(resolveGsImage("https://goldensneakers.net.evil.com/i/a.png", "a.png")).toBe("");
     expect(resolveGsImage("https://imgur.com/a.png", "a.png")).toBe("");
     expect(resolveGsImage("http://media.goldensneakers.net/i/a.png", "a.png")).toBe("");
     expect(resolveGsImage("not a url", "a.png")).toBe("");
+    expect(resolveGsImage("data:image/png;base64,AAAA", "a.png")).toBe("");
+    expect(resolveGsImage("javascript:alert(1)", "a.png")).toBe("");
     expect(resolveGsImage(null, "a.png")).toBe("");
   });
 });

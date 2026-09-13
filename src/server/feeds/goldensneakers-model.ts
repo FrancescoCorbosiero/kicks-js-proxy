@@ -27,18 +27,52 @@ export const GsRowSchema = z.looseObject({
 export type GsRow = z.infer<typeof GsRowSchema>;
 
 /**
+ * Origin a site-relative image path hangs off. Some GS rows ship
+ * `image_full_url` as a bare path ("/images/IH6001/main/") instead of a URL;
+ * the provider won't fix it, so we re-attach the origin they left out.
+ */
+export const GS_IMAGE_BASE = "https://www.goldensneakers.net";
+
+/**
+ * Turn whatever the feed put in `image_full_url` into an absolute URL, or null
+ * when it is not a path at all. Trust is NOT decided here — the caller still
+ * runs the https + goldensneakers.net gate on the result, so a relative path
+ * can never smuggle in a foreign host.
+ */
+function absoluteImageUrl(raw: string, imageBase: string): string | null {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return raw; // already absolute
+  if (raw.startsWith("//")) return `https:${raw}`; // protocol-relative
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return null; // data:, javascript:, mailto:…
+  // Site-relative — but only when it actually looks like a path: junk such as
+  // "not a url" must stay imageless rather than become a plausible 404.
+  const looksLikePath = !/\s/.test(raw) && (raw.includes("/") || /\.[a-z0-9]{2,5}$/i.test(raw));
+  if (!looksLikePath) return null;
+  return `${imageBase.replace(/\/+$/, "")}/${raw.replace(/^\/+/, "")}`;
+}
+
+/**
  * Resolve a feed row's image URL, supporting BOTH formats GS has shipped:
  *  - legacy: image_full_url is a base FOLDER (…/images/SKU/main/) and
  *    image_name holds the file to append;
  *  - current (Aug 2026): image_full_url is already the COMPLETE file URL on
  *    media.goldensneakers.net while image_name still holds just the filename —
  *    blind concatenation would double it (…/x.png/x.png → 404).
+ * Either form may arrive site-relative ("/images/SKU/main/") instead of as a
+ * URL — the same product, spelled two ways, in the same feed. Those rows used
+ * to resolve to "" (product on the catalog with no picture); they are now
+ * completed against GS_IMAGE_BASE before the trust gate runs.
  * Only https URLs on goldensneakers.net or a true subdomain are accepted;
  * anything else — http, third-party hosts, lookalikes such as
  * evilgoldensneakers.net — resolves to "" (no image, never a foreign URL).
  */
-export function resolveGsImage(fullUrl?: string | null, name?: string | null): string {
-  const base = (fullUrl ?? "").trim();
+export function resolveGsImage(
+  fullUrl?: string | null,
+  name?: string | null,
+  imageBase: string = GS_IMAGE_BASE,
+): string {
+  const raw = (fullUrl ?? "").trim();
+  if (!raw) return "";
+  const base = absoluteImageUrl(raw, imageBase);
   if (!base) return "";
   let url: URL;
   try {
