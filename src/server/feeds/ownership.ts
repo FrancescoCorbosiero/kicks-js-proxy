@@ -95,3 +95,47 @@ export async function fetchSecondarySource(
     };
   }
 }
+
+/**
+ * Carry per-variant identifiers from the stored catalog onto freshly fetched
+ * products.
+ *
+ * KicksDB's bulk price endpoint — the one the sync runs on — returns sizes and
+ * prices but NO identifiers, while the per-product endpoint that fills the
+ * catalog does return them. So the sync sees a product whose GTINs it already
+ * knows, and would write none. This copies them across, matched on variant id
+ * and falling back to the size label, so a KicksDB product is as complete on
+ * an external catalog as a supplier-feed one.
+ */
+export function carryIdentifiers(
+  products: SourceProduct[],
+  catalog: ReadonlyMap<string, SourceProduct>,
+): SourceProduct[] {
+  if (catalog.size === 0) return products;
+  return products.map((p) => {
+    const known = catalog.get(skuKey(p.sku));
+    if (!known) return p;
+    const byVariantId = new Map<string, string>();
+    const bySizeLabel = new Map<string, string>();
+    for (const v of known.variants) {
+      if (!v.upc) continue;
+      byVariantId.set(v.stockxVariantId, v.upc);
+      const label = `${v.sizeType}:${v.sizeLabel}`.toLowerCase();
+      if (!bySizeLabel.has(label)) bySizeLabel.set(label, v.upc);
+    }
+    if (byVariantId.size === 0) return p;
+    return {
+      ...p,
+      variants: p.variants.map((v) =>
+        v.upc
+          ? v
+          : {
+              ...v,
+              upc:
+                byVariantId.get(v.stockxVariantId) ??
+                bySizeLabel.get(`${v.sizeType}:${v.sizeLabel}`.toLowerCase()),
+            },
+      ),
+    };
+  });
+}

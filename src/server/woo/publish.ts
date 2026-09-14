@@ -11,6 +11,7 @@ import { sourceEuSize } from "@/server/store-json/match";
 import type { StoreProductModel } from "@/server/store-json/model";
 import { skuKey } from "@/lib/skus";
 import { planPublish, planReimportParent, publishedVariations, type PublishPlan } from "./publish-plan";
+import { buildIdentityResolver } from "./identity";
 import { getWooClient, type WooClient } from "./client";
 
 /**
@@ -51,6 +52,10 @@ export interface PublishProductReport {
   unpricedSizes: string[];
   /** Catalog variants with no resolvable EU size. */
   skippedNoEu: number;
+  /** Barcodes not written (unusable or shared by two sizes) — see rebuild-plan. */
+  rejectedGtins: { sizeLabel: string; value: string; reason: string }[];
+  /** Sizes that went out WITH a GTIN — what a channel can actually match on. */
+  gtins: number;
   images: number;
   reason: PublishSkipReason | null;
   error: string | null;
@@ -58,6 +63,12 @@ export interface PublishProductReport {
 
 export interface PublishOutcome {
   auditId: string;
+  /**
+   * Identity taxonomies the store would not take (absent, or the REST key
+   * cannot create terms). Publishing still happened — the products are simply
+   * missing that field for external catalogs.
+   */
+  identitySkipped: string[];
   dryRun: boolean;
   status: ApplyAuditRow["status"];
   products: PublishProductReport[];
@@ -165,6 +176,20 @@ export async function publishProducts(
   const reports: PublishProductReport[] = [];
   const published: { plan: PublishPlan; product: StoreProductModel }[] = [];
   const tagliaAttributeId = await resolveTagliaId(client);
+  // Brand / category / gender resolved ONCE for the whole batch: 300 products
+  // of the same brand must not mean 300 term lookups. Best-effort — a store
+  // that cannot take a taxonomy still gets its products.
+  const identity = dryRun
+    ? null
+    : await buildIdentityResolver(
+        client,
+        uniqueSkus
+          .map((sku) => gsOwned.get(sku)?.product ?? catalogEntries.get(sku))
+          .filter((c): c is NonNullable<typeof c> => c != null),
+      ).catch((e) => {
+        console.warn("[publish] identity skipped:", e instanceof Error ? e.message : String(e));
+        return null;
+      });
   let created = 0;
   let reimported = 0;
   let variations = 0;
@@ -179,6 +204,8 @@ export async function publishProducts(
       sizes: [],
       unpricedSizes: [],
       skippedNoEu: 0,
+      rejectedGtins: [],
+      gtins: 0,
       images: 0,
       reason: null,
       error: null,
@@ -219,12 +246,15 @@ export async function publishProducts(
         config,
         manualPrices,
         tagliaAttributeId,
+        identity: identity?.for(catalog),
         stockBySize: gs?.stockBySize,
         includeGallery: options.includeGallery,
       });
       report.sizes = plan.variations.map((v) => v.sizeLabel);
       report.unpricedSizes = plan.unpricedSizes;
       report.skippedNoEu = plan.skippedNoEu;
+      report.rejectedGtins = plan.rejectedGtins;
+      report.gtins = plan.variations.filter((v) => v.upc).length;
       report.images = plan.images.length;
 
       if (plan.variations.length === 0) {
@@ -367,6 +397,7 @@ export async function publishProducts(
     auditId: row.id,
     dryRun,
     status,
+    identitySkipped: identity?.skipped ?? [],
     products: reports,
     created,
     reimported,

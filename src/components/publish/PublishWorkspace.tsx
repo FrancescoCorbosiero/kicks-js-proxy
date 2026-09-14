@@ -378,6 +378,8 @@ function mergeOutcomes(a: PublishOutcome, b: PublishOutcome): PublishOutcome {
 function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: string }) {
   const { t } = useI18n();
   const created = outcome.products.filter((p) => p.action === "create");
+  const gtins = outcome.products.reduce((n, p) => n + p.gtins, 0);
+  const rejectedGtins = outcome.products.reduce((n, p) => n + p.rejectedGtins.length, 0);
   const reimported = outcome.products.filter((p) => p.action === "reimport");
   const skipped = outcome.products.filter((p) => p.action === "skip");
 
@@ -398,7 +400,18 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
         {outcome.failed > 0 && (
           <span className="text-xs font-semibold text-skip">{t.publish.failedCount(outcome.failed)}</span>
         )}
+        {gtins > 0 && <span className="text-xs text-muted tnum">{t.publish.gtins(gtins)}</span>}
+        {rejectedGtins > 0 && (
+          <span className="text-xs font-medium text-warn" title={t.publish.rejectedGtinsHint}>
+            {t.publish.rejectedGtins(rejectedGtins)}
+          </span>
+        )}
       </div>
+      {outcome.identitySkipped.length > 0 && (
+        <p className="text-[11px] leading-snug text-warn">
+          {t.publish.identitySkipped(outcome.identitySkipped.join(", "))}
+        </p>
+      )}
       <ul className="space-y-1">
         {outcome.products.map((p) => (
           <ReportRow key={p.sku} report={p} dryRun={outcome.dryRun} siteUrl={siteUrl} />
@@ -435,6 +448,14 @@ function ReportRow({
       {report.unpricedSizes.length > 0 && (
         <span className="text-skip" title={report.unpricedSizes.join(", ")}>
           {t.publish.unpriced(report.unpricedSizes.length)}
+        </span>
+      )}
+      {report.rejectedGtins.length > 0 && (
+        <span
+          className="text-warn"
+          title={report.rejectedGtins.map((r) => `${r.sizeLabel}: ${r.value} (${r.reason})`).join("\n")}
+        >
+          {t.publish.rejectedGtins(report.rejectedGtins.length)}
         </span>
       )}
       {report.reason && <span className="text-faint">{t.publish.skipReasons[report.reason]}</span>}

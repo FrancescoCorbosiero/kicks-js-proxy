@@ -135,9 +135,13 @@ const ApplySchema = z
     previewedProductIds: z.array(z.number()).default([]),
     // Feed-owned products (finite stock) — excluded from KicksDB-style cleanup.
     feedProductIds: z.array(z.number()).default([]),
+    // Fill empty GTINs from the source across the whole preview, not just the
+    // price selection (a correctly-priced row is a noop and never selectable).
+    backfillGtins: z.boolean().default(true),
+    planIds: z.array(z.string().min(1)).default([]),
   })
-  .refine((v) => v.selections.length > 0 || v.sanitize, {
-    message: "Nothing to do: no price selection and cleanup is off.",
+  .refine((v) => v.selections.length > 0 || v.sanitize || (v.backfillGtins && v.planIds.length > 0), {
+    message: "Nothing to do: no price selection, no cleanup, no identifiers to fill.",
   });
 
 export interface ApplyActionResult {
@@ -227,6 +231,8 @@ export async function applySyncPrices(
       kicksdbVariationIds: parsed.data.kicksdbVariationIds,
       previewedProductIds: parsed.data.previewedProductIds,
       feedProductIds: parsed.data.feedProductIds,
+      backfillGtins: parsed.data.backfillGtins,
+      planIds: parsed.data.planIds,
     });
     return { ok: true, outcome };
   } catch (e) {

@@ -313,6 +313,11 @@ function GsFeedCard({ state, onSynced }: { state: FeedsState; onSynced: () => Pr
               {t.feeds.gs.reportRegistered(report.catalogRegistered)}
             </span>
           )}
+          {(report.invalidBarcodes > 0 || report.duplicateBarcodes > 0) && (
+            <span className="text-warn" title={t.feeds.gs.barcodeQualityHint}>
+              {t.feeds.gs.barcodeQuality(report.invalidBarcodes, report.duplicateBarcodes)}
+            </span>
+          )}
         </div>
       )}
 

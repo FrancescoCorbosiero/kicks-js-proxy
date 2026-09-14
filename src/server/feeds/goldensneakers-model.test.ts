@@ -212,3 +212,43 @@ describe("GS pricing passthrough (source-scoped rule)", () => {
     expect(v.offers[0]).toEqual({ deliveryType: "standard", lowestAsk: 72, asks: 1 });
   });
 });
+
+describe("barcode quality reporting", () => {
+  const row = (sku: string, size: string, barcode: string) => ({
+    id: Math.random(),
+    sku,
+    size_eu: size,
+    product_name: "adidas Samba",
+    barcode,
+  });
+
+  it("counts what a channel would refuse, without dropping the row", () => {
+    // The size still sells; only its identifier is unusable. Silence here is
+    // what turns into a Merchant Center disapproval nobody can explain.
+    const { offers, invalidBarcodes } = parseGsPayload([
+      row("IH6001", "40", "4067907638411"),
+      row("IH6001", "41", "4067907638410"), // broken check digit
+      row("IH6001", "42", "not-a-barcode"),
+    ]);
+    expect(offers).toHaveLength(3);
+    expect(invalidBarcodes).toBe(2);
+  });
+
+  it("counts a barcode the feed gives to more than one size", () => {
+    const { duplicateBarcodes } = parseGsPayload([
+      row("IH6001", "40", "4067907638411"),
+      row("IH6001", "41", "4067907638411"),
+      row("JI2626", "42", "4067898487401"),
+    ]);
+    expect(duplicateBarcodes).toBe(1);
+  });
+
+  it("reports nothing for a clean feed", () => {
+    const { invalidBarcodes, duplicateBarcodes } = parseGsPayload([
+      row("IH6001", "40", "4067907638411"),
+      row("IH6001", "41", "4067898487401"),
+    ]);
+    expect([invalidBarcodes, duplicateBarcodes]).toEqual([0, 0]);
+  });
+});
+
