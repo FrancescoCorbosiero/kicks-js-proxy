@@ -7,6 +7,7 @@ import {
   planPublish,
   planReimportParent,
   publishedVariations,
+  withoutIdentity,
 } from "./publish-plan";
 
 const config: AppConfig = buildDefaultConfig({
@@ -299,7 +300,9 @@ describe("product identity for external catalogs", () => {
         ],
       },
     });
-    expect(plan.parentBody.brands).toEqual([7]);
+    // Woo taxonomy fields are arrays of OBJECTS, like categories: a bare id
+    // array is refused outright ("brands[0] is not of type object").
+    expect(plan.parentBody.brands).toEqual([{ id: 7 }]);
     expect(plan.parentBody.categories).toEqual([{ id: 11 }, { id: 12 }]);
 
     const attrs = plan.parentBody.attributes as Record<string, unknown>[];
@@ -316,5 +319,46 @@ describe("product identity for external catalogs", () => {
     expect(plan.parentBody.brands).toBeUndefined();
     expect(plan.parentBody.categories).toBeUndefined();
     expect((plan.parentBody.attributes as unknown[]).length).toBe(1);
+  });
+});
+
+describe("withoutIdentity", () => {
+  const identity = {
+    brandId: 7,
+    categoryIds: [11, 12],
+    attributes: [
+      { id: 2, option: "adidas" },
+      { id: 3, option: "women" },
+    ],
+  };
+
+  it("gives back a body a store that refuses the taxonomies still accepts", () => {
+    const plan = planPublish({ catalog: product(), config, identity });
+    const stripped = withoutIdentity(plan.parentBody, identity);
+    expect(stripped.brands).toBeUndefined();
+    expect(stripped.categories).toBeUndefined();
+    // The size axis survives: it is what makes the variations bind.
+    expect(stripped.attributes).toHaveLength(1);
+    expect(stripped.attributes).toEqual([(plan.parentBody.attributes as unknown[])[0]]);
+    // Everything else is untouched — this is a fallback, not a different product.
+    expect(stripped.name).toBe(plan.parentBody.name);
+    expect(stripped.sku).toBe(plan.parentBody.sku);
+  });
+
+  it("is a no-op on a body that never carried identity", () => {
+    const plan = planPublish({ catalog: product(), config });
+    expect(withoutIdentity(plan.parentBody, undefined)).toEqual(plan.parentBody);
+  });
+});
+
+describe("planReimportParent", () => {
+  it("restates the identity so a force reimport back-fills an existing product", () => {
+    const identity = { brandId: 7, categoryIds: [11], attributes: [{ id: 2, option: "adidas" }] };
+    const plan = planPublish({ catalog: product(), config, identity });
+    const body = planReimportParent(plan, { replaceMedia: false, identity });
+    expect(body.brands).toEqual([{ id: 7 }]);
+    expect(body.categories).toEqual([{ id: 11 }]);
+    // The identity attributes ride along in the attribute list planPublish built.
+    expect(body.attributes).toEqual(plan.parentBody.attributes);
   });
 });

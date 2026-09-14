@@ -10,7 +10,13 @@ import { gsOwnedProducts } from "@/server/feeds/owner";
 import { sourceEuSize } from "@/server/store-json/match";
 import type { StoreProductModel } from "@/server/store-json/model";
 import { skuKey } from "@/lib/skus";
-import { planPublish, planReimportParent, publishedVariations, type PublishPlan } from "./publish-plan";
+import {
+  planPublish,
+  planReimportParent,
+  publishedVariations,
+  withoutIdentity,
+  type PublishPlan,
+} from "./publish-plan";
 import { buildIdentityResolver } from "./identity";
 import { getWooClient, type WooClient } from "./client";
 
@@ -110,6 +116,22 @@ async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promi
  * terms: the variations exist but the storefront's size selector cannot
  * resolve them.
  */
+/**
+ * Woo REST rejects a whole request when one parameter does not fit its schema,
+ * and stores disagree on the shape of the identity taxonomies (a brands plugin
+ * variant, an older core, a filter). Losing the brand is bad; losing the
+ * product is worse — so a 400 naming one of those fields is retried once
+ * without them, and reported instead of thrown.
+ */
+function identityRejection(e: unknown): string | null {
+  if ((e as { status?: number })?.status !== 400) return null;
+  const message = e instanceof Error ? e.message : String(e);
+  for (const field of ["brands", "categories", "attributes"]) {
+    if (new RegExp(`\\b${field}\\b`).test(message)) return field;
+  }
+  return null;
+}
+
 async function resolveTagliaId(client: WooClient): Promise<number | undefined> {
   try {
     const taxonomies = await client.getAttributeTaxonomies();
@@ -175,6 +197,9 @@ export async function publishProducts(
 
   const reports: PublishProductReport[] = [];
   const published: { plan: PublishPlan; product: StoreProductModel }[] = [];
+  // Identity fields this store's REST schema refused — reported once, not per
+  // product, and never fatal.
+  const identityRejected = new Set<string>();
   const tagliaAttributeId = await resolveTagliaId(client);
   // Brand / category / gender resolved ONCE for the whole batch: 300 products
   // of the same brand must not mean 300 term lookups. Best-effort — a store
@@ -241,12 +266,13 @@ export async function publishProducts(
         }
       }
 
+      const resolvedIdentity = identity?.for(catalog);
       const plan = planPublish({
         catalog,
         config,
         manualPrices,
         tagliaAttributeId,
-        identity: identity?.for(catalog),
+        identity: resolvedIdentity,
         stockBySize: gs?.stockBySize,
         includeGallery: options.includeGallery,
       });
@@ -287,10 +313,18 @@ export async function publishProducts(
       if (onStore) {
         // Refresh identity + option list, then replace the variation set.
         productId = onStore.id;
-        await client.updateProduct(
-          productId,
-          planReimportParent(plan, { replaceMedia: options.replaceMedia ?? false }),
-        );
+        const reimportBody = planReimportParent(plan, {
+          replaceMedia: options.replaceMedia ?? false,
+          identity: resolvedIdentity,
+        });
+        try {
+          await client.updateProduct(productId, reimportBody);
+        } catch (e) {
+          const field = identityRejection(e);
+          if (!field) throw e;
+          identityRejected.add(field);
+          await client.updateProduct(productId, withoutIdentity(reimportBody, resolvedIdentity));
+        }
         const old = await client.getAllVariations(productId);
         const res = await client.batchVariations(productId, {
           delete: old.map((v) => v.id),
@@ -304,7 +338,15 @@ export async function publishProducts(
         }
         reimported += 1;
       } else {
-        const parent = await client.createProduct(plan.parentBody);
+        let parent;
+        try {
+          parent = await client.createProduct(plan.parentBody);
+        } catch (e) {
+          const field = identityRejection(e);
+          if (!field) throw e;
+          identityRejected.add(field);
+          parent = await client.createProduct(withoutIdentity(plan.parentBody, resolvedIdentity));
+        }
         productId = parent.id;
         report.permalink = parent.permalink ?? null;
         const res = await client.batchVariations(productId, {
@@ -397,7 +439,7 @@ export async function publishProducts(
     auditId: row.id,
     dryRun,
     status,
-    identitySkipped: identity?.skipped ?? [],
+    identitySkipped: [...new Set([...(identity?.skipped ?? []), ...identityRejected])],
     products: reports,
     created,
     reimported,
