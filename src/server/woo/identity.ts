@@ -66,30 +66,27 @@ export async function buildIdentityResolver(
     }
   }
 
-  // ---- categories (product_cat, path parent → child) ----
-  const paths = wanted.map((w) => w.categoryPath).filter((p) => p.length > 0);
-  if (paths.length > 0) {
+  // ---- category (product_cat) ----
+  // One flat term for the whole shop: see STORE_CATEGORY on why the catalog's
+  // own brand/model tree deliberately stays out of the store taxonomy.
+  const categoryNames = [
+    ...new Map(wanted.filter((w) => w.category).map((w) => [termKey(w.category), w.category])).values(),
+  ];
+  if (categoryNames.length > 0) {
     try {
       const existing = await client.listCategories();
-      // Keyed by "parentId/name" so a child never collides with a same-named
-      // category under a different parent ("One" under Air Jordan vs Yeezy).
-      for (const c of existing) categories.set(`${c.parent ?? 0}/${termKey(c.name)}`, c.id);
-      for (const path of paths) {
-        let parent = 0;
-        for (const name of path) {
-          const key = `${parent}/${termKey(name)}`;
-          let id = categories.get(key);
-          if (id == null) {
-            const created = await client.createCategory(name, parent || undefined);
-            if (!created) {
-              skipped.push("product_cat");
-              parent = 0;
-              break;
-            }
-            id = created.id;
-            categories.set(key, id);
-          }
-          parent = id;
+      // A top-level term only: an existing child of the same name belongs to
+      // someone else's tree and is not ours to attach products to.
+      for (const c of existing) {
+        if ((c.parent ?? 0) === 0) categories.set(termKey(c.name), c.id);
+      }
+      for (const name of categoryNames) {
+        if (categories.has(termKey(name))) continue;
+        const created = await client.createCategory(name);
+        if (created) categories.set(termKey(created.name), created.id);
+        else {
+          skipped.push("product_cat");
+          break;
         }
       }
     } catch {
@@ -152,17 +149,8 @@ export async function buildIdentityResolver(
       const brandId = names.brand ? brands.get(termKey(names.brand)) : undefined;
       if (brandId != null) out.brandId = brandId;
 
-      if (names.categoryPath.length > 0) {
-        const ids: number[] = [];
-        let parent = 0;
-        for (const name of names.categoryPath) {
-          const id = categories.get(`${parent}/${termKey(name)}`);
-          if (id == null) break;
-          ids.push(id);
-          parent = id;
-        }
-        if (ids.length > 0) out.categoryIds = ids;
-      }
+      const categoryId = names.category ? categories.get(termKey(names.category)) : undefined;
+      if (categoryId != null) out.categoryIds = [categoryId];
 
       const attributes: { id: number; option: string }[] = [];
       for (const attr of IDENTITY_ATTRIBUTES) {

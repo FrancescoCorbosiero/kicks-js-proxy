@@ -58,8 +58,8 @@ export interface PublishPlan {
  */
 export interface IdentityNames {
   brand: string;
-  /** Category path, broadest first: ["Air Jordan", "One"]. */
-  categoryPath: string[];
+  /** The single store category every published product goes under. */
+  category: string;
   /** Source vocabulary as-is ("men", "women", "youth"…) — never re-coded here:
    *  the channel plugin owns the mapping to its own field values. */
   gender: string;
@@ -69,19 +69,29 @@ export interface IdentityNames {
 export interface ResolvedIdentity {
   /** product_brand term id — the native WooCommerce brands taxonomy. */
   brandId?: number;
-  /** product_cat term ids, broadest first. */
+  /** product_cat term id — one flat category, see STORE_CATEGORY. */
   categoryIds?: number[];
   /** Global attribute bindings: pa_brand, pa_gender. */
   attributes?: { id: number; option: string }[];
 }
 
+/**
+ * The one product category the store files everything under.
+ *
+ * The catalog's own category/secondaryCategory ("New Balance" › "1906") stay
+ * where they are useful — the discovery sidebar, the scope of a margin rule —
+ * but they must NOT become store taxonomy: the brand half duplicates the
+ * Marchio taxonomy, and the model half mints a term per silhouette. A shop
+ * selling one kind of product needs one category, not a term for every shoe
+ * it has ever listed.
+ */
+export const STORE_CATEGORY = "Sneakers";
+
 /** The identity names a catalog product carries, empty strings dropped. */
 export function identityNamesFor(catalog: SourceProduct): IdentityNames {
   return {
     brand: (catalog.brand ?? "").trim(),
-    categoryPath: [catalog.category, catalog.secondaryCategory]
-      .map((c) => (c ?? "").trim())
-      .filter((c) => c.length > 0),
+    category: STORE_CATEGORY,
     gender: (catalog.gender ?? "").trim(),
   };
 }

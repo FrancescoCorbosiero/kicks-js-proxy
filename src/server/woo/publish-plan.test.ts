@@ -3,6 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
 import {
+  STORE_CATEGORY,
   identityNamesFor,
   planPublish,
   planReimportParent,
@@ -254,17 +255,18 @@ describe("publishedVariations", () => {
 });
 
 describe("product identity for external catalogs", () => {
-  it("reads brand, category path and gender off a KicksDB product", () => {
+  it("files every product under the one store category", () => {
+    // The catalog's own tree ("Yeezy" › "Foam RNNR") is for the discovery
+    // sidebar and margin scopes — it must not mint a store term per silhouette,
+    // and its brand half already exists as the Marchio taxonomy.
     expect(identityNamesFor(product())).toEqual({
       brand: "adidas",
-      categoryPath: ["Yeezy", "Foam RNNR"],
+      category: STORE_CATEGORY,
       gender: "",
     });
   });
 
-  it("reads them off a feed product just the same", () => {
-    // gsOffersToSource fills brand from the supplier row and the rest from the
-    // shared title classifier, so both sources arrive here identical in shape.
+  it("reads a feed product just the same", () => {
     const gs = product({
       source: "goldensneakers",
       brand: "Adidas",
@@ -274,15 +276,13 @@ describe("product identity for external catalogs", () => {
     });
     expect(identityNamesFor(gs)).toEqual({
       brand: "Adidas",
-      categoryPath: ["Samba"],
+      category: STORE_CATEGORY,
       gender: "women",
     });
   });
 
-  it("drops empty parts instead of writing blanks", () => {
-    expect(
-      identityNamesFor(product({ brand: "  ", category: "", secondaryCategory: "  " })),
-    ).toEqual({ brand: "", categoryPath: [], gender: "" });
+  it("drops an empty brand instead of writing a blank", () => {
+    expect(identityNamesFor(product({ brand: "  " })).brand).toBe("");
   });
 
   it("writes the brand BOTH ways — taxonomy and attribute", () => {
@@ -293,7 +293,7 @@ describe("product identity for external catalogs", () => {
       config,
       identity: {
         brandId: 7,
-        categoryIds: [11, 12],
+        categoryIds: [11],
         attributes: [
           { id: 2, option: "adidas" },
           { id: 3, option: "women" },
@@ -303,7 +303,7 @@ describe("product identity for external catalogs", () => {
     // Woo taxonomy fields are arrays of OBJECTS, like categories: a bare id
     // array is refused outright ("brands[0] is not of type object").
     expect(plan.parentBody.brands).toEqual([{ id: 7 }]);
-    expect(plan.parentBody.categories).toEqual([{ id: 11 }, { id: 12 }]);
+    expect(plan.parentBody.categories).toEqual([{ id: 11 }]);
 
     const attrs = plan.parentBody.attributes as Record<string, unknown>[];
     // pa_taglia stays the variation axis; identity attributes never are.
@@ -325,7 +325,7 @@ describe("product identity for external catalogs", () => {
 describe("withoutIdentity", () => {
   const identity = {
     brandId: 7,
-    categoryIds: [11, 12],
+    categoryIds: [11],
     attributes: [
       { id: 2, option: "adidas" },
       { id: 3, option: "women" },
