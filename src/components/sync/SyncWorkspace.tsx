@@ -735,7 +735,7 @@ export function SyncWorkspace({
                 <div className="font-semibold">{t.sync.apply.dryTitle(dry.outcome.variations)}</div>
                 <ul className="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
                   {dry.outcome.changes.slice(0, 12).map((c) => (
-                    <li key={c.storeVariationId} className="flex items-center gap-2 tnum">
+                    <li key={`${c.storeProductId}:${c.storeVariationId}`} className="flex items-center gap-2 tnum">
                       <span className="font-mono text-faint">{c.sku}</span>
                       <span>{c.sizeLabel}</span>
                       <span className="ml-auto text-muted">

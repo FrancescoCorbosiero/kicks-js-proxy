@@ -8,9 +8,9 @@ import { getOverrides } from "@/server/overrides/repo";
 import { manualPriceFor } from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { sourceEuSize } from "@/server/store-json/match";
-import type { StoreProductModel, StoreVariation } from "@/server/store-json/model";
+import type { StoreProductModel } from "@/server/store-json/model";
 import { skuKey } from "@/lib/skus";
-import { planPublish, planReimportParent, type PublishPlan } from "./publish-plan";
+import { planPublish, planReimportParent, publishedVariations, type PublishPlan } from "./publish-plan";
 import { getWooClient, type WooClient } from "./client";
 
 /**
@@ -251,6 +251,9 @@ export async function publishProducts(
       }
 
       let productId: number;
+      // Woo's answer to the create batch, in request order: the only place the
+      // real variation ids exist. The snapshot patch below needs them.
+      let createdRows: { id?: number; error?: unknown }[] = [];
       if (onStore) {
         // Refresh identity + option list, then replace the variation set.
         productId = onStore.id;
@@ -263,6 +266,7 @@ export async function publishProducts(
           delete: old.map((v) => v.id),
           create: plan.variations.map((v) => v.payload),
         });
+        createdRows = res.create;
         variations += res.create.filter((r) => r.error == null).length;
         const failedRows = res.create.filter((r) => r.error != null);
         if (failedRows.length > 0) {
@@ -276,6 +280,7 @@ export async function publishProducts(
         const res = await client.batchVariations(productId, {
           create: plan.variations.map((v) => v.payload),
         });
+        createdRows = res.create;
         variations += res.create.filter((r) => r.error == null).length;
         const failedRows = res.create.filter((r) => r.error != null);
         if (failedRows.length > 0) {
@@ -294,17 +299,7 @@ export async function publishProducts(
           sku,
           name: plan.title,
           attributes: (plan.parentBody as { attributes: unknown[] }).attributes,
-          variations: plan.variations.map((v) => ({
-            id: 0,
-            sku: v.sku,
-            regular_price: v.price != null ? v.price.toFixed(2) : null,
-            sale_price: null,
-            global_unique_id: v.upc,
-            stock_quantity: null,
-            manage_stock: false,
-            stock_status: "instock",
-            attributes: [{ name: "pa_taglia", option: v.sizeLabel }],
-          })) as StoreVariation[],
+          variations: publishedVariations(plan, createdRows),
         } as StoreProductModel,
       });
     } catch (e) {

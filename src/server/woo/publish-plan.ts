@@ -1,6 +1,7 @@
 import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { skuKey } from "@/lib/skus";
+import type { StoreVariation } from "@/server/store-json/model";
 import {
   planRebuild,
   rebuildParentAttributes,
@@ -151,4 +152,39 @@ export function planReimportParent(
     body.images = plan.images.map((src) => ({ src }));
   }
   return body;
+}
+
+/**
+ * The store-model variations a freshly published product really has, built by
+ * pairing the plan's create rows with the ids Woo returned for them (batch
+ * responses come back in request order — the same pairing the rebuild does).
+ *
+ * A row whose id is missing, zero or errored is DROPPED, never given a
+ * placeholder: the snapshot is what the sync aims its price writes at, and an
+ * invented id turns into an update against variation 0 — which Woo rejects,
+ * and which collapses every size of the product into one entry for anything
+ * that keys variations by id.
+ */
+export function publishedVariations(
+  plan: PublishPlan,
+  createdRows: { id?: number; error?: unknown }[],
+): StoreVariation[] {
+  const out: StoreVariation[] = [];
+  plan.variations.forEach((v, i) => {
+    const row = createdRows[i];
+    const id = row && row.error == null && typeof row.id === "number" ? row.id : 0;
+    if (id <= 0) return;
+    out.push({
+      id,
+      sku: v.sku,
+      regular_price: v.price != null ? v.price.toFixed(2) : null,
+      sale_price: null,
+      global_unique_id: v.upc,
+      stock_quantity: null,
+      manage_stock: false,
+      stock_status: "instock",
+      attributes: [{ name: "pa_taglia", option: v.sizeLabel }],
+    } as StoreVariation);
+  });
+  return out;
 }

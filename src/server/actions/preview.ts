@@ -74,7 +74,14 @@ async function assemblePlans(
 ): Promise<PreviewPlan[]> {
   await prunePlans(); // best-effort retention: plans are per-run scratch data
   const out: PreviewPlan[] = [];
+  // One plan per SKU. Two products for the same SKU (a source returning the
+  // style code twice, a feed row overlaid onto its own catalog entry) would
+  // each match the SAME store variations, so the apply would write every price
+  // twice and the UI would show two rows sharing one identity.
+  const seen = new Set<string>();
   for (const product of products) {
+    if (seen.has(skuKey(product.sku))) continue;
+    seen.add(skuKey(product.sku));
     const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();
 
     // EU size per variant — needed both for the table and to key manual-price

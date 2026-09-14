@@ -79,3 +79,48 @@ describe("planProductSanitize", () => {
     expect(planProductSanitize(clean)).toBeNull();
   });
 });
+
+describe("planProductSanitize with unaddressable variations", () => {
+  /**
+   * A product freshly published before the fix: the snapshot patch stamped
+   * every size with the placeholder id 0. Keyed by id they all collapse into
+   * one entry, so the planner used to rewrite each size with another size's
+   * attributes — and aim every write at variation 0, which Woo rejects.
+   */
+  function justPublished(): StoreProductModel {
+    return {
+      id: 999001,
+      sku: "IH6001",
+      name: "adidas Samba Indoor",
+      attributes: [{ id: 3, name: "pa_taglia", variation: true, options: ["40", "41", "42"] }],
+      variations: [
+        { id: 0, sku: "IH6001-EU40", stock_quantity: 2, attributes: [{ id: 3, name: "pa_taglia", option: "40" }] },
+        { id: 0, sku: "IH6001-EU41", stock_quantity: 1, attributes: [{ id: 3, name: "pa_taglia", option: "41" }] },
+        { id: 0, sku: "IH6001-EU42", stock_quantity: 3, attributes: [{ id: 3, name: "pa_taglia", option: "42-0" }] },
+      ],
+    };
+  }
+
+  it("never plans a delete or a write against an id it cannot address", () => {
+    const ops = planProductSanitize(justPublished(), new Set());
+    if (ops) {
+      expect(ops.deleteVariationIds).not.toContain(0);
+      expect(ops.variationWrites.every((w) => w.id > 0)).toBe(true);
+    }
+  });
+
+  it("still handles the real variations of a product that has both", () => {
+    const mixed = justPublished();
+    mixed.variations.push({
+      id: 306668,
+      sku: "IH6001-EU43",
+      stock_quantity: 5,
+      attributes: [{ id: 3, name: "pa_taglia", option: "43-1-3" }],
+    });
+    const ops = planProductSanitize(mixed, new Set())!;
+    const realigned = ops.variationWrites.find((w) => w.id === 306668)!;
+    expect(realigned.attributes).toEqual([{ id: 3, name: "pa_taglia", option: "43 1/3" }]);
+    expect(ops.variationWrites.every((w) => w.id > 0)).toBe(true);
+  });
+});
+

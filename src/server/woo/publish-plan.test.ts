@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
-import { planPublish, planReimportParent } from "./publish-plan";
+import { planPublish, planReimportParent, publishedVariations } from "./publish-plan";
 
 const config: AppConfig = buildDefaultConfig({
   kicksDbApiKey: "",
@@ -209,5 +209,40 @@ describe("planReimportParent — what a force reimport is allowed to touch", () 
     expect(planReimportParent(plan, { replaceMedia: true }).images).toEqual([
       { src: "https://cdn.example.com/foam.jpg" },
     ]);
+  });
+});
+
+describe("publishedVariations", () => {
+  const plan = planPublish({ catalog: product(), config });
+
+  it("takes the ids Woo returned, in request order", () => {
+    const rows = publishedVariations(plan, [{ id: 501 }, { id: 502 }]);
+    expect(rows.map((v) => [v.id, v.attributes])).toEqual([
+      [501, [{ name: "pa_taglia", option: "42" }]],
+      [502, [{ name: "pa_taglia", option: "43" }]],
+    ]);
+  });
+
+  it("drops a size Woo did not create instead of inventing an id", () => {
+    // The regression this exists for: a placeholder id 0 in the snapshot made
+    // the sync plan an update against variation 0 — rejected by Woo — and made
+    // every size of the product share one identity wherever they are keyed by
+    // id (the cleanup planner, and the dry-run list in the UI).
+    const rows = publishedVariations(plan, [
+      { id: 501 },
+      { error: { code: "term_exists", message: "size already used" } },
+    ]);
+    expect(rows.map((v) => v.id)).toEqual([501]);
+  });
+
+  it("drops rows with a missing or zero id", () => {
+    expect(publishedVariations(plan, [{ id: 0 }, {}])).toEqual([]);
+    expect(publishedVariations(plan, [])).toEqual([]);
+  });
+
+  it("carries the price and GTIN of each created size", () => {
+    const [first] = publishedVariations(plan, [{ id: 501 }, { id: 502 }]);
+    expect(first.regular_price).toBe(plan.variations[0].price!.toFixed(2));
+    expect(first.sku).toBe(plan.variations[0].sku);
   });
 });
