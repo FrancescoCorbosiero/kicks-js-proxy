@@ -89,6 +89,10 @@ export function SyncWorkspace({
   // Align sizes (delete orphan/duplicate variations, realign pa_taglia) before
   // pricing — the standardization pass. Default on.
   const [sanitize, setSanitize] = React.useState(true);
+  // Fill empty GTINs from the source across the whole preview. Default on: an
+  // external catalog matches offers on the identifier, and a correctly-priced
+  // row is a noop that can never be ticked for a price change.
+  const [backfillGtins, setBackfillGtins] = React.useState(true);
   // Guided one-click sync: pull (if stale) → preview → dry run, then stop at
   // the single Apply confirmation. State machine driven by the effect below.
   const [guided, setGuided] = React.useState(false);
@@ -302,7 +306,7 @@ export function SyncWorkspace({
   }, [plans]);
 
   // A dry run is only valid for the exact same work: selection + cleanup scope.
-  const signature = `${sanitize ? "s" : "-"}|${plans.map((p) => p.planId).join(",")}|${selectionSignature(applySelections)}`;
+  const signature = `${sanitize ? "s" : "-"}${backfillGtins ? "g" : "-"}|${plans.map((p) => p.planId).join(",")}|${selectionSignature(applySelections)}`;
   const dryValid = dry != null && dry.signature === signature;
   const canRun = plans.length > 0 && (applyCount > 0 || sanitize);
   const dryHasWork =
@@ -345,6 +349,8 @@ export function SyncWorkspace({
           kicksdbVariationIds,
           previewedProductIds,
           feedProductIds,
+          backfillGtins,
+          planIds: plans.map((p) => p.planId),
         });
         if (!res.ok || !res.outcome) setApplyError(res.error ?? t.sync.apply.failed);
         else setDry({ outcome: res.outcome, signature });
@@ -368,6 +374,8 @@ export function SyncWorkspace({
           kicksdbVariationIds,
           previewedProductIds,
           feedProductIds,
+          backfillGtins,
+          planIds: plans.map((p) => p.planId),
         });
         if (!res.ok || !res.outcome) {
           setApplyError(res.error ?? t.sync.apply.failed);
@@ -652,6 +660,19 @@ export function SyncWorkspace({
                 />
                 {t.sync.apply.cleanup}
               </label>
+              <label
+                className="flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-xs font-medium text-muted"
+                title={t.sync.apply.gtinsHint}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-current"
+                  checked={backfillGtins}
+                  disabled={applying != null}
+                  onChange={(e) => setBackfillGtins(e.target.checked)}
+                />
+                {t.sync.apply.gtins}
+              </label>
               <div className="ml-auto flex items-center gap-2">
                 <Button
                   type="button"
@@ -728,6 +749,12 @@ export function SyncWorkspace({
                         {t.sync.apply.droppedByCleanup(dry.outcome.droppedByCleanup)}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {dry.outcome.gtinsWritten > 0 && (
+                  <div className="font-medium text-up">
+                    {t.sync.apply.gtinsWritten(dry.outcome.gtinsWritten)}
                   </div>
                 )}
 

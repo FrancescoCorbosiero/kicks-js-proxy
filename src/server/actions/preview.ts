@@ -11,8 +11,9 @@ import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
+import { getAnyBySkus } from "@/server/catalog/repo";
 import { gsOwnedProducts, overlayGsOwnership } from "@/server/feeds/owner";
-import { fetchSecondarySource, mergeGsOwned } from "@/server/feeds/ownership";
+import { carryIdentifiers, fetchSecondarySource, mergeGsOwned } from "@/server/feeds/ownership";
 import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
@@ -269,10 +270,19 @@ export async function previewFromStore(
       const name = nameBySku.get(skuKey(p.sku));
       if (name) p.title = name;
     }
+    // The bulk price endpoint carries no identifiers; the catalog (filled from
+    // the per-product endpoint) does. Without this the sync could never write
+    // a GTIN for a KicksDB product, only for feed-owned ones.
+    const enriched = carryIdentifiers(
+      fetched,
+      fetched.length > 0
+        ? await getAnyBySkus(market, fetched.map((p) => p.sku)).catch(() => new Map())
+        : new Map(),
+    );
 
     // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
     // carry is covered by the feed, not missing.
-    const overlaid = mergeGsOwned(fetched, owned);
+    const overlaid = mergeGsOwned(enriched, owned);
     const products = overlaid.products;
 
     const returned = new Set(products.map((p) => skuKey(p.sku)));

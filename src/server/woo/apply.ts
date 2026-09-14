@@ -12,6 +12,7 @@ import { getOverrides } from "@/server/overrides/repo";
 import type { StoreModel } from "@/server/store-json/model";
 import { chunk } from "@/server/adapters/http";
 import { skuKey } from "@/lib/skus";
+import { normalizeGtin } from "@/lib/gtin";
 import { getWooClient } from "./client";
 
 /**
@@ -54,6 +55,15 @@ export interface ApplyOptions {
    * the rebuild, which writes real managed stock.
    */
   feedProductIds?: number[];
+  /**
+   * Fill an empty global_unique_id with the source's GTIN, for every variant
+   * of every previewed plan — not only the ones selected for a price change.
+   * Default on: identifiers are what an external catalog matches an offer on,
+   * and a product priced correctly would otherwise never get one.
+   */
+  backfillGtins?: boolean;
+  /** Plan ids in the preview — the scope of that back-fill. */
+  planIds?: string[];
 }
 
 export interface ApplyChange {
@@ -67,6 +77,14 @@ export interface ApplyChange {
   newPrice: number | null;
   /** Managed quantity to write; null = leave the store's stock untouched. */
   newStock: number | null;
+  /**
+   * GTIN to stamp into global_unique_id, or null. Only ever set for a
+   * variation that has NONE: an identifier already on the store was put there
+   * by the operator or another system, and a source is not entitled to
+   * overwrite it. This is how products created before the publisher existed
+   * (or by hand) become listable on an external catalog at all.
+   */
+  newGtin: string | null;
 }
 
 /** Per-product cleanup, compact for the dry-run panel. */
@@ -102,6 +120,8 @@ export interface ApplyOutcome {
   droppedByCleanup: number; // price writes aimed at deleted variations
   cleanup: CleanupSummary | null; // null when sanitize was off
   cleanupDetails: CleanupDetail[];
+  /** Empty global_unique_id fields filled from the source (never overwritten). */
+  gtinsWritten: number;
 }
 
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -112,22 +132,54 @@ async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promi
   await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker));
 }
 
-/** Resolve the selections into concrete price writes (update rows only). */
-async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange[]> {
+/**
+ * Resolve the run into concrete variation writes.
+ *
+ * Two distinct jobs, one pass over the plans:
+ *  - PRICE/STOCK, strictly for the variants the operator selected. Nothing is
+ *    ever written here that was not ticked in the preview.
+ *  - GTIN back-fill, for every variant of every previewed plan. This one is
+ *    deliberately wider: a product whose price is already right produces a
+ *    "noop" row that can never be selected, so tying identifiers to the price
+ *    selection would leave a correctly-priced catalog permanently unlistable
+ *    on Merchant Center. It only ever FILLS AN EMPTY field — an identifier the
+ *    store already holds is left exactly as it is — and the dry run shows every
+ *    one before anything is written.
+ */
+async function collectChanges(
+  selections: ApplySelection[],
+  options: {
+    gtinByVariation: ReadonlyMap<number, string>;
+    /** Every plan in the preview — the scope of the identifier back-fill. */
+    planIds: string[];
+    backfillGtins: boolean;
+  },
+): Promise<ApplyChange[]> {
+  const { gtinByVariation, backfillGtins } = options;
+  const selectedByPlan = new Map(selections.map((s) => [s.planId, new Set(s.variantIds)]));
+  const planIds = [...new Set([...selectedByPlan.keys(), ...(backfillGtins ? options.planIds : [])])];
+
   const changes: ApplyChange[] = [];
-  for (const sel of selections) {
-    const plan = await getPlanById(sel.planId);
+  for (const planId of planIds) {
+    const plan = await getPlanById(planId);
     if (!plan) continue;
-    const wanted = new Set(sel.variantIds);
+    const wanted = selectedByPlan.get(planId) ?? new Set<string>();
     for (const item of plan.items) {
-      if (!wanted.has(item.stockxVariantId)) continue;
-      if (item.action !== "update") continue; // "create" needs upsertProduct — out of scope
+      const selected = wanted.has(item.stockxVariantId) && item.action === "update";
       if (item.storeProductId == null || item.storeVariationId == null) continue;
       // Belt and braces: a plan saved before the id was known would aim at
       // variation 0, which Woo rejects — and which the UI shows as a pile of
       // rows sharing one identity.
       if (item.storeVariationId <= 0) continue;
-      if (item.proposedPrice == null && item.stockQuantity == null) continue;
+
+      const gtin = backfillGtins ? normalizeGtin(item.upc).gtin : null;
+      const newGtin =
+        gtin && !(gtinByVariation.get(item.storeVariationId) ?? "").trim() ? gtin : null;
+      // "create" rows need upsertProduct and are out of scope for prices, but
+      // they are also not on the store, so they carry no identifier either.
+      const writesPrice = selected && (item.proposedPrice != null || item.stockQuantity != null);
+      if (!writesPrice && newGtin == null) continue;
+
       changes.push({
         sku: plan.sku,
         sizeLabel: item.sizeLabel,
@@ -135,8 +187,9 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
         storeProductId: item.storeProductId,
         storeVariationId: item.storeVariationId,
         currentPrice: item.currentPrice,
-        newPrice: item.proposedPrice,
-        newStock: item.stockQuantity ?? null,
+        newPrice: writesPrice ? item.proposedPrice : null,
+        newStock: writesPrice ? (item.stockQuantity ?? null) : null,
+        newGtin,
       });
     }
   }
@@ -172,7 +225,9 @@ export async function applySync(
   selections: ApplySelection[],
   options: ApplyOptions,
 ): Promise<ApplyOutcome> {
-  const snapshot = options.sanitize ? await getActiveSnapshot() : null;
+  // Read regardless of `sanitize`: the cleanup needs it, and so does the GTIN
+  // back-fill (which must know what the store already holds).
+  const snapshot = await getActiveSnapshot().catch(() => null);
 
   // 1. Plan the cleanup over the previewed products. Two regimes:
   //    - KicksDB-owned: the classic sanitize (ghosts, duplicates, pa_taglia).
@@ -210,7 +265,17 @@ export async function applySync(
   const deletedIds = new Set(cleanupOps.flatMap((o) => o.deleteVariationIds));
 
   // 2. Collect price writes; drop the ones aimed at variations being deleted.
-  const allChanges = await collectChanges(selections);
+  const gtinByVariation = new Map<number, string>();
+  for (const product of snapshot?.products ?? []) {
+    for (const v of product.variations) {
+      if (v.global_unique_id) gtinByVariation.set(v.id, String(v.global_unique_id));
+    }
+  }
+  const allChanges = await collectChanges(selections, {
+    gtinByVariation,
+    planIds: options.planIds ?? [],
+    backfillGtins: options.backfillGtins !== false,
+  });
   const changes = allChanges.filter((c) => !deletedIds.has(c.storeVariationId));
   const droppedByCleanup = allChanges.length - changes.length;
 
@@ -259,6 +324,7 @@ export async function applySync(
       droppedByCleanup,
       cleanup,
       cleanupDetails,
+      gtinsWritten: changes.filter((c) => c.newGtin).length,
     };
   }
 
@@ -293,6 +359,7 @@ export async function applySync(
           row.stock_quantity = c.newStock;
           row.stock_status = c.newStock > 0 ? "instock" : "outofstock";
         }
+        if (c.newGtin) row.global_unique_id = c.newGtin;
         merged.set(c.storeVariationId, row);
       }
 
@@ -353,6 +420,7 @@ export async function applySync(
     droppedByCleanup,
     cleanup,
     cleanupDetails,
+    gtinsWritten: changes.filter((c) => c.newGtin).length,
   };
 }
 

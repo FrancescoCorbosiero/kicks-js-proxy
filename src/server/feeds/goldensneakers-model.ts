@@ -3,6 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import { classifyTitle } from "@/server/catalog/classify";
 import { humanEuSize, normSize } from "@/server/store-json/match";
 import { skuKey } from "@/lib/skus";
+import { normalizeGtin } from "@/lib/gtin";
 
 /**
  * GoldenSneakers flat-assortment model: one row per SKU+size, presented_price
@@ -112,6 +113,15 @@ export interface GsOffer {
 export interface GsParseResult {
   offers: GsOffer[];
   rejected: { index: number; reason: string }[];
+  /**
+   * Rows whose barcode no external catalog would accept (bad check digit,
+   * impossible length, junk). The row is KEPT — the size still sells — but the
+   * identifier is not written to the store, so this count is the only place
+   * the supplier's data quality becomes visible before Merchant Center says so.
+   */
+  invalidBarcodes: number;
+  /** Barcodes the feed gives to more than one SKU+size — a channel refuses both. */
+  duplicateBarcodes: number;
 }
 
 /**
@@ -170,7 +180,21 @@ export function parseGsPayload(payload: unknown): GsParseResult {
     if (!existing || (existing.quantity === 0 && offer.quantity > 0)) byKey.set(key, offer);
   });
 
-  return { offers: [...byKey.values()], rejected };
+  const offers = [...byKey.values()];
+  const seen = new Set<string>();
+  let invalidBarcodes = 0;
+  const duplicated = new Set<string>();
+  for (const o of offers) {
+    if (!o.barcode) continue;
+    const { gtin } = normalizeGtin(o.barcode);
+    if (!gtin) {
+      invalidBarcodes += 1;
+      continue;
+    }
+    if (seen.has(gtin)) duplicated.add(gtin);
+    seen.add(gtin);
+  }
+  return { offers, rejected, invalidBarcodes, duplicateBarcodes: duplicated.size };
 }
 
 /**

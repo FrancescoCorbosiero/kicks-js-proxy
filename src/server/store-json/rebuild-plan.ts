@@ -4,6 +4,7 @@ import type { AppConfig } from "@core/config";
 import { resolveEffectiveRule } from "@core/config";
 import { euSize } from "@/lib/sizes";
 import { skuKey } from "@/lib/skus";
+import { duplicateGtins, normalizeGtin } from "@/lib/gtin";
 import { humanEuSize, normSize, preferStoreVariation, variationEuSize } from "./match";
 import type { StoreVariation } from "./model";
 
@@ -72,6 +73,13 @@ export interface RebuildPlan {
   /** Catalog variants skipped because no EU size could be resolved. */
   skippedNoEu: number;
   carriedCount: number;
+  /**
+   * Barcodes NOT written: unusable (bad check digit, wrong length, junk) or
+   * claimed by more than one size. Sizes go out identifier-less rather than
+   * with a GTIN a channel will reject — listed here so the operator can chase
+   * the supplier instead of guessing at a disapproval in Merchant Center.
+   */
+  rejectedGtins: { sizeLabel: string; value: string; reason: string }[];
 }
 
 function parsePrice(s: unknown): number | null {
@@ -136,6 +144,23 @@ export function planRebuild(input: {
   let skippedNoEu = 0;
   let carriedCount = 0;
 
+  // GTIN hygiene, once for the whole product: normalize every barcode, then
+  // strike out any that two sizes claim. Both sources land here — the feed's
+  // `barcode` and KicksDB's UPC identifier are the same `variant.upc` field —
+  // so the store can never receive an identifier a channel would refuse.
+  const rejectedGtins: RebuildPlan["rejectedGtins"] = [];
+  const normalizedUpc = new Map<string, string | null>();
+  for (const variant of catalog.variants) {
+    const raw = variant.upc ?? "";
+    if (!raw) continue;
+    const { gtin, rejection } = normalizeGtin(raw);
+    normalizedUpc.set(variant.stockxVariantId, gtin);
+    if (!gtin && rejection && rejection !== "empty") {
+      rejectedGtins.push({ sizeLabel: variant.sizeLabel, value: String(raw), reason: rejection });
+    }
+  }
+  const shared = duplicateGtins([...normalizedUpc.values()]);
+
   for (const variant of catalog.variants) {
     const rawEu = euSize(variant.sizes) ?? (/eu/i.test(variant.sizeType) ? variant.sizeLabel : null);
     const euNorm = rawEu != null ? normSize(rawEu) : null;
@@ -178,7 +203,11 @@ export function planRebuild(input: {
       carriedCount += 1;
     }
 
-    const upc = variant.upc ?? null;
+    let upc = normalizedUpc.get(variant.stockxVariantId) ?? null;
+    if (upc && shared.has(upc)) {
+      rejectedGtins.push({ sizeLabel: label, value: upc, reason: "duplicate" });
+      upc = null;
+    }
     payload.sku = `${skuKey(parentSku)}-EU${label}`;
     payload.attributes = [
       input.tagliaAttributeId != null
@@ -229,6 +258,7 @@ export function planRebuild(input: {
     unpricedSizes: create.filter((c) => c.price == null).map((c) => c.sizeLabel),
     skippedNoEu,
     carriedCount,
+    rejectedGtins,
   };
 }
 

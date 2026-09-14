@@ -489,6 +489,10 @@ export const it = {
       needSnapshot: "Serve lo stato dello store: esegui prima un pull (o carica un file da /preview).",
     },
     apply: {
+      gtins: "Completa i codici a barre",
+      gtinsHint:
+        "Scrive il GTIN/EAN della fonte nelle varianti che non ne hanno (mai sopra uno esistente). È il codice su cui Google Merchant Center e TikTok Shop agganciano l'offerta: senza, il prodotto non è confrontabile. Vale su tutta l'anteprima, non solo sulle righe selezionate per il prezzo — un prodotto già al prezzo giusto non è selezionabile e resterebbe senza codice per sempre.",
+      gtinsWritten: (n: number) => `${n} codici a barre da completare`,
       ready: (n: number) => `${n} varianti pronte alla scrittura`,
       cleanup: "Allinea taglie (pa_taglia)",
       cleanupHint:
@@ -603,6 +607,10 @@ export const it = {
     },
     gs: {
       name: "GoldenSneakers",
+      barcodeQuality: (invalid: number, duplicate: number) =>
+        `${invalid} codici a barre inutilizzabili · ${duplicate} condivisi tra più taglie`,
+      barcodeQualityHint:
+        "Codici del fornitore che una vetrina esterna rifiuterebbe (cifra di controllo o lunghezza errata) o che compaiono su più taglie. Le righe restano in vendita, ma quelle taglie arrivano sul negozio senza GTIN: è un problema da segnalare al fornitore.",
       tag: "fornitore",
       desc: "Assortimento flat del fornitore: i prodotti coperti dal feed sono POSSEDUTI da GoldenSneakers — taglie, prezzi finali (presented_price) e stock reale arrivano dal feed. Le righe scomparse vengono disattivate, mai eliminate.",
       stats: (skus: number, rows: number) => `${skus} prodotti · ${rows} taglie attive`,
@@ -736,6 +744,12 @@ export const it = {
     exampleLabel: "Esempio:",
   },
   publish: {
+    gtins: (n: number) => `${n} codici a barre scritti`,
+    rejectedGtins: (n: number) => `${n} codici scartati`,
+    rejectedGtinsHint:
+      "Codici a barre non scritti perché una vetrina esterna li rifiuterebbe: cifra di controllo errata, lunghezza non valida, oppure lo stesso codice su più taglie. Passa il mouse sulla riga del prodotto per vedere quali.",
+    identitySkipped: (list: string) =>
+      `Tassonomie non scrivibili su questo negozio: ${list}. I prodotti sono stati creati lo stesso, ma senza quei campi le vetrine esterne li vedono incompleti.`,
     title: "Pubblica",
     desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine, giacenze reali del fornitore e immagini. Prima una prova a vuoto, poi la scrittura vera.",
     notConfigured:

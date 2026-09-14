@@ -180,6 +180,105 @@ export class WooClient {
       .parse(raw);
   }
 
+  /* ---------------------------------------------------------------- *
+   * Product identity: brand, categories, attribute terms.
+   *
+   * Everything a product needs to exist on an EXTERNAL catalog (Merchant
+   * Center, TikTok Shop) beyond its price and its sizes. All of it is
+   * best-effort at the call site: a store without the brands taxonomy, or a
+   * key without permission to create terms, must still be able to publish.
+   * ---------------------------------------------------------------- */
+
+  /** Product brands (`products/brands`). Empty when the store has no such taxonomy. */
+  async listBrands(): Promise<{ id: number; name: string; slug: string }[]> {
+    return this.listTerms("products/brands");
+  }
+
+  async createBrand(name: string): Promise<{ id: number; name: string; slug: string } | null> {
+    return this.createTerm("products/brands", { name });
+  }
+
+  /** Product categories (`products/categories`), parents and children alike. */
+  async listCategories(): Promise<{ id: number; name: string; slug: string; parent?: number }[]> {
+    return this.listTerms("products/categories");
+  }
+
+  async createCategory(
+    name: string,
+    parent?: number,
+  ): Promise<{ id: number; name: string; slug: string } | null> {
+    return this.createTerm("products/categories", parent ? { name, parent } : { name });
+  }
+
+  /** Terms of one global attribute (e.g. every value of pa_brand). */
+  async listAttributeTerms(attributeId: number): Promise<{ id: number; name: string; slug: string }[]> {
+    return this.listTerms(`products/attributes/${attributeId}/terms`);
+  }
+
+  async createAttributeTerm(
+    attributeId: number,
+    name: string,
+  ): Promise<{ id: number; name: string; slug: string } | null> {
+    return this.createTerm(`products/attributes/${attributeId}/terms`, { name });
+  }
+
+  /** Create a global attribute taxonomy (pa_brand, pa_gender) when absent. */
+  async createAttribute(
+    name: string,
+    slug: string,
+  ): Promise<{ id: number; name: string; slug: string } | null> {
+    return this.createTerm("products/attributes", { name, slug, type: "select" });
+  }
+
+  /** Paged term listing; a taxonomy the store does not have answers 404 → []. */
+  private async listTerms(
+    path: string,
+  ): Promise<{ id: number; name: string; slug: string; parent?: number }[]> {
+    const schema = z.array(
+      z.looseObject({ id: z.number(), name: z.string(), slug: z.string(), parent: z.number().optional() }),
+    );
+    const out: { id: number; name: string; slug: string; parent?: number }[] = [];
+    for (let page = 1; page <= 20; page++) {
+      let rows: z.infer<typeof schema>;
+      try {
+        rows = schema.parse(
+          await requestJson(
+            this.apiUrl(path, { per_page: "100", page: String(page) }),
+            { method: "GET", headers: this.headers() },
+            this.retry,
+          ),
+        );
+      } catch (e) {
+        if ((e as { status?: number }).status === 404) return out; // taxonomy absent
+        throw e;
+      }
+      out.push(...rows);
+      if (rows.length < 100) break;
+    }
+    return out;
+  }
+
+  /** Create one term; null when the store cannot (no taxonomy, no permission). */
+  private async createTerm(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<{ id: number; name: string; slug: string } | null> {
+    try {
+      const raw = await requestJson(
+        this.apiUrl(path),
+        { method: "POST", headers: this.headers(), body: JSON.stringify(body) },
+        this.retry,
+      );
+      return z.looseObject({ id: z.number(), name: z.string(), slug: z.string() }).parse(raw);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      // 400 "term_exists" is a race with another writer, not a failure the
+      // caller can act on — the resolver re-reads and finds it.
+      if (status === 404 || status === 400 || status === 401 || status === 403) return null;
+      throw e;
+    }
+  }
+
   /**
    * Write variations: Woo's one structural constraint — variation batches are
    * per-parent-product (POST products/{id}/variations/batch), never global.

@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
-import { planPublish, planReimportParent, publishedVariations } from "./publish-plan";
+import {
+  identityNamesFor,
+  planPublish,
+  planReimportParent,
+  publishedVariations,
+} from "./publish-plan";
 
 const config: AppConfig = buildDefaultConfig({
   kicksDbApiKey: "",
@@ -244,5 +249,72 @@ describe("publishedVariations", () => {
     const [first] = publishedVariations(plan, [{ id: 501 }, { id: 502 }]);
     expect(first.regular_price).toBe(plan.variations[0].price!.toFixed(2));
     expect(first.sku).toBe(plan.variations[0].sku);
+  });
+});
+
+describe("product identity for external catalogs", () => {
+  it("reads brand, category path and gender off a KicksDB product", () => {
+    expect(identityNamesFor(product())).toEqual({
+      brand: "adidas",
+      categoryPath: ["Yeezy", "Foam RNNR"],
+      gender: "",
+    });
+  });
+
+  it("reads them off a feed product just the same", () => {
+    // gsOffersToSource fills brand from the supplier row and the rest from the
+    // shared title classifier, so both sources arrive here identical in shape.
+    const gs = product({
+      source: "goldensneakers",
+      brand: "Adidas",
+      category: "Samba",
+      secondaryCategory: "",
+      gender: "women",
+    });
+    expect(identityNamesFor(gs)).toEqual({
+      brand: "Adidas",
+      categoryPath: ["Samba"],
+      gender: "women",
+    });
+  });
+
+  it("drops empty parts instead of writing blanks", () => {
+    expect(
+      identityNamesFor(product({ brand: "  ", category: "", secondaryCategory: "  " })),
+    ).toEqual({ brand: "", categoryPath: [], gender: "" });
+  });
+
+  it("writes the brand BOTH ways — taxonomy and attribute", () => {
+    // Channel plugins disagree on where they read the brand from, and a
+    // product invisible to the connector the shop uses is as good as brandless.
+    const plan = planPublish({
+      catalog: product(),
+      config,
+      identity: {
+        brandId: 7,
+        categoryIds: [11, 12],
+        attributes: [
+          { id: 2, option: "adidas" },
+          { id: 3, option: "women" },
+        ],
+      },
+    });
+    expect(plan.parentBody.brands).toEqual([7]);
+    expect(plan.parentBody.categories).toEqual([{ id: 11 }, { id: 12 }]);
+
+    const attrs = plan.parentBody.attributes as Record<string, unknown>[];
+    // pa_taglia stays the variation axis; identity attributes never are.
+    expect(attrs[0]).toMatchObject({ variation: true });
+    expect(attrs.slice(1)).toEqual([
+      { id: 2, position: 1, visible: true, variation: false, options: ["adidas"] },
+      { id: 3, position: 2, visible: true, variation: false, options: ["women"] },
+    ]);
+  });
+
+  it("publishes exactly as before when nothing could be resolved", () => {
+    const plan = planPublish({ catalog: product(), config });
+    expect(plan.parentBody.brands).toBeUndefined();
+    expect(plan.parentBody.categories).toBeUndefined();
+    expect((plan.parentBody.attributes as unknown[]).length).toBe(1);
   });
 });

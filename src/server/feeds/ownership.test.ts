@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
-import { fetchSecondarySource, mergeGsOwned, type GsOwnedProduct } from "./ownership";
+import { carryIdentifiers, fetchSecondarySource, mergeGsOwned, type GsOwnedProduct } from "./ownership";
 
 function product(sku: string, over: Partial<SourceProduct> = {}): SourceProduct {
   return {
@@ -91,5 +91,56 @@ describe("fetchSecondarySource", () => {
     expect(fetch).toHaveBeenCalledWith(["CZ0790"]);
     expect(res.products.map((p) => p.sku)).toEqual(["CZ0790"]);
     expect(res.warning).toBeUndefined();
+  });
+});
+
+describe("carryIdentifiers", () => {
+  const variant = (id: string, sizeLabel: string, upc?: string) => ({
+    stockxVariantId: id,
+    sizeLabel,
+    sizeType: "eu",
+    sizes: [{ system: "eu", size: sizeLabel }],
+    ...(upc ? { upc } : {}),
+    offers: [],
+  });
+
+  it("fills the GTINs the bulk price endpoint does not return", () => {
+    // The sync runs on prices (no identifiers); the catalog holds them.
+    const fetched = [product("IE4931", { variants: [variant("v1", "42"), variant("v2", "43")] })];
+    const known = new Map([
+      [
+        "IE4931",
+        product("IE4931", {
+          variants: [variant("v1", "42", "4067907638411"), variant("v2", "43", "4067898487401")],
+        }),
+      ],
+    ]);
+    expect(carryIdentifiers(fetched, known)[0].variants.map((v) => v.upc)).toEqual([
+      "4067907638411",
+      "4067898487401",
+    ]);
+  });
+
+  it("falls back to the size when variant ids differ between endpoints", () => {
+    const fetched = [product("IE4931", { variants: [variant("other-id", "42")] })];
+    const known = new Map([
+      ["IE4931", product("IE4931", { variants: [variant("v1", "42", "4067907638411")] })],
+    ]);
+    expect(carryIdentifiers(fetched, known)[0].variants[0].upc).toBe("4067907638411");
+  });
+
+  it("never overwrites an identifier the source already sent", () => {
+    const fetched = [product("IE4931", { variants: [variant("v1", "42", "4067898487401")] })];
+    const known = new Map([
+      ["IE4931", product("IE4931", { variants: [variant("v1", "42", "4067907638411")] })],
+    ]);
+    expect(carryIdentifiers(fetched, known)[0].variants[0].upc).toBe("4067898487401");
+  });
+
+  it("passes products through when the catalog knows nothing", () => {
+    const fetched = [product("IE4931", { variants: [variant("v1", "42")] })];
+    expect(carryIdentifiers(fetched, new Map())).toBe(fetched);
+    expect(carryIdentifiers(fetched, new Map([["ZZ0000", product("ZZ0000")]]))[0].variants[0].upc)
+      .toBeUndefined();
   });
 });

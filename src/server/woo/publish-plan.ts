@@ -41,8 +41,49 @@ export interface PublishPlan {
   unpricedSizes: string[];
   /** Catalog variants skipped because no EU size could be resolved. */
   skippedNoEu: number;
+  /** Barcodes the planner refused to write, with the reason. */
+  rejectedGtins: { sizeLabel: string; value: string; reason: string }[];
   /** Image URLs the parent will sideload, main image first. */
   images: string[];
+}
+
+/**
+ * The identity a product needs on an EXTERNAL catalog, as plain names — before
+ * anything has been resolved against the store's taxonomies. Google Merchant
+ * Center and TikTok Shop key an offer on brand + identifier + category, and
+ * until now a published product carried none of the three: name, sizes, price,
+ * pictures, nothing else. Both sources fill this in — KicksDB sends brand,
+ * gender and category outright; the feed's products get brand from the
+ * supplier row and the rest from the shared title classifier.
+ */
+export interface IdentityNames {
+  brand: string;
+  /** Category path, broadest first: ["Air Jordan", "One"]. */
+  categoryPath: string[];
+  /** Source vocabulary as-is ("men", "women", "youth"…) — never re-coded here:
+   *  the channel plugin owns the mapping to its own field values. */
+  gender: string;
+}
+
+/** What the store answered when those names were resolved (or created). */
+export interface ResolvedIdentity {
+  /** product_brand term id — the native WooCommerce brands taxonomy. */
+  brandId?: number;
+  /** product_cat term ids, broadest first. */
+  categoryIds?: number[];
+  /** Global attribute bindings: pa_brand, pa_gender. */
+  attributes?: { id: number; option: string }[];
+}
+
+/** The identity names a catalog product carries, empty strings dropped. */
+export function identityNamesFor(catalog: SourceProduct): IdentityNames {
+  return {
+    brand: (catalog.brand ?? "").trim(),
+    categoryPath: [catalog.category, catalog.secondaryCategory]
+      .map((c) => (c ?? "").trim())
+      .filter((c) => c.length > 0),
+    gender: (catalog.gender ?? "").trim(),
+  };
 }
 
 export interface PublishPlanInput {
@@ -50,6 +91,8 @@ export interface PublishPlanInput {
   config: AppConfig;
   /** Operator price locks keyed by canonical EU size (euNorm). */
   manualPrices?: Record<string, number>;
+  /** Brand/category/gender already resolved to store term ids. */
+  identity?: ResolvedIdentity;
   /** Global pa_taglia attribute id, when known — makes create bindings exact. */
   tagliaAttributeId?: number;
   /** Real per-size stock (euNorm → quantity) for feed-owned products. */
@@ -120,6 +163,32 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
   if (catalog.description) parentBody.description = catalog.description;
   if (images.length > 0) parentBody.images = images.map((src) => ({ src }));
 
+  // Identity for the external catalogs. The brand is written BOTH ways on
+  // purpose: channel plugins disagree on where to read it — some only know the
+  // native product_brand taxonomy, others only a global pa_brand attribute —
+  // and a product that is invisible to the connector the shop actually uses is
+  // no better than a product with no brand at all.
+  const identity = input.identity;
+  if (identity?.brandId != null) parentBody.brands = [identity.brandId];
+  if (identity?.categoryIds?.length) {
+    parentBody.categories = identity.categoryIds.map((id) => ({ id }));
+  }
+  if (identity?.attributes?.length) {
+    const sizeAttributes = parentBody.attributes as Record<string, unknown>[];
+    parentBody.attributes = [
+      ...sizeAttributes,
+      // Visible on the product page, never a variation axis: these describe the
+      // product, they do not multiply its sizes.
+      ...identity.attributes.map((a, i) => ({
+        id: a.id,
+        position: sizeAttributes.length + i,
+        visible: true,
+        variation: false,
+        options: [a.option],
+      })),
+    ];
+  }
+
   return {
     sku,
     title: catalog.title || sku,
@@ -128,6 +197,7 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
     sizeOptions: rebuilt.parentSizeOptions,
     unpricedSizes: rebuilt.unpricedSizes,
     skippedNoEu: rebuilt.skippedNoEu,
+    rejectedGtins: rebuilt.rejectedGtins,
     images,
   };
 }

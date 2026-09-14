@@ -57,6 +57,8 @@ export interface GsSyncReport {
   updated: number; // refreshed rows
   deactivated: number; // rows that vanished from the feed
   rejected: number; // invalid rows (bad size, bad shape)
+  invalidBarcodes: number; // rows whose barcode a channel would refuse
+  duplicateBarcodes: number; // barcodes the feed gives to more than one size
   catalogRegistered: number; // GS entries upserted into the multi-source catalog
 }
 
@@ -84,12 +86,18 @@ async function registerGsCatalogEntries(offers: GsOffer[], market: string): Prom
 
 /** Run a sync from an already-downloaded payload (API rows or an uploaded file). */
 export async function syncGoldenSneakers(payload: unknown): Promise<GsSyncReport> {
-  const { offers, rejected } = parseGsPayload(payload);
+  const { offers, rejected, invalidBarcodes, duplicateBarcodes } = parseGsPayload(payload);
   if (offers.length === 0) {
     throw new Error(
       rejected.length > 0
         ? `Feed rejected: 0 valid rows (${rejected.length} invalid — first: ${rejected[0].reason})`
         : "Feed rejected: empty payload — refusing to deactivate the whole feed.",
+    );
+  }
+
+  if (invalidBarcodes > 0 || duplicateBarcodes > 0) {
+    console.warn(
+      `[gs] barcode quality: ${invalidBarcodes} unusable, ${duplicateBarcodes} shared by several sizes — those sizes go to the store without a GTIN.`,
     );
   }
 
@@ -131,6 +139,8 @@ export async function syncGoldenSneakers(payload: unknown): Promise<GsSyncReport
       updated: offers.length - added,
       deactivated,
       rejected: rejected.length,
+      invalidBarcodes,
+      duplicateBarcodes,
       catalogRegistered,
     };
     if (runId) {

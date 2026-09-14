@@ -42,7 +42,7 @@ function catalog(): SourceProduct {
     market: "IT",
     currency: "EUR",
     variants: [
-      { stockxVariantId: "v36", sizeLabel: "4", sizeType: "us m", sizes: [{ system: "eu", size: "EU 36" }], upc: "UPC-36", offers: [{ deliveryType: "standard", lowestAsk: 100, asks: 3 }] },
+      { stockxVariantId: "v36", sizeLabel: "4", sizeType: "us m", sizes: [{ system: "eu", size: "EU 36" }], upc: "4067907638411", offers: [{ deliveryType: "standard", lowestAsk: 100, asks: 3 }] },
       { stockxVariantId: "v425", sizeLabel: "9", sizeType: "us m", sizes: [{ system: "eu", size: "EU 42.5" }], offers: [{ deliveryType: "standard", lowestAsk: 200, asks: 5 }] },
       { stockxVariantId: "v455", sizeLabel: "11.5", sizeType: "us m", sizes: [{ system: "eu", size: "EU 45.5" }], offers: [] },
       { stockxVariantId: "v3623", sizeLabel: "4.5", sizeType: "us m", sizes: [{ system: "eu", size: "EU 36 2/3" }], offers: [{ deliveryType: "standard", lowestAsk: 120, asks: 2 }] },
@@ -103,7 +103,7 @@ describe("planRebuild", () => {
     const s36 = plan.create.find((c) => c.sizeLabel === "36")!;
     expect(s36.sku).toBe("U906023D-EU36");
     expect(s36.payload.attributes).toEqual([{ id: 3, option: "36" }]);
-    expect(s36.payload.global_unique_id).toBe("UPC-36");
+    expect(s36.payload.global_unique_id).toBe("4067907638411");
     const s3623 = plan.create.find((c) => c.sizeLabel === "36 2/3")!;
     expect(s3623.sku).toBe("U906023D-EU36 2/3");
   });
@@ -192,5 +192,63 @@ describe("rebuildParentAttributes", () => {
     expect(attrs).toEqual([
       { id: 3, name: "pa_taglia", variation: true, visible: true, options: ["36"] },
     ]);
+  });
+});
+
+describe("planRebuild — GTIN hygiene", () => {
+  /** The identifier every external catalog keys on: written only when sound. */
+  function withUpcs(upcs: (string | undefined)[]): SourceProduct {
+    const p = catalog();
+    p.variants.forEach((v, i) => {
+      if (upcs[i] === undefined) delete v.upc;
+      else v.upc = upcs[i];
+    });
+    return p;
+  }
+
+  const base = {
+    parentSku: "U906023D",
+    storeProductId: 1,
+    oldVariations: [],
+    config: config(),
+    tagliaAttributeId: 3,
+  };
+
+  it("drops a barcode a channel would reject, and says why", () => {
+    // 4067907638410 = the real EAN with a broken check digit.
+    const plan = planRebuild({ ...base, catalog: withUpcs(["4067907638410", undefined, undefined]) });
+    expect(plan.create.every((c) => c.upc == null)).toBe(true);
+    expect(plan.rejectedGtins).toEqual([
+      { sizeLabel: "4", value: "4067907638410", reason: "badCheckDigit" },
+    ]);
+  });
+
+  it("normalizes a UPC-A to 13 digits on the way out", () => {
+    const plan = planRebuild({ ...base, catalog: withUpcs(["036000291452", undefined, undefined]) });
+    expect(plan.create.find((c) => c.sizeLabel === "36")!.upc).toBe("0036000291452");
+    expect(plan.rejectedGtins).toEqual([]);
+  });
+
+  it("strips a barcode two sizes both claim — from BOTH of them", () => {
+    // A channel disapproves every offer sharing a GTIN, and nothing here can
+    // tell which size the number really belongs to.
+    const plan = planRebuild({
+      ...base,
+      catalog: withUpcs(["4067907638411", "4067907638411", undefined]),
+    });
+    expect(plan.create.every((c) => c.upc == null)).toBe(true);
+    expect(plan.rejectedGtins.filter((r) => r.reason === "duplicate")).toHaveLength(2);
+  });
+
+  it("leaves a clean per-size set exactly as it is", () => {
+    const plan = planRebuild({
+      ...base,
+      catalog: withUpcs(["4067907638411", "4067898487401", undefined]),
+    });
+    expect(plan.create.filter((c) => c.upc).map((c) => c.upc)).toEqual([
+      "4067907638411",
+      "4067898487401",
+    ]);
+    expect(plan.rejectedGtins).toEqual([]);
   });
 });

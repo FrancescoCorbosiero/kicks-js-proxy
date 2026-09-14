@@ -475,6 +475,10 @@ export const en: Dictionary = {
       needSnapshot: "Store state required: run a pull first (or upload a file at /preview).",
     },
     apply: {
+      gtins: "Fill in barcodes",
+      gtinsHint:
+        "Writes the source's GTIN/EAN into variations that have none (never over an existing one). It is the code Google Merchant Center and TikTok Shop match an offer on — without it the product cannot be compared. Applies to the whole preview, not just the rows selected for a price change: a correctly-priced product is not selectable and would stay identifier-less forever.",
+      gtinsWritten: (n: number) => `${n} barcodes to fill in`,
       ready: (n) => `${n} variations ready to write`,
       cleanup: "Align sizes (pa_taglia)",
       cleanupHint:
@@ -587,6 +591,10 @@ export const en: Dictionary = {
     },
     gs: {
       name: "GoldenSneakers",
+      barcodeQuality: (invalid: number, duplicate: number) =>
+        `${invalid} unusable barcodes · ${duplicate} shared across sizes`,
+      barcodeQualityHint:
+        "Supplier codes an external catalog would reject (bad check digit or length), or that appear on several sizes. The rows still sell, but those sizes reach the store with no GTIN — worth raising with the supplier.",
       tag: "supplier",
       desc: "The supplier's flat assortment: products the feed covers are OWNED by GoldenSneakers — sizes, final prices (presented_price) and real stock come from the feed. Vanished rows are deactivated, never deleted.",
       stats: (skus, rows) => `${skus} products · ${rows} active sizes`,
@@ -718,6 +726,12 @@ export const en: Dictionary = {
     exampleLabel: "Example:",
   },
   publish: {
+    gtins: (n: number) => `${n} barcodes written`,
+    rejectedGtins: (n: number) => `${n} barcodes dropped`,
+    rejectedGtinsHint:
+      "Barcodes not written because an external catalog would reject them: bad check digit, invalid length, or the same code on several sizes. Hover a product row to see which.",
+    identitySkipped: (list: string) =>
+      `Taxonomies this store would not take: ${list}. The products were still created, but external catalogs will see them incomplete without those fields.`,
     title: "Publish",
     desc: "The products in your catalog that are not on the store yet. Select them and they get created on WooCommerce: product, EU sizes, prices from the margin rules, real supplier stock and images. Dry run first, real write second.",
     notConfigured: "WooCommerce is not configured (WOO_BASE_URL and API keys): publishing is unavailable.",
