@@ -58,13 +58,17 @@ export function planProductSanitize(
   const counts = sanitizeProduct(sanitized, keepAvailable);
   if (!counts.changed) return null;
 
-  const after = new Map(sanitized.variations.map((v) => [v.id, v]));
+  // Variations keyed by id — so anything without a real one is out of scope
+  // here: it can be neither deleted nor rewritten over REST, and several of
+  // them would collapse into a single map entry and rewrite each other.
+  const after = new Map(sanitized.variations.filter((v) => v.id > 0).map((v) => [v.id, v]));
   const deleteVariationIds = product.variations
-    .filter((v) => !after.has(v.id))
+    .filter((v) => v.id > 0 && !after.has(v.id))
     .map((v) => v.id);
 
   const variationWrites: VariationRestWrite[] = [];
   for (const before of product.variations) {
+    if (!(before.id > 0)) continue;
     const now = after.get(before.id);
     if (!now) continue;
     const write: VariationRestWrite = { id: before.id };

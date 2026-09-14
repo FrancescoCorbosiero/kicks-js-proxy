@@ -174,6 +174,24 @@ describe("resolveFromModel", () => {
     expect(map.get("v-42")?.storeVariationId).toBe(334132);
   });
 
+  it("never links a variant to a variation with no real Woo id", () => {
+    // A product published before its variation ids were read back carried
+    // id 0 in the snapshot; matching against it planned an update on
+    // variation 0. Unmatched is the right answer — the row becomes a
+    // "create", which the apply drops, until the next pull brings real ids.
+    const m: StoreModel = structuredClone(model);
+    for (const v of m.products[0].variations) v.id = 0;
+    expect(resolveFromModel(m, source()).size).toBe(0);
+  });
+
+  it("still matches the addressable variations of a half-patched product", () => {
+    const m: StoreModel = structuredClone(model);
+    m.products[0].variations[0].id = 0; // the EU 42.5 one
+    const map = resolveFromModel(m, source());
+    expect(map.has("v-425")).toBe(false);
+    expect(map.get("v-42")?.storeVariationId).toBe(334132);
+  });
+
   it("returns empty when the parent SKU is not in the snapshot", () => {
     const other = { ...source(), sku: "ZZ0000-000" };
     expect(resolveFromModel(model, other).size).toBe(0);

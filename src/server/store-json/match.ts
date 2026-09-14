@@ -220,6 +220,11 @@ export function resolveFromModel(
   const byGtin = new Map<string, StoreVariation>();
   const bySize = new Map<string, StoreVariation>();
   for (const vrt of prod.variations) {
+    // A variation with no real Woo id cannot be a write target: linking to it
+    // would plan an update against variation 0. Leaving it unmatched makes the
+    // row a harmless "create" the apply drops, until the next pull brings the
+    // real id in.
+    if (!(vrt.id > 0)) continue;
     if (vrt.global_unique_id) byGtin.set(vrt.global_unique_id, vrt);
     const e = variationEuSize(prod.sku, vrt);
     if (!e) continue;

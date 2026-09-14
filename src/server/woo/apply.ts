@@ -123,6 +123,10 @@ async function collectChanges(selections: ApplySelection[]): Promise<ApplyChange
       if (!wanted.has(item.stockxVariantId)) continue;
       if (item.action !== "update") continue; // "create" needs upsertProduct — out of scope
       if (item.storeProductId == null || item.storeVariationId == null) continue;
+      // Belt and braces: a plan saved before the id was known would aim at
+      // variation 0, which Woo rejects — and which the UI shows as a pile of
+      // rows sharing one identity.
+      if (item.storeVariationId <= 0) continue;
       if (item.proposedPrice == null && item.stockQuantity == null) continue;
       changes.push({
         sku: plan.sku,
