@@ -124,6 +124,60 @@ function usableImages(catalog: SourceProduct, includeGallery: boolean, max: numb
   return out;
 }
 
+/**
+ * Attach brand / categories / gender to a product body, in the shape the Woo
+ * REST product schema actually takes: taxonomy fields are arrays of OBJECTS
+ * ({ id }), exactly like `categories` — a bare id array is refused outright
+ * ("brands[0] is not of type object").
+ *
+ * The brand is written BOTH ways on purpose: channel plugins disagree on where
+ * to read it — some only know the native product_brand taxonomy, others only a
+ * global pa_brand attribute — and a product invisible to the connector the
+ * shop actually uses is no better than a product with no brand at all.
+ */
+function applyIdentity(body: Record<string, unknown>, identity: ResolvedIdentity | undefined): void {
+  if (identity?.brandId != null) body.brands = [{ id: identity.brandId }];
+  if (identity?.categoryIds?.length) {
+    body.categories = identity.categoryIds.map((id) => ({ id }));
+  }
+  if (identity?.attributes?.length) {
+    const existing = (body.attributes as Record<string, unknown>[] | undefined) ?? [];
+    body.attributes = [
+      ...existing,
+      // Visible on the product page, never a variation axis: these describe the
+      // product, they do not multiply its sizes.
+      ...identity.attributes.map((a, i) => ({
+        id: a.id,
+        position: existing.length + i,
+        visible: true,
+        variation: false,
+        options: [a.option],
+      })),
+    ];
+  }
+}
+
+/** The keys applyIdentity may have added — used to retry without them. */
+const IDENTITY_KEYS = ["brands", "categories"] as const;
+
+/**
+ * The same body with every identity field removed: the fallback when a store's
+ * REST schema refuses one of them. Losing the brand is bad; losing the product
+ * is worse, so a publish that trips on a taxonomy retries without it.
+ */
+export function withoutIdentity(
+  body: Record<string, unknown>,
+  identity: ResolvedIdentity | undefined,
+): Record<string, unknown> {
+  const out = { ...body };
+  for (const key of IDENTITY_KEYS) delete out[key];
+  const added = identity?.attributes?.length ?? 0;
+  if (added > 0 && Array.isArray(out.attributes)) {
+    out.attributes = (out.attributes as unknown[]).slice(0, out.attributes.length - added);
+  }
+  return out;
+}
+
 export function planPublish(input: PublishPlanInput): PublishPlan {
   const { catalog, config } = input;
   const sku = skuKey(catalog.sku);
@@ -168,26 +222,7 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
   // native product_brand taxonomy, others only a global pa_brand attribute —
   // and a product that is invisible to the connector the shop actually uses is
   // no better than a product with no brand at all.
-  const identity = input.identity;
-  if (identity?.brandId != null) parentBody.brands = [identity.brandId];
-  if (identity?.categoryIds?.length) {
-    parentBody.categories = identity.categoryIds.map((id) => ({ id }));
-  }
-  if (identity?.attributes?.length) {
-    const sizeAttributes = parentBody.attributes as Record<string, unknown>[];
-    parentBody.attributes = [
-      ...sizeAttributes,
-      // Visible on the product page, never a variation axis: these describe the
-      // product, they do not multiply its sizes.
-      ...identity.attributes.map((a, i) => ({
-        id: a.id,
-        position: sizeAttributes.length + i,
-        visible: true,
-        variation: false,
-        options: [a.option],
-      })),
-    ];
-  }
+  applyIdentity(parentBody, input.identity);
 
   return {
     sku,
@@ -212,14 +247,20 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
  */
 export function planReimportParent(
   plan: PublishPlan,
-  opts: { replaceMedia: boolean },
+  opts: { replaceMedia: boolean; identity?: ResolvedIdentity },
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     name: plan.title,
+    // Already carries the identity attributes: planPublish appended them to
+    // the same list. Only the taxonomy fields have to be re-stated.
     attributes: (plan.parentBody as { attributes: unknown }).attributes,
   };
   if (opts.replaceMedia && plan.images.length > 0) {
     body.images = plan.images.map((src) => ({ src }));
+  }
+  if (opts.identity?.brandId != null) body.brands = [{ id: opts.identity.brandId }];
+  if (opts.identity?.categoryIds?.length) {
+    body.categories = opts.identity.categoryIds.map((id) => ({ id }));
   }
   return body;
 }
