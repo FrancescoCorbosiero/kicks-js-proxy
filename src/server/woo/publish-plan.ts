@@ -58,8 +58,8 @@ export interface PublishPlan {
  */
 export interface IdentityNames {
   brand: string;
-  /** The single store category every published product goes under. */
-  category: string;
+  /** Category path, broadest first — see categoryPathFor for who decides it. */
+  categoryPath: string[];
   /** Source vocabulary as-is ("men", "women", "youth"…) — never re-coded here:
    *  the channel plugin owns the mapping to its own field values. */
   gender: string;
@@ -69,29 +69,44 @@ export interface IdentityNames {
 export interface ResolvedIdentity {
   /** product_brand term id — the native WooCommerce brands taxonomy. */
   brandId?: number;
-  /** product_cat term id — one flat category, see STORE_CATEGORY. */
+  /** product_cat term ids, broadest first. */
   categoryIds?: number[];
   /** Global attribute bindings: pa_brand, pa_gender. */
   attributes?: { id: number; option: string }[];
 }
 
-/**
- * The one product category the store files everything under.
- *
- * The catalog's own category/secondaryCategory ("New Balance" › "1906") stay
- * where they are useful — the discovery sidebar, the scope of a margin rule —
- * but they must NOT become store taxonomy: the brand half duplicates the
- * Marchio taxonomy, and the model half mints a term per silhouette. A shop
- * selling one kind of product needs one category, not a term for every shoe
- * it has ever listed.
- */
+/** The one category supplier-feed products are filed under on the store. */
 export const STORE_CATEGORY = "Sneakers";
+
+/**
+ * Where a product is filed on the STORE — a decision that belongs to the
+ * source, because the two sources mean different things by "category".
+ *
+ * A supplier feed carries no taxonomy at all: what the catalog shows for a
+ * feed product ("New Balance" › "1906") is inferred from its title by
+ * classifyTitle. Writing that to WooCommerce duplicates the Marchio taxonomy
+ * the same publish already fills, and mints a product_cat term per silhouette.
+ * Feed products therefore get ONE flat category.
+ *
+ * KicksDB is the opposite case: category and secondary_category are real
+ * fields of its API, curated upstream ("Air Jordan" › "One"), so its products
+ * keep the tree they actually come with rather than being flattened into a
+ * label this app invented. The catalog's internal tree — the discovery sidebar,
+ * the scope of a margin rule — is untouched either way.
+ */
+export function categoryPathFor(catalog: SourceProduct): string[] {
+  const source = catalog.source ?? "kicksdb";
+  if (source !== "kicksdb") return [STORE_CATEGORY];
+  return [catalog.category, catalog.secondaryCategory]
+    .map((c) => (c ?? "").trim())
+    .filter((c) => c.length > 0);
+}
 
 /** The identity names a catalog product carries, empty strings dropped. */
 export function identityNamesFor(catalog: SourceProduct): IdentityNames {
   return {
     brand: (catalog.brand ?? "").trim(),
-    category: STORE_CATEGORY,
+    categoryPath: categoryPathFor(catalog),
     gender: (catalog.gender ?? "").trim(),
   };
 }
