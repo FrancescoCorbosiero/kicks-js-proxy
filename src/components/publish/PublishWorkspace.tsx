@@ -10,6 +10,7 @@ import { useI18n } from "@/i18n/provider";
 import { runPublish } from "@/server/actions/publish";
 import type { PublishOutcome, PublishProductReport, PublishTarget } from "@/server/woo/publish";
 import { CardImage } from "@/components/catalog/CardImage";
+import { RepairPanel } from "./RepairPanel";
 
 /**
  * The Publisher's workspace: the catalog→store delta, selectable, with a
@@ -297,6 +298,9 @@ export function PublishWorkspace({
 
       {outcome && <OutcomePanel outcome={outcome} siteUrl={siteUrl} />}
 
+      {/* The non-destructive repair: for products the store already carries. */}
+      <RepairPanel />
+
       {/* Candidate list */}
       {candidates.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-muted">
@@ -378,6 +382,9 @@ function mergeOutcomes(a: PublishOutcome, b: PublishOutcome): PublishOutcome {
 function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: string }) {
   const { t } = useI18n();
   const created = outcome.products.filter((p) => p.action === "create");
+  // The failure that started all this: a product created with no picture at
+  // all. It was in the per-row detail and easy to miss; now it is a headline.
+  const noImage = outcome.products.filter((p) => p.action !== "skip" && p.images === 0).length;
   const gtins = outcome.products.reduce((n, p) => n + p.gtins, 0);
   const rejectedGtins = outcome.products.reduce((n, p) => n + p.rejectedGtins.length, 0);
   const reimported = outcome.products.filter((p) => p.action === "reimport");
@@ -399,6 +406,11 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
         )}
         {outcome.failed > 0 && (
           <span className="text-xs font-semibold text-skip">{t.publish.failedCount(outcome.failed)}</span>
+        )}
+        {noImage > 0 && (
+          <span className="text-xs font-semibold text-warn" title={t.publish.noImageHint}>
+            {t.publish.noImage(noImage)}
+          </span>
         )}
         {gtins > 0 && <span className="text-xs text-muted tnum">{t.publish.gtins(gtins)}</span>}
         {rejectedGtins > 0 && (

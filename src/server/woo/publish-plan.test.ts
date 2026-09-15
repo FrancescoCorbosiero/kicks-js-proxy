@@ -302,8 +302,8 @@ describe("product identity for external catalogs", () => {
         brandId: 7,
         categoryIds: [11, 12],
         attributes: [
-          { id: 2, option: "adidas" },
-          { id: 3, option: "women" },
+          { id: 2, option: "adidas", field: "brand" as const },
+          { id: 3, option: "women", field: "gender" as const },
         ],
       },
     });
@@ -334,8 +334,8 @@ describe("withoutIdentity", () => {
     brandId: 7,
     categoryIds: [11],
     attributes: [
-      { id: 2, option: "adidas" },
-      { id: 3, option: "women" },
+      { id: 2, option: "adidas", field: "brand" as const },
+      { id: 3, option: "women", field: "gender" as const },
     ],
   };
 
@@ -360,7 +360,7 @@ describe("withoutIdentity", () => {
 
 describe("planReimportParent", () => {
   it("restates the identity so a force reimport back-fills an existing product", () => {
-    const identity = { brandId: 7, categoryIds: [11], attributes: [{ id: 2, option: "adidas" }] };
+    const identity = { brandId: 7, categoryIds: [11], attributes: [{ id: 2, option: "adidas", field: "brand" as const }] };
     const plan = planPublish({ catalog: product(), config, identity });
     const body = planReimportParent(plan, { replaceMedia: false, identity });
     expect(body.brands).toEqual([{ id: 7 }]);

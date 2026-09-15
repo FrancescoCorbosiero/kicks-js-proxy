@@ -34,6 +34,12 @@ const EnvSchema = z.object({
   // Shared secret for the scheduled endpoints (/api/cron/*). Unset = disabled.
   CRON_SECRET: z.string().optional(),
 
+  // Automatic self-repair inside the daily scheduler: put back missing
+  // pictures / brand / category on products already online. OFF by default —
+  // it is the only pass that WRITES to the live store unattended, and arming
+  // that is the operator's decision, not a default.
+  AUTO_REPAIR: z.enum(["on", "off"]).optional(),
+
   // In-app scheduler (src/server/scheduler.ts). Default: on in production,
   // off in dev; set explicitly to override either way.
   SCHEDULER: z.enum(["on", "off"]).optional(),

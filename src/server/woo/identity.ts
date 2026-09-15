@@ -164,14 +164,14 @@ export async function buildIdentityResolver(
         if (ids.length > 0) out.categoryIds = ids;
       }
 
-      const attributes: { id: number; option: string }[] = [];
+      const attributes: NonNullable<ResolvedIdentity["attributes"]> = [];
       for (const attr of IDENTITY_ATTRIBUTES) {
         const value = attr.key === "brand" ? names.brand : names.gender;
         const attrId = attributeIds.get(attr.key);
         // The term has to exist: Woo silently drops an unknown option on a
         // taxonomy attribute, which would look like it worked.
         if (!value || attrId == null || !attributeTerms.get(attr.key)?.has(termKey(value))) continue;
-        attributes.push({ id: attrId, option: value });
+        attributes.push({ id: attrId, option: value, field: attr.key });
       }
       if (attributes.length > 0) out.attributes = attributes;
 
