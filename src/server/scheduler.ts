@@ -15,6 +15,9 @@ import { kicksdbConfigured } from "@/server/adapters/kicksdb";
  * The /api/cron/* endpoints stay available for external schedulers.
  */
 
+/** Products healed per tick — a big store recovers over days, not in one burst. */
+const MAX_REPAIRS_PER_TICK = 200;
+
 /** Rounds per refresh pass (100 SKUs each) — same backstop as the cron route. */
 const MAX_ROUNDS = 50;
 const FIRST_TICK_MS = 60 * 1000;
@@ -28,6 +31,7 @@ export interface SchedulerStatus {
   lastRunAt: number | null;
   lastGsSkus: number | null; // SKUs in the last GS sync (null = not run)
   lastRefreshed: number | null; // entries re-priced in the last pass
+  lastRepaired: number | null; // products healed in the last pass (null = off)
   lastError: string | null;
 }
 
@@ -45,6 +49,7 @@ function store(): SchedulerState {
     lastRunAt: null,
     lastGsSkus: null,
     lastRefreshed: null,
+    lastRepaired: null,
     lastError: null,
   });
 }
@@ -100,6 +105,34 @@ async function tick(): Promise<void> {
       if (refresh.error) errors.push(`KicksDB refresh: ${refresh.error}`);
     } else {
       s.lastRefreshed = null;
+    }
+
+    // Self-repair: products already online that lost a field to a source's
+    // change of shape. Additive and idempotent, but it writes to the LIVE
+    // store, so it runs only when explicitly armed.
+    if (env.AUTO_REPAIR === "on") {
+      try {
+        const { scanRepairCandidates, repairProducts } = await import("@/server/woo/repair");
+        const { incomplete } = await scanRepairCandidates();
+        // Bounded: a big store heals over successive days rather than
+        // hammering the REST API in one tick.
+        const batch = incomplete.slice(0, MAX_REPAIRS_PER_TICK);
+        if (batch.length > 0) {
+          const outcome = await repairProducts(batch, { dryRun: false });
+          s.lastRepaired = outcome.repaired;
+          console.log(
+            `[scheduler] repair done: ${outcome.repaired} healed, ${outcome.alreadyWhole} already whole, ${outcome.failed} failed`,
+          );
+        } else {
+          s.lastRepaired = 0;
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        errors.push(`repair: ${message}`);
+        console.error(`[scheduler] repair failed: ${message}`);
+      }
+    } else {
+      s.lastRepaired = null;
     }
 
     // Drain a slice of the metadata-backfill queue (rows imported before the

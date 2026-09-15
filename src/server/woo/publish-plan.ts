@@ -71,8 +71,8 @@ export interface ResolvedIdentity {
   brandId?: number;
   /** product_cat term ids, broadest first. */
   categoryIds?: number[];
-  /** Global attribute bindings: pa_brand, pa_gender. */
-  attributes?: { id: number; option: string }[];
+  /** Global attribute bindings, each tagged with the fact it carries. */
+  attributes?: { id: number; option: string; field: "brand" | "gender" }[];
 }
 
 /** The one category supplier-feed products are filed under on the store. */

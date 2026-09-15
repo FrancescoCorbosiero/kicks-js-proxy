@@ -189,6 +189,7 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                   {s.lastRun(new Date(status.lastRunAt).toLocaleString())}
                   {status.lastGsSkus != null && ` · ${s.lastGs(status.lastGsSkus)}`}
                   {status.lastRefreshed != null && ` · ${s.lastRepriced(status.lastRefreshed)}`}
+                  {status.lastRepaired != null && ` · ${s.lastRepaired(status.lastRepaired)}`}
                 </div>
               )}
             </>
