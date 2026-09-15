@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { computePrice } from "@core/core-spine";
 import { resolveEffectiveRule } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
-import { gsOffersToSource, parseGsPayload, resolveGsImage } from "./goldensneakers-model";
+import {
+  gsOffersToSource,
+  parseGsPayload,
+  resolveGsGallery,
+  resolveGsImage,
+} from "./goldensneakers-model";
 
 /** Rows straight from the real GS flat sample (trimmed to the fields we read). */
 const SAMPLE = [
@@ -252,3 +257,71 @@ describe("barcode quality reporting", () => {
   });
 });
 
+describe("the fields the feed fills inconsistently", () => {
+  /** The real row from the feed browser, verbatim. */
+  const ROW = {
+    id: 20647,
+    sku: "DM0032-601",
+    product_name: "Nike Air Max Plus TN Tough Red Black",
+    brand_name: "Nike",
+    barcode: "",
+    size_us: "9",
+    size_eu: "42.5",
+    offer_price: 113,
+    presented_price: 113,
+    available_quantity: 1,
+    image: "/images/DM0032-601/main/",
+    image_full_url: "/images/DM0032-601/main/",
+    image_name: "Screenshot_2026-09-15_at_14.13.16.png",
+    additional_images: [] as unknown[],
+  };
+
+  const RESOLVED =
+    "https://www.goldensneakers.net/images/DM0032-601/main/Screenshot_2026-09-15_at_14.13.16.png";
+
+  it("resolves the relative path both fields carry", () => {
+    expect(parseGsPayload([ROW]).offers[0].image).toBe(RESOLVED);
+  });
+
+  it("falls back to `image` when image_full_url is the empty one", () => {
+    // Same picture, the other field: an empty image_full_url used to mean no
+    // picture at all even with `image` holding the very same path.
+    const { offers } = parseGsPayload([{ ...ROW, image_full_url: "" }]);
+    expect(offers[0].image).toBe(RESOLVED);
+  });
+
+  it("picks up the extra shots the feed ships as paths", () => {
+    const { offers } = parseGsPayload([
+      { ...ROW, additional_images: ["/images/DM0032-601/alt/side.png", "  ", "javascript:x"] },
+    ]);
+    expect(offers[0].gallery).toEqual([
+      "https://www.goldensneakers.net/images/DM0032-601/alt/side.png",
+    ]);
+  });
+
+  it("reads the object form too, and never repeats the main image", () => {
+    expect(
+      resolveGsGallery(
+        [
+          { image_full_url: "/images/X/alt/", image_name: "a.png" },
+          { image: "/images/X/alt/", image_name: "a.png" }, // the same shot again
+          { nothing: true },
+        ],
+        "https://www.goldensneakers.net/images/X/main/b.png",
+      ),
+    ).toEqual(["https://www.goldensneakers.net/images/X/alt/a.png"]);
+  });
+
+  it("drops a shot that is just the main image under another name", () => {
+    expect(resolveGsGallery(["/images/X/main/b.png"], "https://www.goldensneakers.net/images/X/main/b.png"))
+      .toEqual([]);
+  });
+
+  it("carries the gallery onto the plan-ready product", () => {
+    const { offers } = parseGsPayload([
+      { ...ROW, additional_images: ["/images/DM0032-601/alt/side.png"] },
+    ]);
+    const source = gsOffersToSource("DM0032-601", offers, "IT");
+    expect(source.gallery).toEqual(["https://www.goldensneakers.net/images/DM0032-601/alt/side.png"]);
+  });
+});

@@ -22,8 +22,12 @@ export const GsRowSchema = z.looseObject({
   offer_price: z.number().nullish(),
   presented_price: z.number().nullish(),
   available_quantity: z.number().nullish(),
+  // The feed carries the main picture under BOTH names, and rows exist where
+  // only one of them is filled.
+  image: z.string().nullish(),
   image_full_url: z.string().nullish(),
   image_name: z.string().nullish(),
+  additional_images: z.array(z.union([z.string(), z.looseObject({})])).nullish(),
 });
 export type GsRow = z.infer<typeof GsRowSchema>;
 
@@ -94,6 +98,29 @@ export function resolveGsImage(
   return base.replace(/\/+$/, "") + "/" + file; // legacy: folder + filename
 }
 
+/**
+ * The extra product shots of one row, run through the same sanitizer as the
+ * main image. The feed sends them as plain paths, but an object form
+ * ({ image, image_name, ... }) is just as plausible from this provider, so
+ * both are read; anything else is skipped rather than guessed at.
+ */
+export function resolveGsGallery(raw: unknown, main: string): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    let url = "";
+    if (typeof entry === "string") url = resolveGsImage(entry, null);
+    else if (entry && typeof entry === "object") {
+      const o = entry as Record<string, unknown>;
+      const path = typeof o.image_full_url === "string" ? o.image_full_url : o.image;
+      const name = typeof o.image_name === "string" ? o.image_name : null;
+      if (typeof path === "string") url = resolveGsImage(path, name);
+    }
+    if (url && url !== main && !out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
 /** A validated, size-normalized GS offer ready for the feed_items table. */
 export interface GsOffer {
   sku: string; // canonical (skuKey)
@@ -107,6 +134,8 @@ export interface GsOffer {
   productName: string;
   brandName: string;
   image: string;
+  /** Extra product shots, already absolute and domain-checked. */
+  gallery: string[];
   raw: unknown;
 }
 
@@ -161,6 +190,10 @@ export function parseGsPayload(payload: unknown): GsParseResult {
       rejected.push({ index, reason: `unparseable EU size "${euRaw}"` });
       return;
     }
+    // Either field may be the populated one — the provider fills them
+    // inconsistently, and an empty image_full_url used to mean no picture at
+    // all even when `image` held the very same path.
+    const image = resolveGsImage(row.image_full_url || row.image, row.image_name);
     const offer: GsOffer = {
       sku: skuKey(row.sku),
       euNorm,
@@ -172,7 +205,8 @@ export function parseGsPayload(payload: unknown): GsParseResult {
       quantity: row.available_quantity ?? 0,
       productName: row.product_name ?? "",
       brandName: row.brand_name ?? "",
-      image: resolveGsImage(row.image_full_url, row.image_name),
+      image,
+      gallery: resolveGsGallery(row.additional_images, image),
       raw: rawRow,
     };
     const key = `${offer.sku}::${offer.euNorm}`;
@@ -220,6 +254,7 @@ export function gsOffersToSource(sku: string, offers: GsOffer[], market: string)
     title,
     brand,
     image: first?.image ?? "",
+    ...(first?.gallery?.length ? { gallery: first.gallery } : {}),
     market,
     currency: "EUR",
     source: "goldensneakers",

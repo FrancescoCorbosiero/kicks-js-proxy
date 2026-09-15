@@ -2,7 +2,7 @@ import "server-only";
 import type { SourceProduct } from "@core/core-spine";
 import { ownerPinFor, type StoreOverrides } from "@/server/overrides/model";
 import { skuKey } from "@/lib/skus";
-import { gsOffersToSource, type GsOffer } from "./goldensneakers-model";
+import { gsOffersToSource, resolveGsGallery, type GsOffer } from "./goldensneakers-model";
 import { mergeGsOwned, type GsOwnedProduct } from "./ownership";
 import { GS_FEED, knownOffersBySku } from "./repo";
 import type { FeedItemRow } from "@/server/db/schema";
@@ -31,6 +31,13 @@ function rowToOffer(r: FeedItemRow): GsOffer {
     productName: r.productName,
     brandName: r.brandName,
     image: r.image,
+    // feed_items has no gallery column, but it keeps the whole source row:
+    // re-deriving from it costs nothing and skips a migration for a field the
+    // provider only sometimes fills.
+    gallery: resolveGsGallery(
+      (r.raw as { additional_images?: unknown } | null)?.additional_images,
+      r.image,
+    ),
     raw: r.raw,
   };
 }
