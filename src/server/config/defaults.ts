@@ -37,6 +37,19 @@ export function goldenSneakersPassthroughRule(): ScopedPricingRule {
  * rounding, UPC-first matching, dry-run-by-default apply. Operators refine
  * this in the config UI — new pricing behaviour is just more rows, never code.
  */
+/**
+ * Taxonomy out of the box: KicksDB keeps the tree it curates, everything else
+ * (a supplier feed, whose apparent tree is inferred from its titles) lands
+ * under one flat category. Both halves are configuration — the Taxonomies tab
+ * is where a shop that sells more than sneakers changes them.
+ */
+export const DEFAULT_TAXONOMY: AppConfig["taxonomy"] = {
+  useSourceTree: ["kicksdb"],
+  defaultCategory: "Sneakers",
+  rules: [],
+  write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true },
+};
+
 export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
   return {
     source: {
@@ -50,6 +63,7 @@ export function buildDefaultConfig(connection: ConnectionConfig): AppConfig {
         display: { traits: true, variants: true, identifiers: true, prices: true },
       },
     },
+    taxonomy: DEFAULT_TAXONOMY,
     pricingRules: [
       {
         id: "general",

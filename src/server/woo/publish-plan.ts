@@ -1,5 +1,5 @@
 import type { SourceProduct } from "@core/core-spine";
-import type { AppConfig } from "@core/config";
+import { resolveCategoryPath, type AppConfig, type TaxonomyConfig } from "@core/config";
 import { skuKey } from "@/lib/skus";
 import type { StoreVariation } from "@/server/store-json/model";
 import {
@@ -75,39 +75,24 @@ export interface ResolvedIdentity {
   attributes?: { id: number; option: string; field: "brand" | "gender" }[];
 }
 
-/** The one category supplier-feed products are filed under on the store. */
-export const STORE_CATEGORY = "Sneakers";
-
 /**
- * Where a product is filed on the STORE — a decision that belongs to the
- * source, because the two sources mean different things by "category".
+ * The identity names a catalog product carries, under the operator's taxonomy
+ * configuration. Empty strings mean "say nothing", never a blank term.
  *
- * A supplier feed carries no taxonomy at all: what the catalog shows for a
- * feed product ("New Balance" › "1906") is inferred from its title by
- * classifyTitle. Writing that to WooCommerce duplicates the Marchio taxonomy
- * the same publish already fills, and mints a product_cat term per silhouette.
- * Feed products therefore get ONE flat category.
- *
- * KicksDB is the opposite case: category and secondary_category are real
- * fields of its API, curated upstream ("Air Jordan" › "One"), so its products
- * keep the tree they actually come with rather than being flattened into a
- * label this app invented. The catalog's internal tree — the discovery sidebar,
- * the scope of a margin rule — is untouched either way.
+ * Where a product is filed is a decision the two sources do not share: KicksDB
+ * ships a curated tree, a supplier feed ships none and its apparent tree is
+ * inferred from its titles. That asymmetry is configuration, not code — see
+ * resolveCategoryPath and the Taxonomies tab. Which of these fields reach the
+ * store at all is configuration too: a shop that keeps its brands elsewhere
+ * turns the brand off rather than accepting a duplicate taxonomy.
  */
-export function categoryPathFor(catalog: SourceProduct): string[] {
-  const source = catalog.source ?? "kicksdb";
-  if (source !== "kicksdb") return [STORE_CATEGORY];
-  return [catalog.category, catalog.secondaryCategory]
-    .map((c) => (c ?? "").trim())
-    .filter((c) => c.length > 0);
-}
-
-/** The identity names a catalog product carries, empty strings dropped. */
-export function identityNamesFor(catalog: SourceProduct): IdentityNames {
+export function identityNamesFor(catalog: SourceProduct, taxonomy: TaxonomyConfig): IdentityNames {
   return {
-    brand: (catalog.brand ?? "").trim(),
-    categoryPath: categoryPathFor(catalog),
-    gender: (catalog.gender ?? "").trim(),
+    brand: taxonomy.write.brandTaxonomy || taxonomy.write.brandAttribute
+      ? (catalog.brand ?? "").trim()
+      : "",
+    categoryPath: resolveCategoryPath(catalog, taxonomy),
+    gender: taxonomy.write.genderAttribute ? (catalog.gender ?? "").trim() : "",
   };
 }
 

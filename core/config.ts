@@ -138,12 +138,89 @@ export interface ConnectionConfig {
     marketToCurrency: Record<string, string>; // { IT: "EUR", US: "USD", ... }
 }
 
+/* ------------------------------------------------------------------ */
+/* TAXONOMY — how a product's identity reaches the STORE               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One "products like these belong under that category" instruction. Same
+ * scope vocabulary and the same most-specific-wins precedence as a pricing
+ * rule, deliberately: the operator has already learned it once.
+ */
+export interface TaxonomyRule {
+    id: string;
+    enabled: boolean;
+    scope: RuleScope;
+    /** Store category. A ">" separated path nests: "Abbigliamento > T-shirt". */
+    category: string;
+}
+
+/**
+ * What the store is told about a product beyond its price and its sizes.
+ *
+ * The two sources disagree by nature: KicksDB ships a curated tree
+ * (category / secondary_category), a supplier feed ships nothing and its
+ * apparent tree is inferred from the title. Rather than hard-code that
+ * asymmetry, it is configuration — which source is trusted with its own tree,
+ * where everything else lands, and which fields reach the store at all.
+ */
+export interface TaxonomyConfig {
+    /** Sources whose OWN category tree is written verbatim. */
+    useSourceTree: string[];
+    /** Where a product lands when no rule matches. Empty = write no category. */
+    defaultCategory: string;
+    /** Scoped overrides, resolved most-specific-first. */
+    rules: TaxonomyRule[];
+    /** Which identity fields are written at all. */
+    write: {
+        /** The native product_brand taxonomy ("Marchi del prodotto"). */
+        brandTaxonomy: boolean;
+        /** The pa_brand global attribute — some channel plugins read only this. */
+        brandAttribute: boolean;
+        /** The pa_gender global attribute. */
+        genderAttribute: boolean;
+    };
+}
+
 export interface AppConfig {
     source: SourceConfig;
     pricingRules: ScopedPricingRule[];    // ordered general -> specific
+    taxonomy: TaxonomyConfig;
     matching: MatchingConfig;
     apply: ApplyConfig;
     connection: ConnectionConfig;
+}
+
+/** Split a configured category into its path parts ("A > B" -> ["A","B"]). */
+export function categoryPathOf(category: string): string[] {
+    return category
+        .split(">")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+}
+
+/**
+ * The store category path for a product, under the operator's configuration.
+ *
+ * A source trusted with its own tree keeps it; everything else asks the rules,
+ * and falls back to the default. Returning [] means "write no category" — Woo
+ * will file the product under its own default term, which is a truthful
+ * "nobody said", not a label this app invented.
+ */
+export function resolveCategoryPath(
+    product: ProductScopeAxes,
+    taxonomy: TaxonomyConfig,
+): string[] {
+    const source = product.source ?? "kicksdb";
+    if (taxonomy.useSourceTree.some((s) => sameText(s, source))) {
+        return [product.category, product.secondaryCategory]
+            .map((c) => (c ?? "").trim())
+            .filter((c) => c.length > 0);
+    }
+    const winner = taxonomy.rules
+        .filter((r) => r.enabled && r.category.trim() && productScopeMatches(r.scope, product))
+        .sort((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope))[0];
+    return categoryPathOf(winner ? winner.category : taxonomy.defaultCategory);
 }
 
 /* ------------------------------------------------------------------ */

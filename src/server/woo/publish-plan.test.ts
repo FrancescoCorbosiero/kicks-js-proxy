@@ -3,7 +3,6 @@ import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
 import {
-  STORE_CATEGORY,
   identityNamesFor,
   planPublish,
   planReimportParent,
@@ -257,7 +256,7 @@ describe("publishedVariations", () => {
 describe("product identity for external catalogs", () => {
   it("keeps the tree KicksDB actually curates", () => {
     // category / secondary_category are real API fields there, not a guess.
-    expect(identityNamesFor(product())).toEqual({
+    expect(identityNamesFor(product(), config.taxonomy)).toEqual({
       brand: "adidas",
       categoryPath: ["Yeezy", "Foam RNNR"],
       gender: "",
@@ -275,21 +274,22 @@ describe("product identity for external catalogs", () => {
       secondaryCategory: "1906",
       gender: "women",
     });
-    expect(identityNamesFor(gs)).toEqual({
+    expect(identityNamesFor(gs, config.taxonomy)).toEqual({
       brand: "Adidas",
-      categoryPath: [STORE_CATEGORY],
+      categoryPath: ["Sneakers"],
       gender: "women",
     });
   });
 
   it("gives a KicksDB product with no taxonomy no category at all", () => {
     expect(
-      identityNamesFor(product({ category: "", secondaryCategory: "" })).categoryPath,
+      identityNamesFor(product({ category: "", secondaryCategory: "" }), config.taxonomy)
+        .categoryPath,
     ).toEqual([]);
   });
 
   it("drops an empty brand instead of writing a blank", () => {
-    expect(identityNamesFor(product({ brand: "  " })).brand).toBe("");
+    expect(identityNamesFor(product({ brand: "  " }), config.taxonomy).brand).toBe("");
   });
 
   it("writes the brand BOTH ways — taxonomy and attribute", () => {

@@ -29,6 +29,7 @@ function makeConfig(rules: ScopedPricingRule[]): AppConfig {
       cacheTtlSeconds: 900,
       query: { sort: "release_date", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } },
     },
+    taxonomy: { useSourceTree: ["kicksdb"], defaultCategory: "Sneakers", rules: [], write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true } },
     pricingRules: rules,
     matching: { strategyOrder: ["upc", "skuPattern", "manual"], skuTemplate: "{sku}" },
     apply: {
@@ -99,6 +100,7 @@ describe("fixed-margin rules (markupFixed)", () => {
   const cfg = (rules: import("../config").ScopedPricingRule[]) =>
     ({
       source: { market: "IT", defaultDeliveryType: "standard", batchChunkSize: 50, cacheTtlSeconds: 900, query: { sort: "", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } } },
+      taxonomy: { useSourceTree: ["kicksdb"], defaultCategory: "Sneakers", rules: [], write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true } },
       pricingRules: rules,
       matching: { strategyOrder: ["upc"], skuTemplate: "" },
       apply: { includeActions: ["update"], dryRunByDefault: true, requireApprovalAboveDeltaPercent: 25, concurrency: 1, wooBatchSize: 100, retry: { attempts: 1, backoffMs: 0 } },
@@ -159,6 +161,7 @@ describe("safety-net fields survive resolution (regression: dropped from the eff
     };
     const cfg = {
       source: { market: "IT", defaultDeliveryType: "standard", batchChunkSize: 50, cacheTtlSeconds: 900, query: { sort: "", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } } },
+      taxonomy: { useSourceTree: ["kicksdb"], defaultCategory: "Sneakers", rules: [], write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true } },
       pricingRules: [{
         id: "general", scope: {}, enabled: true, sourceDeliveryType: "standard",
         markupPercent: 35, rounding: { mode: "none" }, tax: { priceIncludesVat: false, vatRatePercent: 0 },
