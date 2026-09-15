@@ -211,6 +211,7 @@ export async function publishProducts(
         uniqueSkus
           .map((sku) => gsOwned.get(sku)?.product ?? catalogEntries.get(sku))
           .filter((c): c is NonNullable<typeof c> => c != null),
+        config.taxonomy,
       ).catch((e) => {
         console.warn("[publish] identity skipped:", e instanceof Error ? e.message : String(e));
         return null;

@@ -14,6 +14,7 @@ export function makeConfig(rules: ScopedPricingRule[]): AppConfig {
         display: { traits: true, variants: true, identifiers: true, prices: true },
       },
     },
+    taxonomy: { useSourceTree: ["kicksdb"], defaultCategory: "Sneakers", rules: [], write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true } },
     pricingRules: rules,
     matching: { strategyOrder: ["upc", "skuPattern", "manual"], skuTemplate: "{sku}" },
     apply: {

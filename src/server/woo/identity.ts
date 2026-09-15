@@ -1,6 +1,7 @@
 import "server-only";
 import type { SourceProduct } from "@core/core-spine";
 import { identityNamesFor, type ResolvedIdentity } from "./publish-plan";
+import type { TaxonomyConfig } from "@core/config";
 import type { WooClient } from "./client";
 
 /**
@@ -37,9 +38,10 @@ const termKey = (name: string) => name.trim().toLowerCase().replace(/\s+/g, " ")
 export async function buildIdentityResolver(
   client: WooClient,
   catalogs: SourceProduct[],
+  taxonomy: TaxonomyConfig,
 ): Promise<IdentityResolver> {
   const skipped: string[] = [];
-  const wanted = catalogs.map(identityNamesFor);
+  const wanted = catalogs.map((c) => identityNamesFor(c, taxonomy));
 
   const brands = new Map<string, number>();
   const categories = new Map<string, number>();
@@ -47,7 +49,9 @@ export async function buildIdentityResolver(
   const attributeIds = new Map<string, number>();
 
   // ---- brands (native product_brand taxonomy) ----
-  const brandNames = [...new Map(wanted.filter((w) => w.brand).map((w) => [termKey(w.brand), w.brand])).values()];
+  const brandNames = taxonomy.write.brandTaxonomy
+    ? [...new Map(wanted.filter((w) => w.brand).map((w) => [termKey(w.brand), w.brand])).values()]
+    : [];
   if (brandNames.length > 0) {
     try {
       const existing = await client.listBrands();
@@ -98,8 +102,10 @@ export async function buildIdentityResolver(
   }
 
   // ---- global attributes (pa_brand, pa_gender) ----
-  const needed = IDENTITY_ATTRIBUTES.filter((a) =>
-    wanted.some((w) => (a.key === "brand" ? w.brand : w.gender)),
+  const enabled = (key: "brand" | "gender") =>
+    key === "brand" ? taxonomy.write.brandAttribute : taxonomy.write.genderAttribute;
+  const needed = IDENTITY_ATTRIBUTES.filter(
+    (a) => enabled(a.key) && wanted.some((w) => (a.key === "brand" ? w.brand : w.gender)),
   );
   if (needed.length > 0) {
     try {
@@ -146,7 +152,7 @@ export async function buildIdentityResolver(
   return {
     skipped: [...new Set(skipped)],
     for(catalog: SourceProduct): ResolvedIdentity {
-      const names = identityNamesFor(catalog);
+      const names = identityNamesFor(catalog, taxonomy);
       const out: ResolvedIdentity = {};
 
       const brandId = names.brand ? brands.get(termKey(names.brand)) : undefined;

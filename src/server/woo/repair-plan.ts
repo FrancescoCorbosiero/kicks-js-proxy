@@ -33,8 +33,20 @@ export interface LiveProduct {
 export interface RepairSource {
   images: string[];
   identity: ResolvedIdentity | undefined;
-  /** The source states a gender — used to tell "absent" from "unbindable". */
-  wantsGender?: boolean;
+  /**
+   * What the taxonomy configuration says this product SHOULD carry. A field
+   * the operator switched off is not a gap: without this the repair would
+   * report "no brand" forever on a shop that keeps its brands elsewhere, and
+   * the report would stop meaning anything.
+   */
+  wants: {
+    /** The native product_brand taxonomy. */
+    brandTaxonomy: boolean;
+    /** The pa_brand attribute — a separate switch, some plugins read only it. */
+    brandAttribute: boolean;
+    category: boolean;
+    gender: boolean;
+  };
 }
 
 export type RepairField = "image" | "brand" | "category" | "gender";
@@ -92,7 +104,7 @@ export function planRepair(live: LiveProduct, source: RepairSource): RepairPatch
 
   // ---- brand (native taxonomy) ----
   const liveBrands = asArray(live.brands);
-  if (liveBrands.length === 0) {
+  if (source.wants.brandTaxonomy && liveBrands.length === 0) {
     if (source.identity?.brandId != null) {
       body.brands = [{ id: source.identity.brandId }];
       fills.push("brand");
@@ -105,7 +117,7 @@ export function planRepair(live: LiveProduct, source: RepairSource): RepairPatch
   const realCategories = asArray(live.categories).filter(
     (c) => !DEFAULT_CATEGORY_SLUGS.has(String(c.slug ?? "").toLowerCase()),
   );
-  if (realCategories.length === 0) {
+  if (source.wants.category && realCategories.length === 0) {
     if (source.identity?.categoryIds?.length) {
       body.categories = source.identity.categoryIds.map((id) => ({ id }));
       fills.push("category");
@@ -118,7 +130,10 @@ export function planRepair(live: LiveProduct, source: RepairSource): RepairPatch
   // Woo replaces the whole attribute array on update, so the live ones are
   // carried over verbatim: losing pa_taglia here would orphan every variation.
   const liveAttributes = asArray(live.attributes);
-  const missingAttributes = (source.identity?.attributes ?? []).filter(
+  const wantedAttributes = (source.identity?.attributes ?? []).filter((a) =>
+    a.field === "brand" ? source.wants.brandAttribute : source.wants.gender,
+  );
+  const missingAttributes = wantedAttributes.filter(
     (a) => !liveAttributes.some((l) => attributeMatches(l, a.id) && hasOptions(l)),
   );
   if (missingAttributes.length > 0) {
@@ -144,7 +159,7 @@ export function planRepair(live: LiveProduct, source: RepairSource): RepairPatch
   // or no identity resolved at all) is missing from the product all the same —
   // say so, instead of reporting the product whole.
   const genderBound = (source.identity?.attributes ?? []).some((a) => a.field === "gender");
-  if (source.wantsGender && !genderBound && !fills.includes("gender")) {
+  if (source.wants.gender && !genderBound && !fills.includes("gender")) {
     unavailable.push("gender");
   }
 

@@ -11,7 +11,7 @@ const SOURCE: RepairSource = {
       { id: 3, option: "women", field: "gender" },
     ],
   },
-  wantsGender: true,
+  wants: { brandTaxonomy: true, brandAttribute: true, category: true, gender: true },
 };
 
 /** A product published while the feed's image fields were unreadable. */
@@ -87,7 +87,11 @@ describe("planRepair", () => {
   });
 
   it("reports a gap the source cannot close instead of inventing one", () => {
-    const patch = planRepair(BROKEN, { images: [], identity: undefined, wantsGender: true });
+    const patch = planRepair(BROKEN, {
+      images: [],
+      identity: undefined,
+      wants: { brandTaxonomy: true, brandAttribute: true, category: true, gender: true },
+    });
     expect(patch.body).toEqual({});
     expect(patch.fills).toEqual([]);
     expect(patch.unavailable.sort()).toEqual(["brand", "category", "gender", "image"]);
@@ -99,5 +103,38 @@ describe("planRepair", () => {
       attributes: [{ id: 3, name: "pa_gender", options: [] }],
     };
     expect(planRepair(hollow, SOURCE).fills).toContain("gender");
+  });
+});
+
+describe("planRepair and the taxonomy configuration", () => {
+  const live: LiveProduct = {
+    id: 902,
+    images: [],
+    brands: [],
+    categories: [],
+    attributes: [],
+  };
+
+  it("does not call a switched-off field a gap", () => {
+    // A shop that keeps its brands elsewhere would otherwise be told "no
+    // brand" on every product, for ever, and stop reading the report.
+    const patch = planRepair(live, {
+      ...SOURCE,
+      wants: { brandTaxonomy: false, brandAttribute: false, category: false, gender: false },
+    });
+    expect(patch.body.brands).toBeUndefined();
+    expect(patch.body.categories).toBeUndefined();
+    expect(patch.unavailable).toEqual([]);
+    // The picture is not part of the taxonomy config: it is always wanted.
+    expect(patch.fills).toEqual(["image"]);
+  });
+
+  it("still fills the fields that are switched on", () => {
+    const patch = planRepair(live, {
+      ...SOURCE,
+      wants: { brandTaxonomy: true, brandAttribute: false, category: false, gender: false },
+    });
+    expect(patch.body.brands).toEqual([{ id: 7 }]);
+    expect(patch.body.categories).toBeUndefined();
   });
 });

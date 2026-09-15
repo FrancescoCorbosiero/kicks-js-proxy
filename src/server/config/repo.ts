@@ -4,7 +4,7 @@ import type { AppConfig } from "@core/config";
 import { db } from "@/server/db/client";
 import { config as configTable } from "@/server/db/schema";
 import { connectionFromEnv } from "@/lib/env";
-import { buildDefaultConfig, goldenSneakersPassthroughRule } from "./defaults";
+import { DEFAULT_TAXONOMY, buildDefaultConfig, goldenSneakersPassthroughRule } from "./defaults";
 
 /**
  * Returns the active AppConfig with its ConnectionConfig (secrets) always taken
@@ -27,7 +27,21 @@ export async function getActiveConfig(): Promise<AppConfig> {
   return {
     ...rows[0].data,
     pricingRules: ensureOutlierGuard(ensureGsRule(rows[0].data.pricingRules)),
+    // Configs stored before the Taxonomies tab existed carry no taxonomy
+    // section; they get the shipped default rather than an undefined that
+    // every reader would have to guard against.
+    taxonomy: ensureTaxonomy(rows[0].data.taxonomy),
     connection,
+  };
+}
+
+function ensureTaxonomy(stored: AppConfig["taxonomy"] | undefined): AppConfig["taxonomy"] {
+  if (!stored) return DEFAULT_TAXONOMY;
+  return {
+    useSourceTree: stored.useSourceTree ?? DEFAULT_TAXONOMY.useSourceTree,
+    defaultCategory: stored.defaultCategory ?? DEFAULT_TAXONOMY.defaultCategory,
+    rules: stored.rules ?? [],
+    write: { ...DEFAULT_TAXONOMY.write, ...(stored.write ?? {}) },
   };
 }
 

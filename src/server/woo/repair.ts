@@ -132,6 +132,7 @@ export async function repairProducts(
   const identity = await buildIdentityResolver(
     client,
     uniqueSkus.map(catalogFor).filter((c): c is SourceProduct => c != null),
+    config.taxonomy,
   ).catch(() => null);
 
   const reports: RepairProductReport[] = [];
@@ -178,10 +179,17 @@ export async function repairProducts(
       // Live, never the snapshot: the snapshot knows only the first image and
       // nothing about brands or categories, and a patch is a write.
       const live = (await client.getFullProduct(onStore.id)) as unknown as LiveProduct;
+      const resolved = identity?.for(catalog);
       const patch = planRepair(live, {
         images: plan.images,
-        identity: identity?.for(catalog),
-        wantsGender: !!(catalog.gender ?? "").trim(),
+        identity: resolved,
+        wants: {
+          brandTaxonomy: config.taxonomy.write.brandTaxonomy && !!(catalog.brand ?? "").trim(),
+          brandAttribute: config.taxonomy.write.brandAttribute,
+          // "No category" is a legitimate configured outcome, not a gap.
+          category: (resolved?.categoryIds?.length ?? 0) > 0,
+          gender: config.taxonomy.write.genderAttribute && !!(catalog.gender ?? "").trim(),
+        },
       });
 
       report.filled = patch.fills;

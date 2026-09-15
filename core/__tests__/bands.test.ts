@@ -99,6 +99,7 @@ describe("resolveEffectiveRule with bands", () => {
         cacheTtlSeconds: 900,
         query: { sort: "release_date", limit: 10, display: { traits: true, variants: true, identifiers: true, prices: true } },
       },
+      taxonomy: { useSourceTree: ["kicksdb"], defaultCategory: "Sneakers", rules: [], write: { brandTaxonomy: true, brandAttribute: true, genderAttribute: true } },
       pricingRules: rules,
       matching: { strategyOrder: ["upc"], skuTemplate: "{sku}-{size}" },
       apply: {

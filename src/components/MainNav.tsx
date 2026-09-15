@@ -21,6 +21,7 @@ export function MainNav() {
     { href: "/sync", label: t.header.navSync },
     { href: "/publish", label: t.header.navPublish },
     { href: "/import", label: t.header.navImport },
+    { href: "/taxonomies", label: t.header.navTaxonomies },
     { href: "/feeds", label: t.header.navFeeds },
   ];
 
