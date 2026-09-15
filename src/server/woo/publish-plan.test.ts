@@ -3,6 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import type { AppConfig } from "@core/config";
 import { buildDefaultConfig } from "@/server/config/defaults";
 import {
+  STORE_CATEGORY,
   identityNamesFor,
   planPublish,
   planReimportParent,
@@ -254,7 +255,8 @@ describe("publishedVariations", () => {
 });
 
 describe("product identity for external catalogs", () => {
-  it("reads brand, category path and gender off a KicksDB product", () => {
+  it("keeps the tree KicksDB actually curates", () => {
+    // category / secondary_category are real API fields there, not a guess.
     expect(identityNamesFor(product())).toEqual({
       brand: "adidas",
       categoryPath: ["Yeezy", "Foam RNNR"],
@@ -262,27 +264,32 @@ describe("product identity for external catalogs", () => {
     });
   });
 
-  it("reads them off a feed product just the same", () => {
-    // gsOffersToSource fills brand from the supplier row and the rest from the
-    // shared title classifier, so both sources arrive here identical in shape.
+  it("files a feed product under the one flat store category instead", () => {
+    // A feed carries no taxonomy: what the catalog shows for it is inferred
+    // from the title, so writing it duplicates Marchio and mints a term per
+    // silhouette. The inferred tree stays internal.
     const gs = product({
       source: "goldensneakers",
       brand: "Adidas",
-      category: "Samba",
-      secondaryCategory: "",
+      category: "New Balance",
+      secondaryCategory: "1906",
       gender: "women",
     });
     expect(identityNamesFor(gs)).toEqual({
       brand: "Adidas",
-      categoryPath: ["Samba"],
+      categoryPath: [STORE_CATEGORY],
       gender: "women",
     });
   });
 
-  it("drops empty parts instead of writing blanks", () => {
+  it("gives a KicksDB product with no taxonomy no category at all", () => {
     expect(
-      identityNamesFor(product({ brand: "  ", category: "", secondaryCategory: "  " })),
-    ).toEqual({ brand: "", categoryPath: [], gender: "" });
+      identityNamesFor(product({ category: "", secondaryCategory: "" })).categoryPath,
+    ).toEqual([]);
+  });
+
+  it("drops an empty brand instead of writing a blank", () => {
+    expect(identityNamesFor(product({ brand: "  " })).brand).toBe("");
   });
 
   it("writes the brand BOTH ways — taxonomy and attribute", () => {
@@ -325,7 +332,7 @@ describe("product identity for external catalogs", () => {
 describe("withoutIdentity", () => {
   const identity = {
     brandId: 7,
-    categoryIds: [11, 12],
+    categoryIds: [11],
     attributes: [
       { id: 2, option: "adidas" },
       { id: 3, option: "women" },

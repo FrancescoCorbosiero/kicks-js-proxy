@@ -58,7 +58,7 @@ export interface PublishPlan {
  */
 export interface IdentityNames {
   brand: string;
-  /** Category path, broadest first: ["Air Jordan", "One"]. */
+  /** Category path, broadest first — see categoryPathFor for who decides it. */
   categoryPath: string[];
   /** Source vocabulary as-is ("men", "women", "youth"…) — never re-coded here:
    *  the channel plugin owns the mapping to its own field values. */
@@ -75,13 +75,38 @@ export interface ResolvedIdentity {
   attributes?: { id: number; option: string }[];
 }
 
+/** The one category supplier-feed products are filed under on the store. */
+export const STORE_CATEGORY = "Sneakers";
+
+/**
+ * Where a product is filed on the STORE — a decision that belongs to the
+ * source, because the two sources mean different things by "category".
+ *
+ * A supplier feed carries no taxonomy at all: what the catalog shows for a
+ * feed product ("New Balance" › "1906") is inferred from its title by
+ * classifyTitle. Writing that to WooCommerce duplicates the Marchio taxonomy
+ * the same publish already fills, and mints a product_cat term per silhouette.
+ * Feed products therefore get ONE flat category.
+ *
+ * KicksDB is the opposite case: category and secondary_category are real
+ * fields of its API, curated upstream ("Air Jordan" › "One"), so its products
+ * keep the tree they actually come with rather than being flattened into a
+ * label this app invented. The catalog's internal tree — the discovery sidebar,
+ * the scope of a margin rule — is untouched either way.
+ */
+export function categoryPathFor(catalog: SourceProduct): string[] {
+  const source = catalog.source ?? "kicksdb";
+  if (source !== "kicksdb") return [STORE_CATEGORY];
+  return [catalog.category, catalog.secondaryCategory]
+    .map((c) => (c ?? "").trim())
+    .filter((c) => c.length > 0);
+}
+
 /** The identity names a catalog product carries, empty strings dropped. */
 export function identityNamesFor(catalog: SourceProduct): IdentityNames {
   return {
     brand: (catalog.brand ?? "").trim(),
-    categoryPath: [catalog.category, catalog.secondaryCategory]
-      .map((c) => (c ?? "").trim())
-      .filter((c) => c.length > 0),
+    categoryPath: categoryPathFor(catalog),
     gender: (catalog.gender ?? "").trim(),
   };
 }
