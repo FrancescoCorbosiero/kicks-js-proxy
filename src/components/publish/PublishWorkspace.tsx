@@ -9,16 +9,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useI18n } from "@/i18n/provider";
 import { runPublish } from "@/server/actions/publish";
 import type { PublishOutcome, PublishProductReport, PublishTarget } from "@/server/woo/publish";
+import { hasMixedSources, type PublishCounts, type PublishSourceLens } from "@/lib/publish-page";
+import { mergeQuery, type QueryParams } from "@/lib/qs";
 import { CardImage } from "@/components/catalog/CardImage";
 import { RepairPanel } from "./RepairPanel";
 
 /**
- * Three bounds, all for the same reason: everything below is rendered by the
- * browser, and the catalog has no ceiling. A shop with 4000 unpublished
- * products must cost the same in DOM nodes and in requests as a shop with 40.
+ * Bounds, all for the same reason: everything below is rendered by the browser,
+ * and the catalog has no ceiling. A shop with 4000 unpublished products must
+ * cost the same in DOM nodes and in requests as a shop with 40. The list's own
+ * bound lives on the server (PAGE_LIMIT) — the browser is never sent more.
  */
-/** Candidate rows rendered. Beyond this the list says so and search narrows. */
-const LIST_LIMIT = 300;
 /**
  * SKUs one run may touch — the server action's own per-call cap. Publishing is
  * a create per product plus a call per size plus media, so this is already
@@ -44,15 +45,26 @@ const REPORT_LIMIT = 60;
 
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
-type SourceFilter = "all" | "goldensneakers" | "kicksdb";
+/** Keystrokes settle before the server is asked — same as discovery's. */
+const DEBOUNCE_MS = 350;
 
 export function PublishWorkspace({
   candidates,
+  counts,
+  matched,
+  params,
   hasSnapshot,
   wooConfigured,
   siteUrl,
 }: {
+  /** ONE PAGE of the delta. The filters below are answered by the server. */
   candidates: PublishTarget[];
+  /** Totals over the whole pool, never over the page. */
+  counts: PublishCounts;
+  /** Rows matching the current filters, including those past the page. */
+  matched: number;
+  /** Current URL params — the base every filter update merges over. */
+  params: QueryParams;
   hasSnapshot: boolean;
   wooConfigured: boolean;
   siteUrl: string;
@@ -61,49 +73,46 @@ export function PublishWorkspace({
   const router = useRouter();
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [source, setSource] = React.useState<SourceFilter>("all");
-  const [term, setTerm] = React.useState("");
   const [includeGallery, setIncludeGallery] = React.useState(false);
   const [force, setForce] = React.useState(false);
   const [replaceMedia, setReplaceMedia] = React.useState(false);
-  const [showOnStore, setShowOnStore] = React.useState(false);
   const [busy, startRun] = React.useTransition();
+  const [, startFilter] = React.useTransition();
   const [outcome, setOutcome] = React.useState<PublishOutcome | null>(null);
   const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const missing = React.useMemo(() => candidates.filter((c) => !c.onStore), [candidates]);
+  // The URL is the source of truth for the three filters; `term` is a local
+  // echo so typing stays responsive between debounced pushes.
+  const source = (params.src as PublishSourceLens) ?? "all";
+  const showOnStore = params.onStore === "1";
+  const [term, setTerm] = React.useState(String(params.q ?? ""));
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
 
-  const counts = React.useMemo(() => {
-    const pool = showOnStore ? candidates : missing;
-    let gs = 0;
-    let kicks = 0;
-    for (const c of pool) {
-      if (c.source === "goldensneakers") gs += 1;
-      else kicks += 1;
-    }
-    return { all: pool.length, goldensneakers: gs, kicksdb: kicks };
-  }, [candidates, missing, showOnStore]);
+  function pushFilter(updates: QueryParams) {
+    // Merge over the LIVE URL, not the render-time prop: a debounced push
+    // fires after the keystroke, by which time another control may have
+    // navigated, and a stale base would silently revert it.
+    const current: QueryParams = Object.fromEntries(
+      new URLSearchParams(window.location.search).entries(),
+    );
+    startFilter(() => {
+      router.replace(`/publish${mergeQuery(current, updates)}`, { scroll: false });
+    });
+  }
+
+  function pushFilterDebounced(updates: QueryParams) {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => pushFilter(updates), DEBOUNCE_MS);
+  }
 
   // Both sources represented? Everything provider-specific in this tab hangs
   // off this: on a single-source shop the labels are noise, not information.
-  const mixedSources = counts.goldensneakers > 0 && counts.kicksdb > 0;
-
-  const visible = React.useMemo(() => {
-    const q = term.trim().toLowerCase();
-    return (showOnStore ? candidates : missing).filter((c) => {
-      // With the lens hidden the filter must not linger: a stale "kicksdb"
-      // selection would empty the list with no control left to clear it.
-      if (mixedSources && source === "goldensneakers" && c.source !== "goldensneakers") return false;
-      if (mixedSources && source === "kicksdb" && c.source === "goldensneakers") return false;
-      if (!q) return true;
-      return (
-        c.sku.toLowerCase().includes(q) ||
-        c.title.toLowerCase().includes(q) ||
-        c.brand.toLowerCase().includes(q)
-      );
-    });
-  }, [candidates, missing, mixedSources, showOnStore, source, term]);
+  const mixedSources = hasMixedSources(counts);
+  const visible = candidates;
 
   function toggle(sku: string) {
     setOutcome(null);
@@ -118,7 +127,7 @@ export function PublishWorkspace({
   function selectAllVisible() {
     setOutcome(null);
     // The rows on screen, and no more. Selecting the whole filtered set while
-    // only LIST_LIMIT of it is rendered handed a single click a catalog-sized
+    // only a page of it was rendered handed a single click a catalog-sized
     // run: on a 4000-product shop that was 160 back-to-back publish calls,
     // each one creating products on the live store, and a report the browser
     // had to keep growing in the DOM until the tab died.
@@ -205,7 +214,7 @@ export function PublishWorkspace({
 
       {/* Delta summary + source lens */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
-        <span className="text-sm font-semibold">{t.publish.deltaTitle(missing.length)}</span>
+        <span className="text-sm font-semibold">{t.publish.deltaTitle(counts.missing)}</span>
         {/* A lens over the sources this shop actually has: a single-source
             catalog gets no "StockX (0)" tab to filter by. */}
         {mixedSources && (
@@ -214,7 +223,10 @@ export function PublishWorkspace({
               <button
                 key={key}
                 type="button"
-                onClick={() => setSource(key)}
+                onClick={() => {
+                  clearSelection();
+                  pushFilter({ src: key === "all" ? undefined : key });
+                }}
                 className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                   source === key ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:text-ink"
                 }`}
@@ -229,7 +241,10 @@ export function PublishWorkspace({
           placeholder={t.publish.searchPlaceholder}
           className="h-8 w-56 text-xs"
           value={term}
-          onChange={(e) => setTerm(e.target.value)}
+          onChange={(e) => {
+            setTerm(e.target.value);
+            pushFilterDebounced({ q: e.target.value.trim() || undefined });
+          }}
         />
         {/* Force reimport needs something to point at: the products it acts on
             are by definition the ones already on the store. */}
@@ -237,8 +252,8 @@ export function PublishWorkspace({
           <Checkbox
             checked={showOnStore}
             onCheckedChange={(c) => {
-              setShowOnStore(c === true);
               clearSelection();
+              pushFilter({ onStore: c === true ? "1" : undefined });
             }}
             aria-label={t.publish.showOnStore}
           />
@@ -329,14 +344,16 @@ export function PublishWorkspace({
       {/* The non-destructive repair: for products the store already carries. */}
       <RepairPanel />
 
-      {/* Candidate list */}
+      {/* Candidate list — one server-resolved page of it. */}
       {candidates.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-muted">
-          {t.publish.empty}
+          {/* Nothing left to publish is a different answer from nothing
+              matching what you typed, and only one of them is good news. */}
+          {counts.total === 0 ? t.publish.empty : t.publish.noMatches}
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {visible.slice(0, LIST_LIMIT).map((c) => (
+          {visible.map((c) => (
             <li key={c.sku}>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors ${
@@ -381,8 +398,8 @@ export function PublishWorkspace({
           ))}
         </ul>
       )}
-      {visible.length > LIST_LIMIT && (
-        <p className="text-center text-[11px] text-faint">{t.publish.truncated(visible.length)}</p>
+      {matched > candidates.length && (
+        <p className="text-center text-[11px] text-faint">{t.publish.truncated(matched)}</p>
       )}
     </div>
   );

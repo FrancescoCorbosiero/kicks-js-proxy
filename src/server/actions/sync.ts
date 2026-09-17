@@ -101,11 +101,12 @@ export async function getSyncState(): Promise<SyncPageState> {
   const [latest, history, targets] = await Promise.all([
     getLatestPullRun().catch(() => null),
     listApplyHistory().catch(() => [] as ApplyHistoryEntry[]),
-    listPublishTargets().catch(() => ({ candidates: [] })),
+    listPublishTargets().catch(() => null),
   ]);
   return {
     wooConfigured: wooConfigured(),
-    unpublished: targets.candidates.filter((c) => !c.onStore).length,
+    // The delta's size, not the page's: listPublishTargets ships a page.
+    unpublished: targets?.counts.missing ?? 0,
     runningPull:
       latest && latest.status === "running"
         ? {
