@@ -280,6 +280,8 @@ export const it = {
     brands: "Brand",
     allBrands: "Tutti i brand",
     categories: "Categorie",
+    moreCategories: (n: number) =>
+      `+${n} altre categorie non elencate. Se sono quasi quante i prodotti, la fonte non ha un vero albero: sistemalo in Tassonomie.`,
     allCategories: "Tutte le categorie",
     uncategorized: "Senza categoria",
     genderLabel: "Genere",
@@ -760,6 +762,8 @@ export const it = {
     dryRun: (n: number) => `Prova a vuoto (${n})`,
     apply: (n: number) => (n > 0 ? `Ripara ${n} prodotti` : "Ripara"),
     progress: (done: number, total: number) => `${done}/${total}…`,
+    runCapped: (max: number, held: number) =>
+      `Questa esecuzione ne prende ${max}. Gli altri ${held} restano nel riquadro: rilancia per continuare.`,
     dryRunFirst: "Fai prima una prova a vuoto: ti mostra esattamente cosa scriverebbe.",
     allWhole: "Nessun campo da riempire — questi prodotti sono già completi.",
     dryTitle: "Prova a vuoto — nulla è stato scritto",
@@ -815,6 +819,9 @@ export const it = {
       "Il valore della fonte così com'è (men, women, youth…). La conversione ai valori del canale la fa il plugin.",
     previewTitle: "Cosa farebbe, sul tuo catalogo",
     previewTotal: (n: number) => `${n} prodotti valutati`,
+    previewCategories: (n: number) => `${n} categorie prodotte`,
+    previewTruncated: (n: number) =>
+      `…e altre ${n} categorie non elencate. Se questo numero somiglia al numero dei prodotti, la fonte non ha un vero albero: una categoria per modello è esattamente ciò che le regole qui sopra servono a evitare.`,
     previewHint: "Ricalcolato a ogni modifica sui prodotti reali a catalogo. Nulla è ancora scritto.",
     previewEmpty: "Niente da mostrare: il catalogo è vuoto.",
     noCategory: "Nessuna categoria",
@@ -889,7 +896,10 @@ export const it = {
     empty:
       "Nessun prodotto da pubblicare: tutto il catalogo è già sul negozio.",
     truncated: (n: number) =>
-      `Mostrati i primi 300 di ${n} — "Seleziona tutti" li prende comunque tutti e ${n}.`,
+      `Mostrati i primi 300 di ${n} — restringi con la ricerca per arrivare agli altri.`,
+    runCapped: (max: number, held: number) =>
+      `Questa esecuzione ne prende ${max}: pubblicare crea un prodotto e una chiamata per taglia, e il negozio non regge di più in un colpo solo. Gli altri ${held} restano selezionati per il giro successivo.`,
+    reportTruncated: (n: number) => `…e altre ${n} righe (i totali qui sopra le comprendono).`,
   },
   login: {
     heading: "Accedi",

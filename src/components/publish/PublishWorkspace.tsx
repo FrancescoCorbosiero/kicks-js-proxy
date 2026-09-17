@@ -13,6 +13,24 @@ import { CardImage } from "@/components/catalog/CardImage";
 import { RepairPanel } from "./RepairPanel";
 
 /**
+ * Three bounds, all for the same reason: everything below is rendered by the
+ * browser, and the catalog has no ceiling. A shop with 4000 unpublished
+ * products must cost the same in DOM nodes and in requests as a shop with 40.
+ */
+/** Candidate rows rendered. Beyond this the list says so and search narrows. */
+const LIST_LIMIT = 300;
+/**
+ * SKUs one run may touch — the server action's own per-call cap. Publishing is
+ * a create per product plus a call per size plus media, so this is already
+ * thousands of writes against the live store; a click must never queue more.
+ */
+const RUN_LIMIT = 200;
+/** SKUs per publish call: RUN_LIMIT split into requests the server survives. */
+const BATCH_SIZE = 25;
+/** Report rows rendered. The counters above them always cover the whole run. */
+const REPORT_LIMIT = 60;
+
+/**
  * The Publisher's workspace: the catalog→store delta, selectable, with a
  * mandatory dry run in front of the real write.
  *
@@ -99,9 +117,12 @@ export function PublishWorkspace({
 
   function selectAllVisible() {
     setOutcome(null);
-    // Everything visible, however many: a selection larger than one server
-    // batch is split into BATCH_SIZE calls by run() below.
-    setSelected(new Set(visible.map((c) => c.sku)));
+    // The rows on screen, and no more. Selecting the whole filtered set while
+    // only LIST_LIMIT of it is rendered handed a single click a catalog-sized
+    // run: on a 4000-product shop that was 160 back-to-back publish calls,
+    // each one creating products on the live store, and a report the browser
+    // had to keep growing in the DOM until the tab died.
+    setSelected(new Set(visible.slice(0, RUN_LIMIT).map((c) => c.sku)));
   }
 
   function clearSelection() {
@@ -110,18 +131,17 @@ export function PublishWorkspace({
   }
 
   /**
-   * One publish call per BATCH_SIZE SKUs. The server action caps a batch at
-   * 200 (and creating hundreds of products in a single request would outlive
-   * the request anyway), so a whole-catalog selection runs as a sequence of
-   * batches whose reports are merged into one outcome. A batch that fails
-   * stops the run and keeps what already went through — the products created
-   * so far are real, and hiding them would send the operator back to wp-admin.
+   * What a click will actually touch: the selection, bounded. Anything past
+   * RUN_LIMIT stays ticked and goes in the next run — better a second click
+   * than a browser tab issuing unbounded write calls at the store until one
+   * of them times out.
    */
-  const BATCH_SIZE = 25;
+  const runnable = React.useMemo(() => [...selected].slice(0, RUN_LIMIT), [selected]);
+  const heldBack = selected.size - runnable.length;
 
   function run(dryRun: boolean) {
     setError(null);
-    const skus = [...selected];
+    const skus = runnable;
     setProgress(skus.length > BATCH_SIZE ? { done: 0, total: skus.length } : null);
     startRun(async () => {
       let merged: PublishOutcome | null = null;
@@ -146,9 +166,12 @@ export function PublishWorkspace({
       }
       setProgress(null);
       // A live run changed the store: re-read the delta so published products
-      // leave the list instead of lingering as phantom candidates.
+      // leave the list instead of lingering as phantom candidates. Only what
+      // actually ran is unticked — a selection held back by RUN_LIMIT is still
+      // waiting, and clearing it would silently drop work the operator asked for.
       if (!dryRun && merged) {
-        setSelected(new Set());
+        const ran = new Set(merged.products.map((p) => p.sku));
+        setSelected((prev) => new Set([...prev].filter((sku) => !ran.has(sku))));
         router.refresh();
       }
     });
@@ -158,10 +181,10 @@ export function PublishWorkspace({
     ? t.publish.progress(progress.done, progress.total)
     : t.publish.running;
 
-  // The live button unlocks only after a dry run of the CURRENT selection.
+  // The live button unlocks only after a dry run of exactly what will run.
   const dryRunSeen =
     outcome?.dryRun === true &&
-    outcome.products.length === selected.size &&
+    outcome.products.length === runnable.length &&
     outcome.products.every((p) => selected.has(p.sku));
 
   if (!wooConfigured) {
@@ -276,21 +299,26 @@ export function PublishWorkspace({
             type="button"
             variant="outline"
             onClick={() => run(true)}
-            disabled={busy || selected.size === 0}
+            disabled={busy || runnable.length === 0}
           >
-            {busy ? runningLabel : t.publish.dryRun(selected.size)}
+            {busy ? runningLabel : t.publish.dryRun(runnable.length)}
           </Button>
           <Button
             type="button"
             variant="accent"
             onClick={() => run(false)}
-            disabled={busy || selected.size === 0 || !dryRunSeen}
+            disabled={busy || runnable.length === 0 || !dryRunSeen}
             title={!dryRunSeen ? t.publish.dryRunFirst : undefined}
           >
-            {busy ? runningLabel : t.publish.publishNow(selected.size)}
+            {busy ? runningLabel : t.publish.publishNow(runnable.length)}
           </Button>
-          {!dryRunSeen && selected.size > 0 && (
+          {!dryRunSeen && runnable.length > 0 && (
             <span className="text-[11px] text-faint">{t.publish.dryRunFirst}</span>
+          )}
+          {heldBack > 0 && (
+            <span className="text-[11px] font-medium text-warn">
+              {t.publish.runCapped(RUN_LIMIT, heldBack)}
+            </span>
           )}
           {error && <span className="text-sm font-medium text-skip">{error}</span>}
         </div>
@@ -308,7 +336,7 @@ export function PublishWorkspace({
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {visible.slice(0, 300).map((c) => (
+          {visible.slice(0, LIST_LIMIT).map((c) => (
             <li key={c.sku}>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors ${
@@ -353,7 +381,7 @@ export function PublishWorkspace({
           ))}
         </ul>
       )}
-      {visible.length > 300 && (
+      {visible.length > LIST_LIMIT && (
         <p className="text-center text-[11px] text-faint">{t.publish.truncated(visible.length)}</p>
       )}
     </div>
@@ -424,11 +452,18 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
           {t.publish.identitySkipped(outcome.identitySkipped.join(", "))}
         </p>
       )}
+      {/* Bounded like the repair report: the counters above are the whole
+          truth, the rows are a readable sample of it. */}
       <ul className="space-y-1">
-        {outcome.products.map((p) => (
+        {outcome.products.slice(0, REPORT_LIMIT).map((p) => (
           <ReportRow key={p.sku} report={p} dryRun={outcome.dryRun} siteUrl={siteUrl} />
         ))}
       </ul>
+      {outcome.products.length > REPORT_LIMIT && (
+        <p className="text-[11px] text-faint">
+          {t.publish.reportTruncated(outcome.products.length - REPORT_LIMIT)}
+        </p>
+      )}
     </div>
   );
 }

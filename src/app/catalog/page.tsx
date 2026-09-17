@@ -11,12 +11,12 @@ import {
   type CatalogFreshness,
   type CatalogOwnerFilter,
   type CatalogSort,
-  type CategoryCount,
 } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { lockedPriceCounts, skusPinnedTo } from "@/server/overrides/model";
 import { getServerDictionary } from "@/i18n/server";
 import { buildQuery, type QueryParams } from "@/lib/qs";
+import { buildCategoryTree } from "@/lib/catalog";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters";
 import { CardImage } from "@/components/catalog/CardImage";
 import { ProductDrawer } from "@/components/catalog/ProductDrawer";
@@ -31,28 +31,12 @@ const SORTS: CatalogSort[] = ["brand", "title", "added", "fetched", "priceAsc", 
 const FRESHNESS: CatalogFreshness[] = ["all", "fresh", "stale"];
 const OWNERS: CatalogOwnerFilter[] = ["all", "kicksdb", "goldensneakers", "woo"];
 
-/** The sidebar tree: category → sub-category counts, Uncategorized last. */
-interface CategoryNode {
-  category: string; // "" = uncategorized
-  count: number;
-  children: { name: string; count: number }[];
-}
-
-function buildCategoryTree(rows: CategoryCount[]): CategoryNode[] {
-  const byCat = new Map<string, CategoryNode>();
-  for (const r of rows) {
-    const node = byCat.get(r.category) ?? { category: r.category, count: 0, children: [] };
-    node.count += r.count;
-    if (r.secondaryCategory !== "") {
-      node.children.push({ name: r.secondaryCategory, count: r.count });
-    }
-    byCat.set(r.category, node);
-  }
-  const nodes = [...byCat.values()];
-  const named = nodes.filter((n) => n.category !== "");
-  const uncategorized = nodes.find((n) => n.category === "");
-  return uncategorized ? [...named, uncategorized] : named;
-}
+/**
+ * Brand options shipped to the filter bar. Cheap per row (a native <option>)
+ * and naturally bounded in a real catalog, but it crosses into a client
+ * component, so it gets a ceiling rather than a promise.
+ */
+const BRAND_LIMIT = 400;
 
 function toNumber(x: string | undefined): number | undefined {
   if (!x) return undefined;
@@ -128,12 +112,20 @@ async function loadPageData(sp: Search) {
 
   const catalogSize = ownerCounts.total;
   const drawer = sp.product ? await loadDrawerData(market, sp.product, config) : null;
+  const tree = buildCategoryTree(categories, sp.cat === UNCATEGORIZED ? undefined : sp.cat);
+  // Biggest first, and never drop the one the URL is filtering by.
+  const topBrands = [...brands].sort((a, b) => b.count - a.count).slice(0, BRAND_LIMIT);
+  if (sp.brand && !topBrands.some((b) => b.brand === sp.brand)) {
+    const active = brands.find((b) => b.brand === sp.brand);
+    if (active) topBrands.push(active);
+  }
   return {
     market,
     params,
+    brands: topBrands.sort((a, b) => a.brand.localeCompare(b.brand)),
     page,
-    brands,
-    categoryTree: buildCategoryTree(categories),
+    categoryTree: tree.nodes,
+    hiddenCategories: tree.hidden,
     genders: genders.filter((g) => g.gender !== ""),
     catalogSize,
     ownerCounts,
@@ -163,6 +155,7 @@ export default async function CatalogPage({
     page,
     brands,
     categoryTree,
+    hiddenCategories,
     genders,
     catalogSize,
     ownerCounts,
@@ -247,6 +240,11 @@ export default async function CatalogPage({
                   );
                 })}
               </nav>
+              {hiddenCategories > 0 && (
+                <p className="px-2 pb-1 pt-1.5 text-[10px] leading-snug text-faint">
+                  {t.discovery.moreCategories(hiddenCategories)}
+                </p>
+              )}
             </div>
           </aside>
         )}

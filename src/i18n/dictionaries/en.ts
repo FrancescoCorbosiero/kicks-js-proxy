@@ -271,6 +271,8 @@ export const en: Dictionary = {
     brands: "Brands",
     allBrands: "All brands",
     categories: "Categories",
+    moreCategories: (n: number) =>
+      `+${n} more categories not listed. If that is close to the product count, the source has no real tree: fix it in Taxonomies.`,
     allCategories: "All categories",
     uncategorized: "Uncategorized",
     genderLabel: "Gender",
@@ -742,6 +744,8 @@ export const en: Dictionary = {
     dryRun: (n: number) => `Dry run (${n})`,
     apply: (n: number) => (n > 0 ? `Repair ${n} products` : "Repair"),
     progress: (done: number, total: number) => `${done}/${total}…`,
+    runCapped: (max: number, held: number) =>
+      `This run takes ${max}. The other ${held} stay in the box — run it again to continue.`,
     dryRunFirst: "Dry-run first: it shows exactly what would be written.",
     allWhole: "Nothing to fill — these products are already complete.",
     dryTitle: "Dry run — nothing was written",
@@ -797,6 +801,9 @@ export const en: Dictionary = {
       "The source's own value (men, women, youth…). Mapping to the channel's values is the plugin's job.",
     previewTitle: "What it would do, on your catalog",
     previewTotal: (n: number) => `${n} products evaluated`,
+    previewCategories: (n: number) => `${n} categories produced`,
+    previewTruncated: (n: number) =>
+      `…and ${n} more categories not listed. If that number looks like the product count, the source has no real tree: one category per model is exactly what the rules above exist to prevent.`,
     previewHint: "Recomputed on every edit against the real catalog rows. Nothing is written yet.",
     previewEmpty: "Nothing to show: the catalog is empty.",
     noCategory: "No category",
@@ -869,7 +876,10 @@ export const en: Dictionary = {
     openOnStore: "Open on the store",
     empty: "Nothing to publish: the whole catalog is already on the store.",
     truncated: (n: number) =>
-      `Showing the first 300 of ${n} — "Select all" still takes all ${n}.`,
+      `Showing the first 300 of ${n} — narrow with search to reach the rest.`,
+    runCapped: (max: number, held: number) =>
+      `This run takes ${max}: publishing is a product plus a call per size, and the store cannot take more in one go. The other ${held} stay selected for the next run.`,
+    reportTruncated: (n: number) => `…and ${n} more rows (the totals above include them).`,
   },
   login: {
     heading: "Sign in",

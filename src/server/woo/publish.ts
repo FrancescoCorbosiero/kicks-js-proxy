@@ -141,8 +141,26 @@ async function resolveTagliaId(client: WooClient): Promise<number | undefined> {
   }
 }
 
-/** A catalog product the Publish tab can act on, and whether the store has it. */
-export type PublishTarget = PublishCandidate & { onStore: boolean };
+/**
+ * A catalog product the Publish tab can act on, and whether the store has it.
+ *
+ * Deliberately NARROWER than the catalog row it comes from: every field here
+ * is serialized into the page once per candidate, and the candidate list is
+ * the whole unpublished catalog. Anything the tab does not render is weight
+ * the browser parses for nothing — so this is a pick, not a spread.
+ */
+export type PublishTarget = Pick<
+  PublishCandidate,
+  | "sku"
+  | "title"
+  | "brand"
+  | "image"
+  | "source"
+  | "category"
+  | "secondaryCategory"
+  | "minAsk"
+  | "variantCount"
+> & { onStore: boolean };
 
 /**
  * Every catalog product the Publisher can act on, flagged with whether the
@@ -168,7 +186,18 @@ export async function listPublishTargets(): Promise<{
   );
   const rows = await listPublishCandidates(config.source.market);
   return {
-    candidates: rows.map((r) => ({ ...r, onStore: storeSkus.has(r.sku) })),
+    candidates: rows.map((r) => ({
+      sku: r.sku,
+      title: r.title,
+      brand: r.brand,
+      image: r.image,
+      source: r.source,
+      category: r.category,
+      secondaryCategory: r.secondaryCategory,
+      minAsk: r.minAsk,
+      variantCount: r.variantCount,
+      onStore: storeSkus.has(r.sku),
+    })),
     hasSnapshot: snapshot != null,
   };
 }
