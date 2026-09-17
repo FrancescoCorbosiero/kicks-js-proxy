@@ -2,9 +2,16 @@ import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { storeSnapshot } from "@/server/db/schema";
+import { countOf, rowsOf } from "@/server/db/rows";
 import type { StoreModel } from "./model";
 
-const SINGLETON = "current";
+/**
+ * The snapshot is a single row. Exported because anything querying the blob in
+ * SQL must key on the SAME id — a hardcoded guess elsewhere silently matches
+ * nothing, and "nothing" is indistinguishable from "the store is empty".
+ */
+export const SNAPSHOT_ID = "current";
+const SINGLETON = SNAPSHOT_ID;
 
 export type SnapshotSource = "upload" | "rest";
 
@@ -54,6 +61,36 @@ export async function getActiveSnapshot(): Promise<StoreModel | null> {
 }
 
 /**
+ * Every SKU the store snapshot carries, normalized — extracted IN SQL.
+ *
+ * The callers that need this need ONLY this: "does the store already have
+ * product X". Answering it by deserializing the snapshot pulled the whole blob
+ * into the heap — 9.5 MB of JSON for a 3000-product shop, several times that
+ * as a live object graph — on every render that asked. The Sync tab asks on
+ * every server action, and a store pull fires one per product page, so a long
+ * pull turned into hundreds of multi-megabyte allocations racing the collector:
+ * "Ineffective mark-compacts near heap limit", and the dev server died.
+ *
+ * A few thousand short strings instead. Best-effort: an empty set on any error
+ * means "the store has nothing", which is what no snapshot already means.
+ */
+export async function listStoreSkus(): Promise<Set<string>> {
+  try {
+    const res = await db.execute(sql`
+      select distinct upper(trim(p->>'sku')) as sku
+      from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+      where ${storeSnapshot.id} = ${SINGLETON} and coalesce(trim(p->>'sku'), '') <> ''
+    `);
+    const out = new Set<string>();
+    for (const r of rowsOf<{ sku?: string | null }>(res)) if (r.sku) out.add(r.sku);
+    return out;
+  } catch (e) {
+    console.warn("[snapshot] store SKUs skipped:", e instanceof Error ? e.message : e);
+    return new Set();
+  }
+}
+
+/**
  * How many store SKUs appear on MORE than one product — the dashboard's
  * duplicate banner. Computed in SQL over the jsonb so the dashboard never
  * loads the multi-MB snapshot blob. Best-effort: 0 on any error.
@@ -69,9 +106,7 @@ export async function countDuplicateSkus(): Promise<number> {
         having count(*) > 1
       ) g
     `);
-    const rows = res as unknown as { n?: number | string }[];
-    const n = Array.isArray(rows) ? rows[0]?.n : undefined;
-    return typeof n === "number" ? n : Number.parseInt(String(n ?? "0"), 10) || 0;
+    return countOf(res);
   } catch {
     return 0;
   }

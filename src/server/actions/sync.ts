@@ -15,6 +15,8 @@ import {
   type ApplyOutcome,
 } from "@/server/woo/apply";
 import { wooConfigured } from "@/server/woo/client";
+import { getActiveConfig } from "@/server/config/repo";
+import { countUnpublishedCandidates } from "@/server/catalog/repo";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
 
 function errMessage(e: unknown): string {
@@ -97,16 +99,18 @@ export interface SyncPageState {
 
 /** Everything the sync page header needs (also used to refresh after actions). */
 export async function getSyncState(): Promise<SyncPageState> {
-  const { listPublishTargets } = await import("@/server/woo/publish");
-  const [latest, history, targets] = await Promise.all([
+  const config = await getActiveConfig().catch(() => null);
+  const [latest, history, unpublished] = await Promise.all([
     getLatestPullRun().catch(() => null),
     listApplyHistory().catch(() => [] as ApplyHistoryEntry[]),
-    listPublishTargets().catch(() => null),
+    // ONE integer, counted in SQL. This runs on every render of the tab —
+    // and a running pull re-renders it once per product page — so it must
+    // never be answered by loading the catalog and the snapshot into memory.
+    config ? countUnpublishedCandidates(config.source.market) : Promise.resolve(0),
   ]);
   return {
     wooConfigured: wooConfigured(),
-    // The delta's size, not the page's: listPublishTargets ships a page.
-    unpublished: targets?.counts.missing ?? 0,
+    unpublished,
     runningPull:
       latest && latest.status === "running"
         ? {
@@ -194,7 +198,6 @@ export async function listRebuildableSkus(): Promise<{
   catalogOnly: number; // known to a source but not on the store — not rebuildable
 }> {
   try {
-    const { getActiveConfig } = await import("@/server/config/repo");
     const { listCatalogEntries } = await import("@/server/catalog/repo");
     const { getActiveSnapshot } = await import("@/server/store-json/repo");
     const { activeFeedSkus, GS_FEED } = await import("@/server/feeds/repo");
