@@ -3,7 +3,9 @@ import { and, desc, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, t
 import type { ProductScopeAxes } from "@core/config";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
-import { catalogProducts } from "@/server/db/schema";
+import { catalogProducts, storeSnapshot } from "@/server/db/schema";
+import { countOf } from "@/server/db/rows";
+import { SNAPSHOT_ID } from "@/server/store-json/repo";
 import { skuKey } from "@/lib/skus";
 import { chunkArray } from "@/lib/chunk";
 import { classifyTitle } from "./classify";
@@ -191,6 +193,43 @@ export async function listPublishCandidates(market: string): Promise<PublishCand
   } catch (e) {
     console.warn("[catalog] publish candidates skipped (cache unavailable):", describeDbError(e));
     return [];
+  }
+}
+
+/**
+ * How many catalog products the store does NOT carry yet — counted in SQL.
+ *
+ * The Sync tab shows this so an almost-idle sync on a fresh shop reads as
+ * "nothing is published yet" instead of "the sync is broken". It is ONE
+ * integer, and it used to be obtained by loading every catalog row and the
+ * entire store snapshot into the heap. That runs on every render of the tab,
+ * and a store pull re-renders it once per product page — which is how a long
+ * pull walked the dev server into an out-of-memory crash.
+ *
+ * Matches listPublishCandidates' filter exactly, or the number would disagree
+ * with the list it describes. Best-effort: 0 on any error.
+ */
+export async function countUnpublishedCandidates(market: string): Promise<number> {
+  try {
+    const res = await db.execute(sql`
+      with store_skus as (
+        select distinct upper(trim(p->>'sku')) as sku
+        from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+        where ${storeSnapshot.id} = ${SNAPSHOT_ID} and coalesce(trim(p->>'sku'), '') <> ''
+      )
+      select count(*)::int as n
+      from ${catalogProducts} c
+      where c.market = ${market}
+        and c.source <> 'woo'
+        and c.variant_count >= 1
+        and not exists (
+          select 1 from store_skus ss where ss.sku = upper(trim(c.sku))
+        )
+    `);
+    return countOf(res);
+  } catch (e) {
+    console.warn("[catalog] unpublished count skipped:", e instanceof Error ? e.message : e);
+    return 0;
   }
 }
 

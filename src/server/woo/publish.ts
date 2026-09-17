@@ -2,7 +2,12 @@ import "server-only";
 import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getActiveConfig } from "@/server/config/repo";
-import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import {
+  getActiveSnapshot,
+  getSnapshotInfo,
+  listStoreSkus,
+  saveSnapshot,
+} from "@/server/store-json/repo";
 import {
   pagePublishTargets,
   type PublishPage,
@@ -182,13 +187,15 @@ export async function listPublishTargets(query: PublishQuery = {}): Promise<
   PublishPage<PublishTarget> & { hasSnapshot: boolean }
 > {
   const config = await getActiveConfig();
-  const snapshot = await getActiveSnapshot().catch(() => null);
-  const storeSkus = new Set(
-    (snapshot?.products ?? [])
-      .map((p: StoreProductModel) => (p.sku ? skuKey(p.sku) : ""))
-      .filter(Boolean),
-  );
-  const rows = await listPublishCandidates(config.source.market);
+  // The SKU set and the "is there a snapshot at all" flag, WITHOUT the blob:
+  // this runs on every render of the tab, including the one that follows each
+  // publish call, and deserializing the whole store to ask "does it have X"
+  // is how the dev server ran out of heap.
+  const [info, storeSkus, rows] = await Promise.all([
+    getSnapshotInfo().catch(() => null),
+    listStoreSkus(),
+    listPublishCandidates(config.source.market),
+  ]);
   // Filtered and sliced HERE: the whole delta stays on the server, and only a
   // page of it is serialized into the page the browser has to parse.
   const page = pagePublishTargets(
@@ -202,11 +209,11 @@ export async function listPublishTargets(query: PublishQuery = {}): Promise<
       secondaryCategory: r.secondaryCategory,
       minAsk: r.minAsk,
       variantCount: r.variantCount,
-      onStore: storeSkus.has(r.sku),
+      onStore: storeSkus.has(skuKey(r.sku)),
     })),
     query,
   );
-  return { ...page, hasSnapshot: snapshot != null };
+  return { ...page, hasSnapshot: info != null };
 }
 
 /**
