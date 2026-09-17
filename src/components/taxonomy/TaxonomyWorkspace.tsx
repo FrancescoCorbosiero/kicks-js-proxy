@@ -369,6 +369,12 @@ export function TaxonomyWorkspace({ initial }: { initial: TaxonomyState }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-bold">{t.taxonomy.previewTitle}</span>
           <span className="text-xs text-muted tnum">{t.taxonomy.previewTotal(state.total)}</span>
+          {/* The count the table cannot show. A source trusted with a tree it
+              infers per model lands here with thousands: that number IS the
+              finding, and it must not be delivered as thousands of rows. */}
+          <span className="text-xs text-muted tnum">
+            {t.taxonomy.previewCategories(state.categoryCount)}
+          </span>
           {previewing && (
             <span className="spin h-3.5 w-3.5 rounded-full border-2 border-accent/30 border-t-accent" />
           )}
@@ -399,6 +405,11 @@ export function TaxonomyWorkspace({ initial }: { initial: TaxonomyState }) {
               </li>
             ))}
           </ul>
+        )}
+        {state.categoryCount > state.preview.length && (
+          <p className="mt-2 text-[11px] text-faint">
+            {t.taxonomy.previewTruncated(state.categoryCount - state.preview.length)}
+          </p>
         )}
       </section>
 

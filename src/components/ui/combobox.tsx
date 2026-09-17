@@ -16,6 +16,15 @@ import { cn } from "@/lib/utils";
  * matches no option is flagged rather than forbidden.
  */
 
+/**
+ * Rows the dropdown will render at once. The option lists come from the
+ * catalog, which has no ceiling: a supplier feed whose "families" are inferred
+ * from product titles yields one per model, and opening the picker used to
+ * build a DOM node per catalog product. Typing narrows — that is what the
+ * search box is for — so the list is bounded and says what it is hiding.
+ */
+const VISIBLE_OPTIONS = 100;
+
 export interface ComboboxOption {
   value: string;
   /** How many catalog products carry it — shown as the option's right rail. */
@@ -36,6 +45,8 @@ export interface ComboboxProps {
   customLabel?: (typed: string) => string;
   /** Message when the filter matches nothing at all. */
   emptyLabel?: string;
+  /** Footer for the options the list is not rendering — "keep typing". */
+  moreLabel?: (hidden: number) => string;
   disabled?: boolean;
   className?: string;
   id?: string;
@@ -50,6 +61,7 @@ export function Combobox({
   anyLabel,
   customLabel,
   emptyLabel,
+  moreLabel,
   disabled,
   className,
   id,
@@ -77,10 +89,12 @@ export function Combobox({
   const custom = open && query.trim().length > 0 && !exact ? query.trim() : null;
 
   // Row order: [Any] [custom?] ...options — index arithmetic follows it.
+  const shownOptions = filtered.slice(0, VISIBLE_OPTIONS);
+  const hiddenOptions = filtered.length - shownOptions.length;
   const rows: { kind: "any" | "custom" | "option"; value: string; option?: ComboboxOption }[] = [
     { kind: "any", value: "" },
     ...(custom ? [{ kind: "custom" as const, value: custom }] : []),
-    ...filtered.map((o) => ({ kind: "option" as const, value: o.value, option: o })),
+    ...shownOptions.map((o) => ({ kind: "option" as const, value: o.value, option: o })),
   ];
 
   React.useEffect(() => {
@@ -230,6 +244,11 @@ export function Combobox({
           })}
           {rows.length === 1 && emptyLabel && (
             <li className="px-2 py-1.5 text-xs text-faint">{emptyLabel}</li>
+          )}
+          {hiddenOptions > 0 && (
+            <li className="px-2 py-1.5 text-[10px] text-faint">
+              {moreLabel?.(hiddenOptions) ?? `+${hiddenOptions}`}
+            </li>
           )}
         </ul>
       )}

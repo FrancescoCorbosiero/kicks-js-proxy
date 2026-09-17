@@ -8,6 +8,13 @@ import { getServerDictionary } from "@/i18n/server";
 export const dynamic = "force-dynamic";
 
 /**
+ * Scope options handed to the browser. The catalog's family list has no
+ * ceiling — a feed whose tree is inferred per model produces one per product —
+ * and every option here is serialized into the page.
+ */
+const OPTION_LIMIT = 300;
+
+/**
  * The Margins tab — the granular pricing-rule admin (the scs-b2b margin
  * panel, on this engine): scoped rules from general to specific, each with a
  * percent, fixed-€ or banded margin plus the operational knobs (rounding,
@@ -26,10 +33,23 @@ export default async function PricingPage() {
     rules = config.pricingRules;
     // The real catalog tree, so a rule is scoped by PICKING the family the
     // operator already browses by instead of guessing a title substring.
-    [families, brands] = await Promise.all([
+    const [allFamilies, allBrands] = await Promise.all([
       listCategoryCounts(config.source.market),
       listBrandCounts(config.source.market),
     ]);
+    // Bounded before it crosses into the browser: these are pickers, and a
+    // source with no real taxonomy yields one family per product. Biggest
+    // first, and the scopes existing rules already name are always offered —
+    // the combobox takes free text for anything else.
+    const scoped = new Set(
+      rules.flatMap((r) => [r.scope.category ?? "", r.scope.secondaryCategory ?? "", r.scope.brand ?? ""]),
+    );
+    families = [...allFamilies]
+      .sort((a, b) => b.count - a.count)
+      .filter((f, i) => i < OPTION_LIMIT || scoped.has(f.category) || scoped.has(f.secondaryCategory));
+    brands = [...allBrands]
+      .sort((a, b) => b.count - a.count)
+      .filter((b, i) => i < OPTION_LIMIT || scoped.has(b.brand));
   } catch (e) {
     return <DbUnavailable error={e} />;
   }

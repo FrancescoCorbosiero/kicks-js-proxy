@@ -12,6 +12,13 @@ import { Badge } from "@/components/ui/badge";
 
 /** Products per call: each one costs a lookup, a read and (maybe) a write. */
 const CHUNK = 20;
+/**
+ * Products one run may touch. "Use all" on a full store puts thousands of SKUs
+ * in the box, and without a ceiling one click became thousands of sequential
+ * writes at the live store — a burst no shop should ever receive from a browser
+ * tab. The remainder stays in the box for the next run.
+ */
+const RUN_LIMIT = 200;
 
 /**
  * The non-destructive counterpart to force reimport: put back what products
@@ -32,7 +39,10 @@ export function RepairPanel() {
   const [dry, setDry] = React.useState<{ outcome: RepairOutcome; signature: string } | null>(null);
   const [applied, setApplied] = React.useState<RepairOutcome | null>(null);
 
-  const skus = React.useMemo(() => parseSkus(text), [text]);
+  const parsedSkus = React.useMemo(() => parseSkus(text), [text]);
+  // What a click actually runs, bounded. Everything else waits its turn.
+  const skus = React.useMemo(() => parsedSkus.slice(0, RUN_LIMIT), [parsedSkus]);
+  const heldBack = parsedSkus.length - skus.length;
   const signature = [...skus].sort().join(",");
   const dryValid = dry != null && dry.signature === signature && skus.length > 0;
   // Nothing to write is not a reason to unlock the live button.
@@ -134,7 +144,12 @@ export function RepairPanel() {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs text-muted tnum">{t.repair.parsed(skus.length)}</span>
+        <span className="text-xs text-muted tnum">{t.repair.parsed(parsedSkus.length)}</span>
+        {heldBack > 0 && (
+          <span className="text-[11px] font-medium text-warn">
+            {t.repair.runCapped(RUN_LIMIT, heldBack)}
+          </span>
+        )}
         <Button
           type="button"
           variant="outline"
