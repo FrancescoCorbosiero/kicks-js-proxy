@@ -3,6 +3,11 @@ import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import {
+  pagePublishTargets,
+  type PublishPage,
+  type PublishQuery,
+} from "@/lib/publish-page";
 import { getAnyBySkus, listPublishCandidates, type PublishCandidate } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { manualPriceFor } from "@/server/overrides/model";
@@ -173,10 +178,9 @@ export type PublishTarget = Pick<
  * live per-SKU check at publish time is what keeps that from creating a
  * duplicate parent.
  */
-export async function listPublishTargets(): Promise<{
-  candidates: PublishTarget[];
-  hasSnapshot: boolean;
-}> {
+export async function listPublishTargets(query: PublishQuery = {}): Promise<
+  PublishPage<PublishTarget> & { hasSnapshot: boolean }
+> {
   const config = await getActiveConfig();
   const snapshot = await getActiveSnapshot().catch(() => null);
   const storeSkus = new Set(
@@ -185,8 +189,10 @@ export async function listPublishTargets(): Promise<{
       .filter(Boolean),
   );
   const rows = await listPublishCandidates(config.source.market);
-  return {
-    candidates: rows.map((r) => ({
+  // Filtered and sliced HERE: the whole delta stays on the server, and only a
+  // page of it is serialized into the page the browser has to parse.
+  const page = pagePublishTargets(
+    rows.map((r) => ({
       sku: r.sku,
       title: r.title,
       brand: r.brand,
@@ -198,8 +204,9 @@ export async function listPublishTargets(): Promise<{
       variantCount: r.variantCount,
       onStore: storeSkus.has(r.sku),
     })),
-    hasSnapshot: snapshot != null,
-  };
+    query,
+  );
+  return { ...page, hasSnapshot: snapshot != null };
 }
 
 /**

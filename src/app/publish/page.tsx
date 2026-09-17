@@ -4,12 +4,23 @@ import { DbUnavailable } from "@/components/DbUnavailable";
 import { getPublishState, type PublishPageState } from "@/server/actions/publish";
 import { wooSiteUrl } from "@/server/woo/client";
 import { PublishWorkspace } from "@/components/publish/PublishWorkspace";
+import type { PublishSourceLens } from "@/lib/publish-page";
+import type { QueryParams } from "@/lib/qs";
 
 export const dynamic = "force-dynamic";
 // Publishing is slow work (a parent create + one call per size + media
 // sideload, per product), and the client sends it in batches through a server
 // action hosted by this page — which inherits this page's limit.
 export const maxDuration = 300;
+
+/** Filter state lives in the URL, so the server can answer it. */
+interface Search {
+  q?: string;
+  src?: string;
+  onStore?: string;
+}
+
+const LENSES: PublishSourceLens[] = ["all", "goldensneakers", "kicksdb"];
 
 /**
  * The Publish tab — the catalog→store direction the app was missing.
@@ -20,13 +31,24 @@ export const maxDuration = 300;
  * products on WooCommerce: parent, canonical EU sizes, prices from the margin
  * rules, real feed stock, media.
  */
-export default async function PublishPage() {
+export default async function PublishPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
   const { t } = await getServerDictionary();
+  const sp = await searchParams;
+  const params: QueryParams = { q: sp.q, src: sp.src, onStore: sp.onStore };
+  const query = {
+    q: sp.q,
+    source: LENSES.find((l) => l === sp.src) ?? "all",
+    showOnStore: sp.onStore === "1",
+  };
 
   let state: PublishPageState;
   try {
     await assertSchemaCurrent();
-    state = await getPublishState();
+    state = await getPublishState(query);
   } catch (e) {
     return <DbUnavailable error={e} />;
   }
@@ -45,6 +67,9 @@ export default async function PublishPage() {
 
       <PublishWorkspace
         candidates={state.candidates}
+        counts={state.counts}
+        matched={state.matched}
+        params={params}
         hasSnapshot={state.hasSnapshot}
         wooConfigured={state.wooConfigured}
         siteUrl={wooSiteUrl()}

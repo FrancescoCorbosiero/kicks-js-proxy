@@ -895,8 +895,9 @@ export const it = {
     openOnStore: "Apri sul negozio",
     empty:
       "Nessun prodotto da pubblicare: tutto il catalogo è già sul negozio.",
+    noMatches: "Nessun prodotto corrisponde a questi filtri.",
     truncated: (n: number) =>
-      `Mostrati i primi 300 di ${n} — restringi con la ricerca per arrivare agli altri.`,
+      `Mostrati i primi 300 di ${n} — restringi con la ricerca: filtra sull'intero catalogo, non solo su questi.`,
     runCapped: (max: number, held: number) =>
       `Questa esecuzione ne prende ${max}: pubblicare crea un prodotto e una chiamata per taglia, e il negozio non regge di più in un colpo solo. Gli altri ${held} restano selezionati per il giro successivo.`,
     reportTruncated: (n: number) => `…e altre ${n} righe (i totali qui sopra le comprendono).`,

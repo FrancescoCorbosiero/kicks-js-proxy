@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { wooConfigured } from "@/server/woo/client";
+import type { PublishPage, PublishQuery } from "@/lib/publish-page";
 import {
   listPublishTargets,
   publishProducts,
@@ -14,22 +15,33 @@ function errMessage(e: unknown): string {
   return cause?.message ?? (e instanceof Error ? e.message : String(e));
 }
 
-export interface PublishPageState {
+export interface PublishPageState extends PublishPage<PublishTarget> {
   wooConfigured: boolean;
-  /** Catalog products, each flagged with whether the store already has it. */
-  candidates: PublishTarget[];
   /** False when no store snapshot exists — the delta cannot be trusted yet. */
   hasSnapshot: boolean;
 }
 
-/** Everything the Publish tab renders on load. */
-export async function getPublishState(): Promise<PublishPageState> {
+const EMPTY_COUNTS = { all: 0, goldensneakers: 0, kicksdb: 0, missing: 0, total: 0 };
+
+/**
+ * A page of the Publish tab's list, resolved against the current filters.
+ *
+ * The filters live in the URL and are answered here, so the browser never
+ * receives more than one page of candidates however large the delta is.
+ */
+export async function getPublishState(query: PublishQuery = {}): Promise<PublishPageState> {
   const configured = wooConfigured();
   try {
-    const { candidates, hasSnapshot } = await listPublishTargets();
-    return { wooConfigured: configured, candidates, hasSnapshot };
+    const page = await listPublishTargets(query);
+    return { wooConfigured: configured, ...page };
   } catch {
-    return { wooConfigured: configured, candidates: [], hasSnapshot: false };
+    return {
+      wooConfigured: configured,
+      candidates: [],
+      counts: EMPTY_COUNTS,
+      matched: 0,
+      hasSnapshot: false,
+    };
   }
 }
 

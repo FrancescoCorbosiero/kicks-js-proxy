@@ -875,8 +875,9 @@ export const en: Dictionary = {
     unpriced: (n: number) => `${n} unpriced`,
     openOnStore: "Open on the store",
     empty: "Nothing to publish: the whole catalog is already on the store.",
+    noMatches: "No product matches these filters.",
     truncated: (n: number) =>
-      `Showing the first 300 of ${n} — narrow with search to reach the rest.`,
+      `Showing the first 300 of ${n} — narrow with search: it filters the whole catalog, not just these.`,
     runCapped: (max: number, held: number) =>
       `This run takes ${max}: publishing is a product plus a call per size, and the store cannot take more in one go. The other ${held} stay selected for the next run.`,
     reportTruncated: (n: number) => `…and ${n} more rows (the totals above include them).`,
