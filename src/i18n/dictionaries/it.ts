@@ -482,6 +482,8 @@ export const it = {
         total != null ? `${done}/${total} prodotti` : `${done} prodotti`,
       cancel: "Annulla",
       failed: "Pull fallito",
+      ceiling:
+        "Lo scaricamento si è fermato al limite di pagine di una singola esecuzione. Tutto quello che è stato letto è salvato: premi di nuovo per continuare da dove si è interrotto.",
     },
     preview: {
       button: "Calcola anteprima",

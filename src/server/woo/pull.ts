@@ -239,14 +239,38 @@ export async function cancelPull(runId: string): Promise<void> {
 }
 
 /**
- * Run a whole pull to completion — the scheduled (cron) entry point. Bounded
- * by `maxSteps` as a runaway backstop; each step is one product page.
+ * Product pages one invocation will walk. A runaway backstop, not a size
+ * limit: at PRODUCTS_PER_PAGE each, this covers 100 000 products. The old
+ * ceiling of 1000 steps sat at exactly 20 000 products, so a store that size
+ * walked every page, never reached the short page that means "finished", and
+ * returned with the snapshot NOT replaced — reported as a plain failure, with
+ * nothing saying the work had actually been done and merely needed one more
+ * invocation. Hitting a ceiling and hitting an error are different things.
  */
-export async function runFullPull(maxSteps = 1000): Promise<PullProgress> {
+const MAX_PULL_STEPS = 5000;
+
+/**
+ * Run a whole pull to completion — the scheduled (cron) entry point.
+ *
+ * A run is resumable: the cursor lives on the row, so stopping at the ceiling
+ * is safe and the next invocation carries on. It is still worth saying out
+ * loud, because a snapshot that was not replaced is a store state the operator
+ * is reading as current when it is not.
+ */
+export async function runFullPull(maxSteps = MAX_PULL_STEPS): Promise<PullProgress> {
   const { run } = await startPull();
   let progress = toProgress(run);
-  for (let i = 0; i < maxSteps && progress.status === "running"; i++) {
+  let steps = 0;
+  for (; steps < maxSteps && progress.status === "running"; steps++) {
     progress = await advancePull(run.id, 1);
+  }
+  if (steps >= maxSteps && progress.status === "running") {
+    console.warn(
+      `[woo] pull ${run.id} stopped at the ${maxSteps}-page ceiling with ` +
+        `${progress.productsFetched} products staged. The snapshot was NOT replaced; ` +
+        `the run resumes on the next invocation. Raise MAX_PULL_STEPS if the store ` +
+        `is genuinely larger than ${maxSteps * PRODUCTS_PER_PAGE} products.`,
+    );
   }
   return progress;
 }

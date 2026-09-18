@@ -40,8 +40,12 @@ function selectionSignature(selections: { planId: string; variantIds: string[] }
     .join("|");
 }
 
-/** Product pages one pull may walk — 20 per page, so 20 000 products. */
-const MAX_PULL_STEPS = 1000;
+/**
+ * Product pages one click will walk — 20 per page, so 100 000 products, the
+ * same backstop the scheduled pull uses. A run is resumable (the cursor lives
+ * on the row), so reaching this is "press it again", not "it broke".
+ */
+const MAX_PULL_STEPS = 5000;
 
 export function SyncWorkspace({
   defaultMarket,
@@ -146,7 +150,10 @@ export function SyncWorkspace({
           return;
         }
       }
-      setPullError(t.sync.pull.failed);
+      // The ceiling, not an error: everything fetched so far is staged and the
+      // next run continues from it. Saying "failed" here would send the
+      // operator hunting a fault that is not there.
+      setPullError(t.sync.pull.ceiling);
     } finally {
       setPulling(false);
     }
