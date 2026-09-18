@@ -40,6 +40,9 @@ function selectionSignature(selections: { planId: string; variantIds: string[] }
     .join("|");
 }
 
+/** Product pages one pull may walk — 20 per page, so 20 000 products. */
+const MAX_PULL_STEPS = 1000;
+
 export function SyncWorkspace({
   defaultMarket,
   snapshotInfo,
@@ -116,7 +119,11 @@ export function SyncWorkspace({
         setPullProgress(started.progress);
         if (started.progress.done) return;
       }
-      for (;;) {
+      // Bounded like the scheduled pull (runFullPull's maxSteps): one step is
+      // one product page, so this is 20 000 products. An unbounded loop here
+      // means the browser keeps firing server actions for as long as the store
+      // declines to say "done" — which is not a state the browser can fix.
+      for (let step = 0; step < MAX_PULL_STEPS; step++) {
         if (cancelRef.current) {
           await cancelStorePull({ runId });
           setPullProgress(null);
@@ -139,6 +146,7 @@ export function SyncWorkspace({
           return;
         }
       }
+      setPullError(t.sync.pull.failed);
     } finally {
       setPulling(false);
     }

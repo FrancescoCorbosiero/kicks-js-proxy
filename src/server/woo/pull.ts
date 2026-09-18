@@ -1,6 +1,7 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
+import { countOf } from "@/server/db/rows";
 import { storePullRuns, storePullProducts, type StorePullRunRow } from "@/server/db/schema";
 import { saveSnapshot } from "@/server/store-json/repo";
 import type { StoreModel, StoreProductModel } from "@/server/store-json/model";
@@ -108,6 +109,14 @@ function toStoreProduct(p: WooRestProduct, variations: WooRestVariation[]): Stor
   };
 }
 
+/** Staged rows for a run — the pull's own evidence that a page moved. */
+async function countStaged(runId: string): Promise<number> {
+  const res = await db.execute(
+    sql`select count(*)::int as n from ${storePullProducts} where "run_id" = ${runId}`,
+  );
+  return countOf(res);
+}
+
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
   const queue = [...items];
   const worker = async () => {
@@ -135,6 +144,14 @@ export async function advancePull(runId: string, pages = 1): Promise<PullProgres
       const { products, total } = await client.getProductsPage(cursorPage, PRODUCTS_PER_PAGE);
       if (totalProducts == null && total != null) totalProducts = total;
 
+      // Staged rows are keyed by (run, product), so a page the store already
+      // gave us adds nothing. Counting before and after is how this loop knows
+      // the cursor actually moved: an install that ignores `?page` answers
+      // every page with the first one, and "finished" below — which trusts the
+      // store to send a short page — would never come true. The client drives
+      // this one call at a time, so that is an endless pull hammering the shop.
+      const staged = await countStaged(runId);
+
       await forEachLimit(products, VARIATIONS_CONCURRENCY, async (p) => {
         const variations = await client.getAllVariations(p.id);
         variationsFetched += variations.length;
@@ -151,7 +168,17 @@ export async function advancePull(runId: string, pages = 1): Promise<PullProgres
       productsFetched += products.length;
       cursorPage += 1;
 
-      const finished = products.length < PRODUCTS_PER_PAGE;
+      const added = (await countStaged(runId)) - staged;
+      const repeating = products.length > 0 && added === 0;
+      if (repeating) {
+        console.warn(
+          `[woo] the products endpoint is not paginating — page ${cursorPage - 1} ` +
+            `returned ${products.length} products already staged. Finishing the pull ` +
+            `with the ${staged} products collected. Check for a cache or security ` +
+            `plugin stripping ?page from /products.`,
+        );
+      }
+      const finished = repeating || products.length < PRODUCTS_PER_PAGE;
       await db
         .update(storePullRuns)
         .set({ cursorPage, productsFetched, variationsFetched, totalProducts, updatedAt: new Date() })
