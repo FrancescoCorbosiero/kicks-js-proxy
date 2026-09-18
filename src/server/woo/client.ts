@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { pageVerdict } from "./paginate";
 import {
   requestJson,
   requestJsonWithHeaders,
@@ -110,9 +111,21 @@ export class WooClient {
     return { products, total: Number.isFinite(total) ? total : null };
   }
 
-  /** All variations of one parent product (paged at 100 — sneaker sizes fit in one). */
+  /**
+   * All variations of one parent product (paged at 100 — sneaker sizes fit in
+   * one page, so the loop below normally runs exactly once).
+   *
+   * It ends on ITS OWN terms. This loop used to run until the store sent a
+   * short page, which made the store the only thing standing between a pull
+   * and an unbounded array: an install that ignores `?page` answers every page
+   * with the first one, and the pull collected the same 100 rows until the
+   * process died with "Ineffective mark-compacts near heap limit". Distinct
+   * ids and a page ceiling now decide instead, and either stop is reported
+   * with the product id so the offending endpoint can be found.
+   */
   async getAllVariations(productId: number): Promise<WooRestVariation[]> {
     const out: WooRestVariation[] = [];
+    const seen = new Set<number>();
     for (let page = 1; ; page++) {
       const raw = await requestJson(
         this.apiUrl(`products/${productId}/variations`, {
@@ -125,8 +138,32 @@ export class WooClient {
         this.retry,
       );
       const rows = z.array(WooVariationSchema).parse(raw);
-      out.push(...rows);
-      if (rows.length < VARIATIONS_PER_PAGE) return out;
+      const fresh = rows.filter((v) => !seen.has(v.id));
+      for (const v of fresh) seen.add(v.id);
+      out.push(...fresh);
+
+      const verdict = pageVerdict({
+        page,
+        rows: rows.length,
+        fresh: fresh.length,
+        perPage: VARIATIONS_PER_PAGE,
+      });
+      if (verdict === "continue") continue;
+      if (verdict === "not-paginating") {
+        console.warn(
+          `[woo] product ${productId}: the variations endpoint is not paginating — ` +
+            `page ${page} repeated rows already returned. Keeping the ${out.length} ` +
+            `distinct variations found. Check for a cache or security plugin ` +
+            `stripping ?page from /products/${productId}/variations.`,
+        );
+      } else if (verdict === "capped") {
+        console.warn(
+          `[woo] product ${productId}: stopped after ${page} variation pages ` +
+            `(${out.length} variations). A parent this large is unexpected — ` +
+            `if it is real, raise MAX_PAGES in src/server/woo/paginate.ts.`,
+        );
+      }
+      return out;
     }
   }
 

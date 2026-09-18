@@ -468,6 +468,8 @@ export const en: Dictionary = {
       progress: (done, total) => (total != null ? `${done}/${total} products` : `${done} products`),
       cancel: "Cancel",
       failed: "Pull failed",
+      ceiling:
+        "The pull stopped at the page ceiling for one run. Everything read so far is saved: press it again to continue from where it left off.",
     },
     preview: {
       button: "Compute preview",

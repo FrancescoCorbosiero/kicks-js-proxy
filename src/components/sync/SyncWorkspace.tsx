@@ -40,6 +40,13 @@ function selectionSignature(selections: { planId: string; variantIds: string[] }
     .join("|");
 }
 
+/**
+ * Product pages one click will walk — 20 per page, so 100 000 products, the
+ * same backstop the scheduled pull uses. A run is resumable (the cursor lives
+ * on the row), so reaching this is "press it again", not "it broke".
+ */
+const MAX_PULL_STEPS = 5000;
+
 export function SyncWorkspace({
   defaultMarket,
   snapshotInfo,
@@ -116,7 +123,11 @@ export function SyncWorkspace({
         setPullProgress(started.progress);
         if (started.progress.done) return;
       }
-      for (;;) {
+      // Bounded like the scheduled pull (runFullPull's maxSteps): one step is
+      // one product page, so this is 20 000 products. An unbounded loop here
+      // means the browser keeps firing server actions for as long as the store
+      // declines to say "done" — which is not a state the browser can fix.
+      for (let step = 0; step < MAX_PULL_STEPS; step++) {
         if (cancelRef.current) {
           await cancelStorePull({ runId });
           setPullProgress(null);
@@ -139,6 +150,10 @@ export function SyncWorkspace({
           return;
         }
       }
+      // The ceiling, not an error: everything fetched so far is staged and the
+      // next run continues from it. Saying "failed" here would send the
+      // operator hunting a fault that is not there.
+      setPullError(t.sync.pull.ceiling);
     } finally {
       setPulling(false);
     }
