@@ -3,7 +3,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getActiveConfig } from "@/server/config/repo";
-import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import {
+  getSnapshotProductsBySkus,
+  upsertSnapshotProducts,
+} from "@/server/store-json/repo";
 import { getAnyBySkus } from "@/server/catalog/repo";
 import { getOverrides } from "@/server/overrides/repo";
 import { manualPriceFor } from "@/server/overrides/model";
@@ -99,18 +102,19 @@ export async function rebuildProducts(
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();
-  const snapshot = await getActiveSnapshot();
   const overrides = await getOverrides().catch(() => null);
   const catalogEntries = await getAnyBySkus(market, skus);
   // Product-level ownership: GS-owned SKUs rebuild from the feed's variant
   // set (real stock, presented prices) instead of the KicksDB catalog.
   const gsOwned = await gsOwnedProducts(skus, market, overrides);
 
-  // Store product ids come from the snapshot (the pull) — SKU-matched.
+  // Store product ids come from the snapshot (the pull) — SKU-matched. Read
+  // out of the jsonb for THESE SKUs only: a rebuild touches at most a hundred
+  // products, and deserializing the whole store to find their ids is how the
+  // same tab ran out of heap elsewhere.
+  const storeProducts = await getSnapshotProductsBySkus(skus);
   const productIdBySku = new Map<string, number>();
-  for (const p of snapshot?.products ?? []) {
-    if (p.sku) productIdBySku.set(skuKey(p.sku), p.id);
-  }
+  for (const [key, p] of storeProducts) productIdBySku.set(key, p.id);
 
   const reports: RebuildProductReport[] = [];
   const executed: { plan: RebuildPlan; created: StoreVariation[]; parentAttributes: unknown }[] = [];
@@ -239,20 +243,17 @@ export async function rebuildProducts(
     }
   });
 
-  // Patch the snapshot to the post-rebuild state of fully-succeeded products.
-  if (!dryRun && executed.length > 0 && snapshot) {
-    try {
-      const bySku = new Map(executed.map((e) => [skuKey(e.plan.sku), e]));
-      snapshot.products = snapshot.products.map((p: StoreProductModel) => {
-        const e = p.sku ? bySku.get(skuKey(p.sku)) : undefined;
-        if (!e) return p;
-        return { ...p, attributes: e.parentAttributes, variations: e.created };
-      });
-      const info = await getSnapshotInfo();
-      await saveSnapshot(snapshot, info?.source ?? "rest");
-    } catch (e) {
-      console.warn("[rebuild] snapshot patch skipped:", e instanceof Error ? e.message : String(e));
+  // Patch the snapshot to the post-rebuild state of fully-succeeded products —
+  // only those products, in SQL. The whole-store read/map/re-serialize this
+  // replaces put ~140 MB through the heap per call on a large shop.
+  if (!dryRun && executed.length > 0) {
+    const patched: StoreProductModel[] = [];
+    for (const e of executed) {
+      const before = storeProducts.get(skuKey(e.plan.sku));
+      if (!before) continue; // not in the snapshot — nothing to correct
+      patched.push({ ...before, attributes: e.parentAttributes, variations: e.created });
     }
+    if (patched.length > 0) await upsertSnapshotProducts(patched);
   }
 
   const failedProducts = reports.filter((r) => r.error != null).length;
