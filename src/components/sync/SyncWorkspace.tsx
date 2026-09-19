@@ -19,7 +19,7 @@ import type { ApplyOutcome, ApplyHistoryEntry } from "@/server/woo/apply";
 import type { SnapshotInfo } from "@/server/store-json/repo";
 import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
-import { emptySummary, isActionable, summarize } from "@/lib/plan";
+import { emptySummary, isActionable, type PlanSummary } from "@/lib/plan";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,9 +79,23 @@ export function SyncWorkspace({
   // A source was degraded but the run still produced real plans (e.g. KicksDB
   // down or absent while the feed-owned products came through).
   const [warning, setWarning] = React.useState<string | null>(null);
+  // `plans` is the PAGE of the run the server sent, not the run. A whole-store
+  // preview is one plan per product and the store has no ceiling — holding all
+  // of them here is what took the server past its heap building the response.
   const [plans, setPlans] = React.useState<PreviewPlan[]>([]);
+  const [runId, setRunId] = React.useState<string | null>(null);
+  const [runTotals, setRunTotals] = React.useState<PlanSummary>(emptySummary());
+  const [runProducts, setRunProducts] = React.useState(0);
   const [stats, setStats] = React.useState<FetchStats | null>(null);
+  /**
+   * The price selection, expressed against the RUN:
+   *  - "all": every actionable row of the run except `excluded` — the posture a
+   *    preview starts in, and the only one that reaches rows past the page;
+   *  - "listed": only what is in `selected`, for a hand-picked apply.
+   */
+  const [priceScope, setPriceScope] = React.useState<"all" | "listed">("all");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [excluded, setExcluded] = React.useState<Set<string>>(new Set());
   const [allOpen, setAllOpen] = React.useState(false);
   const [scope, setScope] = React.useState<string[] | undefined>(
     seedSkus.length > 0 ? seedSkus : undefined,
@@ -159,14 +173,22 @@ export function SyncWorkspace({
     }
   }
 
-  /** Apply a preview result to state, pre-selecting all actionable rows. */
+  /**
+   * Apply a preview result to state. A run starts fully selected — every
+   * actionable row, including the ones past the page — which is what
+   * pre-selecting every plan used to mean back when every plan was sent.
+   */
   function applyResult(res: PreviewResult) {
     setWarning(res.warning ?? null);
     if (!res.ok) {
       setError(res.error ?? "Unknown error");
       setPlans([]);
+      setRunId(null);
+      setRunTotals(emptySummary());
+      setRunProducts(0);
       setStats(null);
       setSelected(new Set());
+      setExcluded(new Set());
       return;
     }
     const next = new Set<string>();
@@ -178,7 +200,12 @@ export function SyncWorkspace({
     setError(null);
     setStats(res.stats ?? null);
     setPlans(res.plans);
+    setRunId(res.runId ?? null);
+    setRunTotals(res.totals ?? emptySummary());
+    setRunProducts(res.products ?? res.plans.length);
+    setPriceScope("all");
     setSelected(next);
+    setExcluded(new Set());
     setAllOpen(res.plans.length <= 3);
     setDry(null);
     setApplied(null);
@@ -238,92 +265,127 @@ export function SyncWorkspace({
     });
   }
 
+  /**
+   * Tick / untick one row.
+   *
+   * Two books are kept because the run is bigger than the page: `selected` is
+   * what the visible rows show, `excluded` is what the server is told to leave
+   * out of the run. Unticking a row it never sent is impossible, which is
+   * exactly right — it was never shown either.
+   */
   function toggle(planId: string, variantId: string, checked: boolean) {
+    const k = selKey(planId, variantId);
     setSelected((prev) => {
       const next = new Set(prev);
-      const k = selKey(planId, variantId);
       if (checked) next.add(k);
       else next.delete(k);
+      return next;
+    });
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (checked) next.delete(k);
+      else next.add(k);
       return next;
     });
   }
 
   function toggleAll(p: PreviewPlan, checked: boolean) {
+    const keys = p.plan.items
+      .filter((i) => isActionable(i.action))
+      .map((i) => selKey(p.planId, i.stockxVariantId));
     setSelected((prev) => {
       const next = new Set(prev);
-      for (const item of p.plan.items) {
-        if (!isActionable(item.action)) continue;
-        const k = selKey(p.planId, item.stockxVariantId);
+      for (const k of keys) {
         if (checked) next.add(k);
         else next.delete(k);
       }
       return next;
     });
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (checked) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
   }
 
-  function selectWhere(predicate: (p: PreviewPlan, item: PlanItem) => boolean) {
+  /** "All updates": back to the whole run, nothing held out. */
+  function selectAllUpdates() {
     const next = new Set<string>();
     for (const p of plans) {
       for (const item of p.plan.items) {
-        if (isActionable(item.action) && predicate(p, item)) {
-          next.add(selKey(p.planId, item.stockxVariantId));
-        }
+        if (item.action === "update") next.add(selKey(p.planId, item.stockxVariantId));
       }
     }
+    setPriceScope("all");
     setSelected(next);
+    setExcluded(new Set());
   }
 
-  const totals = plans.reduce((acc, p) => {
-    const s = summarize(p.plan.items);
-    acc.update += s.update;
-    acc.create += s.create;
-    acc.noop += s.noop;
-    acc.skip += s.skip;
-    return acc;
-  }, emptySummary());
+  /** "None": write no prices at all (cleanup and identifiers can still run). */
+  function selectNone() {
+    setPriceScope("listed");
+    setSelected(new Set());
+    setExcluded(new Set());
+  }
 
-  const applySelections = plans
-    .map((p) => ({
-      planId: p.planId,
-      variantIds: p.plan.items
-        .filter(
-          (i) => i.action === "update" && selected.has(selKey(p.planId, i.stockxVariantId)),
-        )
-        .map((i) => i.stockxVariantId),
-    }))
-    .filter((s) => s.variantIds.length > 0);
-  const applyCount = applySelections.reduce((n, s) => n + s.variantIds.length, 0);
+  /** Counts over the WHOLE run — the page is only what is on screen. */
+  const totals = runTotals;
+  const shown = plans.length;
+  const hidden = Math.max(0, runProducts - shown);
 
-  // Cleanup scope, derived from the whole preview (not just the selection):
-  // variations priceable on KicksDB (kept + made available when zero-stock),
-  // and the previewed store products (cleanup never touches anything else).
-  const kicksdbVariationIds = React.useMemo(() => {
-    const ids = new Set<number>();
-    for (const p of plans)
-      for (const i of p.plan.items)
-        if (i.storeVariationId != null && i.proposedPrice != null) ids.add(i.storeVariationId);
-    return [...ids];
-  }, [plans]);
-  const previewedProductIds = React.useMemo(() => {
-    const ids = new Set<number>();
-    for (const p of plans)
-      for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
-    return [...ids];
-  }, [plans]);
-  // Feed-owned products (finite stock): excluded from the KicksDB-style cleanup.
-  const feedProductIds = React.useMemo(() => {
-    const ids = new Set<number>();
+  /** Update rows on this page the operator has held out of the run. */
+  const excludedUpdates = React.useMemo(() => {
+    let n = 0;
     for (const p of plans) {
-      if (p.source === "kicksdb") continue;
-      for (const i of p.plan.items) if (i.storeProductId != null) ids.add(i.storeProductId);
+      for (const i of p.plan.items) {
+        if (i.action === "update" && excluded.has(selKey(p.planId, i.stockxVariantId))) n += 1;
+      }
     }
-    return [...ids];
-  }, [plans]);
+    return n;
+  }, [plans, excluded]);
 
-  // A dry run is only valid for the exact same work: selection + cleanup scope.
-  const signature = `${sanitize ? "s" : "-"}${backfillGtins ? "g" : "-"}|${plans.map((p) => p.planId).join(",")}|${selectionSignature(applySelections)}`;
+  /** Rows the operator picked by hand — only meaningful in "listed" scope. */
+  const listedSelections = React.useMemo(
+    () =>
+      plans
+        .map((p) => ({
+          planId: p.planId,
+          variantIds: p.plan.items
+            .filter((i) => i.action === "update" && selected.has(selKey(p.planId, i.stockxVariantId)))
+            .map((i) => i.stockxVariantId),
+        }))
+        .filter((sel) => sel.variantIds.length > 0),
+    [plans, selected],
+  );
+
+  /** Rows held out — only meaningful in "all" scope. */
+  const excludedSelections = React.useMemo(
+    () =>
+      plans
+        .map((p) => ({
+          planId: p.planId,
+          variantIds: p.plan.items
+            .filter((i) => excluded.has(selKey(p.planId, i.stockxVariantId)))
+            .map((i) => i.stockxVariantId),
+        }))
+        .filter((sel) => sel.variantIds.length > 0),
+    [plans, excluded],
+  );
+
+  const applyCount =
+    priceScope === "all"
+      ? Math.max(0, totals.update - excludedUpdates)
+      : listedSelections.reduce((n, sel) => n + sel.variantIds.length, 0);
+
+  // A dry run is only valid for the exact same work: run + scope + what was
+  // held out of it. The run id stands in for the plan list it used to name —
+  // a new preview is a new run, so a stale dry run can never look current.
+  const signature = `${sanitize ? "s" : "-"}${backfillGtins ? "g" : "-"}|${runId ?? ""}|${priceScope}|${selectionSignature(priceScope === "all" ? excludedSelections : listedSelections)}`;
   const dryValid = dry != null && dry.signature === signature;
-  const canRun = plans.length > 0 && (applyCount > 0 || sanitize);
+  const canRun = runId != null && runProducts > 0 && (applyCount > 0 || sanitize);
   const dryHasWork =
     dryValid && dry != null && (dry.outcome.variations > 0 || (dry.outcome.cleanup?.deletions ?? 0) > 0 || (dry.outcome.cleanup?.taglieRealigned ?? 0) > 0 || (dry.outcome.cleanup?.stockSynthesized ?? 0) > 0 || (dry.outcome.cleanup?.parentsRealigned ?? 0) > 0);
 
@@ -358,14 +420,13 @@ export function SyncWorkspace({
     void (async () => {
       try {
         const res = await applySyncPrices({
-          selections: applySelections,
+          runId: runId!,
+          priceScope,
+          selections: priceScope === "listed" ? listedSelections : [],
+          excluded: priceScope === "all" ? excludedSelections : [],
           dryRun: true,
           sanitize,
-          kicksdbVariationIds,
-          previewedProductIds,
-          feedProductIds,
           backfillGtins,
-          planIds: plans.map((p) => p.planId),
         });
         if (!res.ok || !res.outcome) setApplyError(res.error ?? t.sync.apply.failed);
         else setDry({ outcome: res.outcome, signature });
@@ -383,14 +444,13 @@ export function SyncWorkspace({
     void (async () => {
       try {
         const res = await applySyncPrices({
-          selections: applySelections,
+          runId: runId!,
+          priceScope,
+          selections: priceScope === "listed" ? listedSelections : [],
+          excluded: priceScope === "all" ? excludedSelections : [],
           dryRun: false,
           sanitize,
-          kicksdbVariationIds,
-          previewedProductIds,
-          feedProductIds,
           backfillGtins,
-          planIds: plans.map((p) => p.planId),
         });
         if (!res.ok || !res.outcome) {
           setApplyError(res.error ?? t.sync.apply.failed);
@@ -594,14 +654,19 @@ export function SyncWorkspace({
       )}
 
       {stats?.notFound && stats.notFound.length > 0 && (
-        <NotFoundCard foundSkus={plans.map((p) => p.sku)} notFound={stats.notFound} />
+        <NotFoundCard
+          foundSkus={plans.map((p) => p.sku)}
+          notFound={stats.notFound}
+          foundTotal={runProducts}
+          missingTotal={stats.notFoundTotal ?? stats.notFound.length}
+        />
       )}
 
-      {plans.length > 0 && (
+      {runProducts > 0 && (
         <div className="space-y-3">
           {/* Summary + quick select */}
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-xs">
-            <span className="font-semibold tnum">{t.results.products(plans.length)}</span>
+            <span className="font-semibold tnum">{t.results.products(runProducts)}</span>
             <span className="text-line-strong">·</span>
             <Badge variant="update">{t.results.update(totals.update)}</Badge>
             <Badge variant="create">{t.results.create(totals.create)}</Badge>
@@ -609,21 +674,27 @@ export function SyncWorkspace({
             <Badge variant="noop">{t.results.noop(totals.noop)}</Badge>
             <span className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-accent/12 px-2.5 py-0.5 text-xs font-semibold text-accent-text tnum">
               <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              {t.results.selected(selected.size)}
+              {t.results.selected(applyCount)}
             </span>
             <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={() => setAllOpen((o) => !o)}>
               {allOpen ? t.results.collapseAll : t.results.expandAll}
             </Button>
           </div>
 
+          {hidden > 0 && (
+            <p className="rounded-lg border border-line bg-surface-2 px-4 py-2 text-xs text-muted tnum">
+              {t.results.shownOf(shown, runProducts)}
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-1.5 px-1 text-sm">
             <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-faint">
               {t.results.quickSelect}
             </span>
-            <Button type="button" variant="outline" size="sm" onClick={() => selectWhere((_, i) => i.action === "update")}>
+            <Button type="button" variant="outline" size="sm" onClick={selectAllUpdates}>
               {t.results.updates(totals.update)}
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+            <Button type="button" variant="outline" size="sm" onClick={selectNone}>
               {t.results.none}
             </Button>
           </div>
@@ -742,7 +813,7 @@ export function SyncWorkspace({
                         <span>{t.sanitize.parentsRealigned(dry.outcome.cleanup.parentsRealigned)}</span>
                       </div>
                     )}
-                    {dry.outcome.cleanupDetails.length > 0 && (
+                    {dry.outcome.cleanupDetailsTotal > 0 && (
                       <ul className="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
                         {dry.outcome.cleanupDetails.slice(0, 8).map((d) => (
                           <li key={d.storeProductId} className="flex items-center gap-2 tnum">
@@ -754,9 +825,9 @@ export function SyncWorkspace({
                         ))}
                       </ul>
                     )}
-                    {dry.outcome.cleanupDetails.length > 8 && (
+                    {dry.outcome.cleanupDetailsTotal > 8 && (
                       <div className="text-faint">
-                        {t.sync.apply.dryMore(dry.outcome.cleanupDetails.length - 8)}
+                        {t.sync.apply.dryMore(dry.outcome.cleanupDetailsTotal - 8)}
                       </div>
                     )}
                     {dry.outcome.droppedByCleanup > 0 && (
@@ -797,8 +868,8 @@ export function SyncWorkspace({
                     </li>
                   ))}
                 </ul>
-                {dry.outcome.changes.length > 12 && (
-                  <div className="text-faint">{t.sync.apply.dryMore(dry.outcome.changes.length - 12)}</div>
+                {dry.outcome.changesTotal > 12 && (
+                  <div className="text-faint">{t.sync.apply.dryMore(dry.outcome.changesTotal - 12)}</div>
                 )}
               </div>
             )}
@@ -808,7 +879,7 @@ export function SyncWorkspace({
                 <p className={applied.status === "applied" ? "text-up" : "text-skip"}>
                   {applied.status === "applied"
                     ? t.sync.apply.applied(applied.updated)
-                    : t.sync.apply.partial(applied.updated, applied.failed.length)}
+                    : t.sync.apply.partial(applied.updated, applied.failedTotal)}
                 </p>
                 {applied.cleanup && applied.cleanup.products > 0 && (
                   <p className="text-xs font-normal text-muted tnum">

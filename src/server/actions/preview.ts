@@ -1,12 +1,13 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { buildPlan } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { getActiveSnapshot } from "@/server/store-json/repo";
-import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
-import { savePlan, prunePlans } from "@/server/plans/repo";
+import { indexStoreProducts, resolveFromModel, sourceEuSize } from "@/server/store-json/match";
+import { savePlans, prunePlans, type PlanToSave } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
@@ -18,7 +19,15 @@ import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
 import { skuKey } from "@/lib/skus";
-import type { PreviewPlan } from "@/lib/plan";
+import { emptySummary, type PlanSummary, type PreviewPlan } from "@/lib/plan";
+import { PREVIEW_PAGE_LIMIT, PreviewPage } from "@/lib/preview-page";
+import type { StoreProductModel } from "@/server/store-json/model";
+
+/** SKUs resolved per pass. Bounds the server's own working set, not just the wire. */
+const PREVIEW_CHUNK = 500;
+
+/** Misses listed for the copy button. The true count is reported separately. */
+const NOT_FOUND_LIMIT = 2000;
 
 const InputSchema = z
   .object({
@@ -45,6 +54,8 @@ export interface FetchStats {
   fromCache: number;
   fetched: number;
   notFound: string[];
+  /** Misses in total — `notFound` is capped for the wire. */
+  notFoundTotal?: number;
   catalog?: CatalogStats;
 }
 
@@ -57,33 +68,64 @@ export interface PreviewResult {
    * a warning; `ok` stays true because the plans below are real.
    */
   warning?: string;
+  /**
+   * The persisted run these plans belong to. The apply is given THIS, not a
+   * list of everything it should touch, so a run larger than the page is still
+   * applied whole.
+   */
+  runId?: string;
+  /** A page of the run, products with the most to do first. */
   plans: PreviewPlan[];
+  /** Counts over the WHOLE run — never over the page. */
+  totals?: PlanSummary;
+  /** Products in the whole run. `plans.length` is what is shown of it. */
+  products?: number;
   stats?: FetchStats;
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function addSummary(into: PlanSummary, from: PlanSummary): void {
+  into.update += from.update;
+  into.create += from.create;
+  into.noop += from.noop;
+  into.skip += from.skip;
+}
+
 /**
- * Build + persist a PreviewPlan per fetched product: match against the store
- * snapshot, run buildPlan, attach EU sizes and the exact-match flag.
+ * Build + persist a PreviewPlan per product of ONE chunk: match against the
+ * store snapshot index, run buildPlan, attach EU sizes and the exact-match flag.
  */
-async function assemblePlans(
+async function planChunk(
   products: import("@core/core-spine").SourceProduct[],
   config: import("@core/config").AppConfig,
-  snapshot: Awaited<ReturnType<typeof getActiveSnapshot>>,
+  storeIndex: Map<string, StoreProductModel> | null,
   market: string,
   term: string | null,
   overrides: StoreOverrides,
+  runId: string,
+  seen: Set<string>,
 ): Promise<PreviewPlan[]> {
-  await prunePlans(); // best-effort retention: plans are per-run scratch data
-  const out: PreviewPlan[] = [];
   // One plan per SKU. Two products for the same SKU (a source returning the
   // style code twice, a feed row overlaid onto its own catalog entry) would
   // each match the SAME store variations, so the apply would write every price
   // twice and the UI would show two rows sharing one identity.
-  const seen = new Set<string>();
+  const planned: {
+    toSave: PlanToSave;
+    product: import("@core/core-spine").SourceProduct;
+    euSizes: Record<string, string>;
+    manualPrices: Record<string, number>;
+    followSaleRule: boolean;
+  }[] = [];
+
   for (const product of products) {
     if (seen.has(skuKey(product.sku))) continue;
     seen.add(skuKey(product.sku));
-    const mappings = snapshot ? resolveFromModel(snapshot, product) : new Map();
+    const mappings = storeIndex ? resolveFromModel(storeIndex, product) : new Map();
 
     // EU size per variant — needed both for the table and to key manual-price
     // overrides (which are stored by parent SKU + EU size).
@@ -114,24 +156,29 @@ async function assemblePlans(
       // written to the store. KicksDB never touches stock.
       manageStockFromSource: source !== "kicksdb",
     });
-    const { id, summary } = await savePlan(plan, market);
-
-    out.push({
-      planId: id,
-      market,
-      sku: product.sku,
-      title: product.title,
-      brand: product.brand,
-      source,
-      plan,
-      summary,
-      euSizes,
-      exactMatch: term ? isExactMatch(term, product.sku, product.title) : false,
-      followSaleRule,
-      manualPrices,
-    });
+    planned.push({ toSave: { plan, source }, product, euSizes, manualPrices, followSaleRule });
   }
-  return out;
+
+  const saved = await savePlans(
+    planned.map((p) => p.toSave),
+    market,
+    runId,
+  );
+
+  return planned.map((p, i) => ({
+    planId: saved[i].id,
+    market,
+    sku: p.product.sku,
+    title: p.product.title,
+    brand: p.product.brand,
+    source: p.toSave.source,
+    plan: p.toSave.plan,
+    summary: saved[i].summary,
+    euSizes: p.euSizes,
+    exactMatch: term ? isExactMatch(term, p.product.sku, p.product.title) : false,
+    followSaleRule: p.followSaleRule,
+    manualPrices: p.manualPrices,
+  }));
 }
 
 function errMessage(e: unknown): string {
@@ -153,6 +200,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
   const snapshot = await getActiveSnapshot();
+  const storeIndex = snapshot ? indexStoreProducts(snapshot) : null;
   const overrides = await getOverrides();
   const cache = getCache();
   const ttl = config.source.cacheTtlSeconds;
@@ -179,7 +227,25 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     result.notFound = result.notFound.filter((s) => !overlaid.gsSkus.has(skuKey(s)));
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
-    const plans = await assemblePlans(result.products, config, snapshot, market, term, overrides);
+    await prunePlans(); // best-effort retention: plans are per-run scratch data
+    const runId = randomUUID();
+    const totals = emptySummary();
+    const page = new PreviewPage<PreviewPlan>(PREVIEW_PAGE_LIMIT);
+    // This mode is capped at 500 SKUs by the schema, so it is one pass — but it
+    // goes through the same run machinery, so a plan id means the same thing
+    // wherever it came from.
+    const plans = await planChunk(
+      result.products,
+      config,
+      storeIndex,
+      market,
+      term,
+      overrides,
+      runId,
+      new Set<string>(),
+    );
+    for (const p of plans) addSummary(totals, p.summary);
+    page.add(plans);
 
     // In SKU mode the catalog resolver already GET-verifies + upserts every hit,
     // so report the live catalog size and what this run added/rejected.
@@ -198,12 +264,16 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
 
     return {
       ok: true,
-      plans,
+      runId,
+      plans: page.take(),
+      totals,
+      products: plans.length,
       stats: {
         products: result.products.length,
         fromCache: result.fromCache,
         fetched: result.fetched,
-        notFound: result.notFound,
+        notFound: result.notFound.slice(0, NOT_FOUND_LIMIT),
+        notFoundTotal: result.notFound.length,
         catalog,
       },
     };
@@ -217,8 +287,12 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
  * against the uploaded store snapshot. With no `skusOverride` it previews the
  * whole file (the primary workflow). With one — e.g. a selection from the KicksDB
  * catalog — it previews just those SKUs, still matched to the snapshot so the
- * export stays a valid Woo re-import. Either way the bulk price path is used, so
- * it scales to thousands of SKUs.
+ * export stays a valid Woo re-import.
+ *
+ * The store is walked in chunks. Resolving every SKU at once meant the whole
+ * catalog's worth of source products, mappings and plans were live at the same
+ * moment — which is what ran the dev server out of heap on a large shop. Only
+ * the counts, and the page the browser is sent, survive a chunk.
  */
 export async function previewFromStore(
   marketOverride?: string,
@@ -243,74 +317,121 @@ export async function previewFromStore(
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
   const overrides = await getOverrides();
+  // Built ONCE. resolveFromModel used to scan the whole snapshot per product.
+  const storeIndex = indexStoreProducts(snapshot);
+  const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
 
   try {
-    // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
-    // from the local feed tables, so asking KicksDB about it is pointless at
-    // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
-    // heard of, and a failing batch used to throw and take the whole sync down
-    // with it — the feed sitting right there in the DB, unread.
-    const owned = await gsOwnedProducts(skus, market, overrides);
-    const kicksSkus = skus.filter((s) => !owned.has(skuKey(s)));
+    await prunePlans(); // best-effort retention: plans are per-run scratch data
+    const runId = randomUUID();
+    const page = new PreviewPage<PreviewPlan>(PREVIEW_PAGE_LIMIT);
+    const totals = emptySummary();
+    const seen = new Set<string>();
+    const notFound: string[] = [];
+    let notFoundTotal = 0;
+    let planned = 0;
+    let warning: string | undefined;
+    let catalogTotal = 0;
+    let catalogAdded = 0;
+    let catalogRejected = 0;
+    let catalogSeen = false;
 
-    // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
-    // 50 SKUs -> a 1000-SKU file is ~20 calls, cold or warm. Product names come
-    // from the snapshot (the bulk response carries no title/brand).
-    const secondary = await fetchSecondarySource(kicksSkus, {
-      ownedCount: owned.size,
-      configured: kicksdbConfigured(),
-      fetch: (part) => source.getPricesBatch(part, market),
-      describeError: errMessage,
-    });
-    const fetched = secondary.products;
-    const warning = secondary.warning;
+    for (const part of chunk(skus, PREVIEW_CHUNK)) {
+      // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
+      // from the local feed tables, so asking KicksDB about it is pointless at
+      // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
+      // heard of, and a failing batch used to throw and take the whole sync down
+      // with it — the feed sitting right there in the DB, unread.
+      const owned = await gsOwnedProducts(part, market, overrides);
+      const kicksSkus = part.filter((s) => !owned.has(skuKey(s)));
 
-    const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
-    for (const p of fetched) {
-      const name = nameBySku.get(skuKey(p.sku));
-      if (name) p.title = name;
-    }
-    // The bulk price endpoint carries no identifiers; the catalog (filled from
-    // the per-product endpoint) does. Without this the sync could never write
-    // a GTIN for a KicksDB product, only for feed-owned ones.
-    const enriched = carryIdentifiers(
-      fetched,
-      fetched.length > 0
-        ? await getAnyBySkus(market, fetched.map((p) => p.sku)).catch(() => new Map())
-        : new Map(),
-    );
+      // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
+      // 50 SKUs. Product names come from the snapshot (the bulk response carries
+      // no title/brand).
+      const secondary = await fetchSecondarySource(kicksSkus, {
+        ownedCount: owned.size,
+        configured: kicksdbConfigured(),
+        fetch: (p) => source.getPricesBatch(p, market),
+        describeError: errMessage,
+      });
+      const fetched = secondary.products;
+      warning ??= secondary.warning;
 
-    // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
-    // carry is covered by the feed, not missing.
-    const overlaid = mergeGsOwned(enriched, owned);
-    const products = overlaid.products;
-
-    const returned = new Set(products.map((p) => skuKey(p.sku)));
-    const notFound = skus.filter((s) => !returned.has(skuKey(s)));
-
-    // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
-    // call returned and add only those fetchable on KicksDB (feed-owned
-    // products are excluded — the catalog stays KicksDB-pure). Best-effort — a
-    // catalog failure must never break the preview.
-    let catalog: CatalogStats | undefined;
-    try {
-      const growth = await growCatalogFromSkus(
-        source,
-        dbCatalogStore,
-        products.filter((p) => (p.source ?? "kicksdb") === "kicksdb").map((p) => p.sku),
-        market,
+      for (const p of fetched) {
+        const name = nameBySku.get(skuKey(p.sku));
+        if (name) p.title = name;
+      }
+      // The bulk price endpoint carries no identifiers; the catalog (filled from
+      // the per-product endpoint) does. Without this the sync could never write
+      // a GTIN for a KicksDB product, only for feed-owned ones.
+      const enriched = carryIdentifiers(
+        fetched,
+        fetched.length > 0
+          ? await getAnyBySkus(market, fetched.map((p) => p.sku)).catch(() => new Map())
+          : new Map(),
       );
-      catalog = { total: growth.total, added: growth.added, rejected: growth.rejected.length };
-    } catch (e) {
-      console.warn("[catalog] growth skipped:", errMessage(e));
+
+      // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
+      // carry is covered by the feed, not missing.
+      const products = mergeGsOwned(enriched, owned).products;
+      const returned = new Set(products.map((p) => skuKey(p.sku)));
+      for (const s of part) {
+        if (returned.has(skuKey(s))) continue;
+        notFoundTotal += 1;
+        if (notFound.length < NOT_FOUND_LIMIT) notFound.push(s);
+      }
+
+      // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
+      // call returned and add only those fetchable on KicksDB (feed-owned
+      // products are excluded — the catalog stays KicksDB-pure). Best-effort — a
+      // catalog failure must never break the preview.
+      try {
+        const growth = await growCatalogFromSkus(
+          source,
+          dbCatalogStore,
+          products.filter((p) => (p.source ?? "kicksdb") === "kicksdb").map((p) => p.sku),
+          market,
+        );
+        catalogTotal = growth.total;
+        catalogAdded += growth.added;
+        catalogRejected += growth.rejected.length;
+        catalogSeen = true;
+      } catch (e) {
+        console.warn("[catalog] growth skipped:", errMessage(e));
+      }
+
+      const plans = await planChunk(
+        products,
+        config,
+        storeIndex,
+        market,
+        null,
+        overrides,
+        runId,
+        seen,
+      );
+      planned += plans.length;
+      for (const p of plans) addSummary(totals, p.summary);
+      page.add(plans);
     }
 
-    const plans = await assemblePlans(products, config, snapshot, market, null, overrides);
     return {
       ok: true,
       warning,
-      plans,
-      stats: { products: products.length, fromCache: 0, fetched: products.length, notFound, catalog },
+      runId,
+      plans: page.take(),
+      totals,
+      products: planned,
+      stats: {
+        products: planned,
+        fromCache: 0,
+        fetched: planned,
+        notFound,
+        notFoundTotal,
+        catalog: catalogSeen
+          ? { total: catalogTotal, added: catalogAdded, rejected: catalogRejected }
+          : undefined,
+      },
     };
   } catch (e) {
     return { ok: false, error: errMessage(e), plans: [] };

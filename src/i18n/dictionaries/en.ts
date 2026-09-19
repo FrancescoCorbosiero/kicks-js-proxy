@@ -168,6 +168,9 @@ export const en: Dictionary = {
       `Catalog: ${total} SKUs${added > 0 ? ` (+${added} new)` : ""}`,
     expandAll: "Expand all",
     collapseAll: "Collapse all",
+    /** The run is bigger than the page: say so, never let rows go unmentioned. */
+    shownOf: (shown: number, total: number) =>
+      `Showing ${shown} of ${total} products — the rest are still part of the sync`,
     quickSelect: "Quick select",
     all: (n) => `All (${n})`,
     none: "None",

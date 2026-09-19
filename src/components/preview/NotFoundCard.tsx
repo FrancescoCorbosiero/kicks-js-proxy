@@ -7,6 +7,14 @@ import { Button } from "@/components/ui/button";
 interface Props {
   foundSkus: string[]; // SKUs a source could price (clean list, without the misses)
   notFound: string[]; // SKUs no configured source covers
+  /**
+   * True counts, when the lists above are samples. A whole-store run can miss
+   * tens of thousands of SKUs and neither list is worth sending in full — but
+   * the NUMBER always is, so the card never reports a smaller problem than the
+   * one the operator has. The copy buttons say how many they can actually copy.
+   */
+  foundTotal?: number;
+  missingTotal?: number;
 }
 
 /**
@@ -15,7 +23,9 @@ interface Props {
  * means no CONFIGURED source covers the SKU — which on a supplier-only shop
  * has nothing to do with StockX.
  */
-export function NotFoundCard({ foundSkus, notFound }: Props) {
+export function NotFoundCard({ foundSkus, notFound, foundTotal, missingTotal }: Props) {
+  const found = foundTotal ?? foundSkus.length;
+  const missing = missingTotal ?? notFound.length;
   const { t } = useI18n();
   const [copied, setCopied] = React.useState<"clean" | "missing" | null>(null);
 
@@ -43,10 +53,10 @@ export function NotFoundCard({ foundSkus, notFound }: Props) {
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs font-medium tnum">
           <span className="rounded-md border border-line bg-surface px-2 py-0.5 text-down">
-            {t.results.notFoundCard.found(foundSkus.length)}
+            {t.results.notFoundCard.found(found)}
           </span>
           <span className="rounded-md border border-warn/30 bg-warn/10 px-2 py-0.5 text-warn">
-            {t.results.notFoundCard.missing(notFound.length)}
+            {t.results.notFoundCard.missing(missing)}
           </span>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import type { SourceProduct, SourceVariant, VariantMapping } from "@core/core-spine";
 import { euSize } from "@/lib/sizes";
 import { skuKey } from "@/lib/skus";
-import type { StoreModel, StoreVariation } from "./model";
+import type { StoreModel, StoreProductModel, StoreVariation } from "./model";
 
 /**
  * Canonical numeric size key, tolerant of prefixes, dash-decimals and mixed
@@ -202,16 +202,41 @@ export function preferStoreVariation(
 }
 
 /**
+ * The snapshot keyed by canonical SKU — built ONCE per preview run.
+ *
+ * resolveFromModel used to find its product with model.products.find(), a
+ * linear scan of the whole store for every product being previewed. That is
+ * quadratic: a 20 000-product store meant 200 million comparisons, each one
+ * allocating two strings inside skuKey(), which buried the collector long
+ * before the payload did. The first product of a duplicated SKU wins, matching
+ * find()'s behaviour exactly.
+ */
+export function indexStoreProducts(model: StoreModel): Map<string, StoreProductModel> {
+  const index = new Map<string, StoreProductModel>();
+  for (const p of model.products) {
+    const key = skuKey(p.sku ?? "");
+    if (key && !index.has(key)) index.set(key, p);
+  }
+  return index;
+}
+
+/**
  * Resolve StockX variants -> store variations for one product, matched by EU
  * size. Returns the same Map shape buildPlan expects (storeProductId/Variation +
  * current price). Variants with no match are absent -> treated as "create".
+ *
+ * Takes either the model or an index built from it by indexStoreProducts —
+ * anything previewing more than a handful of products should pass the index.
  */
 export function resolveFromModel(
-  model: StoreModel,
+  model: StoreModel | Map<string, StoreProductModel>,
   product: SourceProduct,
 ): Map<string, VariantMapping> {
   const map = new Map<string, VariantMapping>();
-  const prod = model.products.find((p) => skuKey(p.sku) === skuKey(product.sku));
+  const prod =
+    model instanceof Map
+      ? model.get(skuKey(product.sku))
+      : model.products.find((p) => skuKey(p.sku) === skuKey(product.sku));
   if (!prod) return map;
 
   // Index variations by GTIN (global_unique_id) and by EU size. When the corrupt

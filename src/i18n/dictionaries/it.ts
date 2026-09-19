@@ -176,6 +176,9 @@ export const it = {
       `Catalogo: ${total} SKU${added > 0 ? ` (+${added} nuovi)` : ""}`,
     expandAll: "Espandi tutto",
     collapseAll: "Comprimi tutto",
+    /** The run is bigger than the page: say so, never let rows go unmentioned. */
+    shownOf: (shown: number, total: number) =>
+      `Mostrati ${shown} dei ${total} prodotti — i restanti sono comunque inclusi nella sincronizzazione`,
     quickSelect: "Selezione rapida",
     all: (n: number) => `Tutti (${n})`,
     none: "Nessuno",
