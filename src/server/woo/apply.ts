@@ -4,12 +4,12 @@ import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getPlansByIds, planRunIds, planRunScope } from "@/server/plans/repo";
 import { getActiveConfig } from "@/server/config/repo";
-import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import { getActiveSnapshot, upsertSnapshotProducts } from "@/server/store-json/repo";
 import { planProductSanitize, type ProductSanitizeOps } from "@/server/store-json/sanitize-plan";
 import { planFeedTakeover } from "@/server/store-json/takeover-plan";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { getOverrides } from "@/server/overrides/repo";
-import type { StoreModel } from "@/server/store-json/model";
+import type { StoreModel, StoreProductModel } from "@/server/store-json/model";
 import { chunk } from "@/server/adapters/http";
 import { skuKey } from "@/lib/skus";
 import { normalizeGtin } from "@/lib/gtin";
@@ -447,18 +447,14 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
 
   // 4. Patch the stored snapshot to the post-apply state of succeeded products,
   //    so the next preview reflects reality without a full re-pull.
-  if (succeeded.size > 0) {
-    try {
-      // A price-only run (sanitize off) never loaded the snapshot — load it now.
-      const model = snapshot ?? (await getActiveSnapshot());
-      if (model) {
-        patchSnapshot(model, succeeded, opsByProduct, priceByProduct);
-        const info = await getSnapshotInfo();
-        await saveSnapshot(model, info?.source ?? "rest");
-      }
-    } catch (e) {
-      console.warn("[sync] snapshot patch skipped:", e instanceof Error ? e.message : String(e));
-    }
+  //
+  //    Only the products that actually succeeded are written, in SQL. Handing
+  //    the whole model back to be re-serialized meant ~140 MB of string on top
+  //    of the copy already in memory, at the end of the heaviest operation the
+  //    app has. The read above is the one that has to stay: a whole-store
+  //    cleanup genuinely looks at every product.
+  if (succeeded.size > 0 && snapshot) {
+    await upsertSnapshotProducts(patchedProducts(snapshot, succeeded, opsByProduct, priceByProduct));
   }
 
   const status: ApplyAuditRow["status"] =
@@ -487,18 +483,26 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   };
 }
 
-/** Mutate the model to the post-apply state of the products that succeeded. */
-function patchSnapshot(
+/**
+ * The post-apply state of the products that succeeded — and only those.
+ *
+ * This used to rebuild the whole products array so the entire model could be
+ * written back. The snapshot is patched per product now, so the untouched ones
+ * never have to be named at all.
+ */
+function patchedProducts(
   model: StoreModel,
   succeeded: ReadonlySet<number>,
   opsByProduct: ReadonlyMap<number, ProductSanitizeOps>,
   priceByProduct: ReadonlyMap<number, ApplyChange[]>,
-): void {
-  model.products = model.products.map((p) => {
-    if (!succeeded.has(p.id)) return p;
+): StoreProductModel[] {
+  const out: StoreProductModel[] = [];
+  for (const p of model.products) {
+    if (!succeeded.has(p.id)) continue;
     const next = opsByProduct.get(p.id)?.sanitized ?? p;
+    const byId = new Map(next.variations.map((v) => [v.id, v]));
     for (const c of priceByProduct.get(p.id) ?? []) {
-      const vrt = next.variations.find((v) => v.id === c.storeVariationId);
+      const vrt = byId.get(c.storeVariationId);
       if (!vrt) continue;
       if (c.newPrice != null) vrt.regular_price = c.newPrice.toFixed(2);
       if (c.newStock != null) {
@@ -507,8 +511,9 @@ function patchSnapshot(
         vrt.stock_status = c.newStock > 0 ? "instock" : "outofstock";
       }
     }
-    return next;
-  });
+    out.push(next);
+  }
+  return out;
 }
 
 export interface ApplyHistoryEntry {

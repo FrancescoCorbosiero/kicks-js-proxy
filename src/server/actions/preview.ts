@@ -5,8 +5,12 @@ import { z } from "zod";
 import { buildPlan } from "@core/core-spine";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
-import { getActiveSnapshot } from "@/server/store-json/repo";
-import { indexStoreProducts, resolveFromModel, sourceEuSize } from "@/server/store-json/match";
+import {
+  getSnapshotInfo,
+  getSnapshotProductsBySkus,
+  listStoreSkuSpellings,
+} from "@/server/store-json/repo";
+import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
 import { savePlans, prunePlans, type PlanToSave } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
@@ -23,8 +27,22 @@ import { emptySummary, type PlanSummary, type PreviewPlan } from "@/lib/plan";
 import { PREVIEW_PAGE_LIMIT, PreviewPage } from "@/lib/preview-page";
 import type { StoreProductModel } from "@/server/store-json/model";
 
-/** SKUs resolved per pass. Bounds the server's own working set, not just the wire. */
-const PREVIEW_CHUNK = 500;
+/**
+ * SKUs resolved per pass. Bounds the server's own working set, not just the wire.
+ *
+ * Measured on a 21 800-product store, because the two costs pull opposite ways:
+ * a smaller chunk holds less at once, but each one re-reads the store's SKUs
+ * out of the single jsonb row the snapshot lives in.
+ *
+ *    500 -> peak  187 MB, 69 s
+ *   2000 -> peak  534 MB, 29 s
+ *   5000 -> peak  854 MB, 27 s
+ *
+ * 2000 is the knee: five seconds off 5000's time for 320 MB less. What matters
+ * is that peak is a function of THIS number and not of the store — it is the
+ * same 534 MB whether the shop has 20 000 products or 200 000.
+ */
+const PREVIEW_CHUNK = 2000;
 
 /** Misses listed for the copy button. The true count is reported separately. */
 const NOT_FOUND_LIMIT = 2000;
@@ -199,8 +217,6 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   const config = await getActiveConfig();
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
-  const snapshot = await getActiveSnapshot();
-  const storeIndex = snapshot ? indexStoreProducts(snapshot) : null;
   const overrides = await getOverrides();
   const cache = getCache();
   const ttl = config.source.cacheTtlSeconds;
@@ -227,6 +243,9 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     result.notFound = result.notFound.filter((s) => !overlaid.gsSkus.has(skuKey(s)));
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
+    // Only the store products these results match against — read once the
+    // result set is known, which in query mode is the first moment it can be.
+    const storeIndex = await getSnapshotProductsBySkus(result.products.map((p) => p.sku));
     await prunePlans(); // best-effort retention: plans are per-run scratch data
     const runId = randomUUID();
     const totals = emptySummary();
@@ -299,17 +318,18 @@ export async function previewFromStore(
   skusOverride?: string[],
 ): Promise<PreviewResult> {
   const config = await getActiveConfig();
-  const snapshot = await getActiveSnapshot();
-  if (!snapshot) {
+  // The SKU LIST, not the store. The snapshot is one jsonb row holding every
+  // product — reading it here to learn which SKUs exist, and to match against
+  // them, kept ~150 MB of object graph alive for the whole run. The list comes
+  // out of SQL already deduped by canonical key, and each chunk below reads
+  // back only the products it is about to match.
+  if ((await getSnapshotInfo()) == null) {
     return { ok: false, error: "Upload a store snapshot first.", plans: [] };
   }
-  // Deduped by canonical key: a messy store can carry the same parent SKU on
-  // several products, and duplicate requests became duplicate preview plans.
-  const rawSkus =
+  const skus =
     skusOverride && skusOverride.length > 0
-      ? skusOverride
-      : snapshot.products.map((p) => p.sku).filter((s): s is string => !!s);
-  const skus = [...new Map(rawSkus.map((s) => [skuKey(s), s])).values()];
+      ? [...new Map(skusOverride.map((s) => [skuKey(s), s])).values()]
+      : await listStoreSkuSpellings();
   if (skus.length === 0) {
     return { ok: false, error: "The store snapshot has no products.", plans: [] };
   }
@@ -317,9 +337,6 @@ export async function previewFromStore(
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
   const overrides = await getOverrides();
-  // Built ONCE. resolveFromModel used to scan the whole snapshot per product.
-  const storeIndex = indexStoreProducts(snapshot);
-  const nameBySku = new Map(snapshot.products.map((p) => [skuKey(p.sku), p.name ?? ""]));
 
   try {
     await prunePlans(); // best-effort retention: plans are per-run scratch data
@@ -344,6 +361,9 @@ export async function previewFromStore(
       // with it — the feed sitting right there in the DB, unread.
       const owned = await gsOwnedProducts(part, market, overrides);
       const kicksSkus = part.filter((s) => !owned.has(skuKey(s)));
+      // The store products THIS chunk matches against — keyed by canonical
+      // SKU, which is exactly what resolveFromModel wants as its index.
+      const storeIndex = await getSnapshotProductsBySkus(part);
 
       // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
       // 50 SKUs. Product names come from the snapshot (the bulk response carries
@@ -358,7 +378,7 @@ export async function previewFromStore(
       warning ??= secondary.warning;
 
       for (const p of fetched) {
-        const name = nameBySku.get(skuKey(p.sku));
+        const name = storeIndex.get(skuKey(p.sku))?.name;
         if (name) p.title = name;
       }
       // The bulk price endpoint carries no identifiers; the catalog (filled from

@@ -3,10 +3,9 @@ import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getActiveConfig } from "@/server/config/repo";
 import {
-  getActiveSnapshot,
   getSnapshotInfo,
   listStoreSkus,
-  saveSnapshot,
+  upsertSnapshotProducts,
 } from "@/server/store-json/repo";
 import {
   pagePublishTargets,
@@ -229,7 +228,6 @@ export async function publishProducts(
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();
-  const snapshot = await getActiveSnapshot().catch(() => null);
   const overrides = await getOverrides().catch(() => null);
 
   const uniqueSkus = [...new Set(skus.map(skuKey))];
@@ -425,25 +423,14 @@ export async function publishProducts(
 
   // Patch the snapshot so a published product immediately counts as "on the
   // store" — it must not be offered for publishing again on the next render.
-  if (!dryRun && published.length > 0 && snapshot) {
-    try {
-      const bySku = new Map(published.map((p) => [skuKey(p.plan.sku), p]));
-      const seen = new Set<string>();
-      snapshot.products = snapshot.products.map((p: StoreProductModel) => {
-        const key = p.sku ? skuKey(p.sku) : "";
-        const hit = key ? bySku.get(key) : undefined;
-        if (!hit) return p;
-        seen.add(key);
-        return hit.product;
-      });
-      for (const [key, hit] of bySku) {
-        if (!seen.has(key)) snapshot.products.push(hit.product);
-      }
-      const info = await getSnapshotInfo();
-      await saveSnapshot(snapshot, info?.source ?? "rest");
-    } catch (e) {
-      console.warn("[publish] snapshot patch skipped:", e instanceof Error ? e.message : String(e));
-    }
+  //
+  // Done in SQL, over the products that actually changed. Reading the whole
+  // store in to swap a couple of hundred entries and handing it all back to be
+  // re-serialized cost ~140 MB in and ~140 MB out PER BATCH on a large shop,
+  // and the tab sends batch after batch: that churn, next to a dev server's own
+  // footprint, is what ran the heap out mid-publish.
+  if (!dryRun && published.length > 0) {
+    await upsertSnapshotProducts(published.map((p) => p.product));
   }
 
   const failed = reports.filter((r) => r.error != null).length;
