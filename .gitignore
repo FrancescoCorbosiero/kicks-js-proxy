@@ -30,3 +30,6 @@ npm-debug.log*
 
 # test
 /coverage
+
+# heap snapshots from /api/debug/heap — can be gigabytes
+*.heapsnapshot
