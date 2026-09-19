@@ -37,12 +37,10 @@ const ALLOWED = new Set([
   "components/catalog/drawer-data.ts", // one product, read path, not a write loop
   "app/duplicates/page.tsx",
   "server/actions/store.ts", // the file upload: the whole model IS the payload
-  // These two READ the whole store and genuinely need to — a whole-store
-  // preview matches every product, and the size cleanup plans over every
-  // previewed one. Neither writes it back any more, which was the other half
-  // of the cost. Bounding the read means paging the snapshot out of one jsonb
-  // row, which is a schema change, not a patch.
-  "server/actions/preview.ts",
+  // The size cleanup plans over every previewed product, so a whole-store sync
+  // genuinely looks at all of them. It no longer writes the model back, which
+  // was the other half of the cost; the read is bounded only by restructuring
+  // the apply into a per-chunk execute loop.
   "server/woo/apply.ts",
 ]);
 

@@ -172,6 +172,31 @@ export async function getSnapshotProductsBySkus(
 }
 
 /**
+ * Every store SKU in its ORIGINAL spelling, deduped by canonical key.
+ *
+ * listStoreSkus answers "does the store carry this", which only needs the
+ * canonical form. A preview needs the spelling too: these strings are sent
+ * back out to the price source, and upper-casing a style code on the way is
+ * not this app's decision to make.
+ */
+export async function listStoreSkuSpellings(): Promise<string[]> {
+  try {
+    const res = await db.execute(sql`
+      select distinct on (upper(trim(p->>'sku'))) p->>'sku' as sku
+      from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+      where ${storeSnapshot.id} = ${SINGLETON} and coalesce(trim(p->>'sku'), '') <> ''
+      order by upper(trim(p->>'sku'))
+    `);
+    return rowsOf<{ sku?: string | null }>(res)
+      .map((r) => r.sku)
+      .filter((s): s is string => !!s);
+  } catch (e) {
+    console.warn("[snapshot] store SKU list skipped:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+/**
  * Replace (or append) these products inside the stored snapshot, keyed by
  * canonical SKU, WITHOUT the blob ever entering this process.
  *
