@@ -52,18 +52,38 @@ export const variantMappings = pgTable(
   ],
 );
 
-/** A generated preview. "Apply" just executes a stored plan's items. */
-export const plans = pgTable("plans", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  sku: text("sku").notNull(),
-  currency: text("currency").notNull(),
-  market: text("market").notNull(),
-  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
-  items: jsonb("items").$type<PlanItem[]>().notNull(),
-  // denormalized counts for quick listing: { update, create, noop, skip }
-  summary: jsonb("summary").$type<Record<Plan["items"][number]["action"], number>>().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+/**
+ * A generated preview. "Apply" just executes a stored plan's items.
+ *
+ * `runId` groups every plan of ONE preview into a run. It is what makes the
+ * preview survivable on a large store: the browser is sent a page of the run,
+ * never all of it, and the apply is told the run id instead of being handed
+ * every plan id, product id and variation id back. The whole-run scope is then
+ * read here, in SQL, over rows that never have to exist in the heap at once.
+ */
+export const plans = pgTable(
+  "plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id"),
+    sku: text("sku").notNull(),
+    currency: text("currency").notNull(),
+    market: text("market").notNull(),
+    /**
+     * Who owns the product: "kicksdb" or a feed name. The cleanup treats
+     * feed-owned products differently, so the run has to remember this — the
+     * browser used to carry it back per plan, which it can no longer do for
+     * plans it was never sent.
+     */
+    source: text("source").notNull().default("kicksdb"),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    items: jsonb("items").$type<PlanItem[]>().notNull(),
+    // denormalized counts for quick listing: { update, create, noop, skip }
+    summary: jsonb("summary").$type<Record<Plan["items"][number]["action"], number>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("plans_run_idx").on(t.runId)],
+);
 
 /** One row per apply attempt (including dry runs). Job-level: planId optional. */
 export const applyAudit = pgTable("apply_audit", {

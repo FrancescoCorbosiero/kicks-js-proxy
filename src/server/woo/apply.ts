@@ -2,7 +2,7 @@ import "server-only";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
-import { getPlanById } from "@/server/plans/repo";
+import { getPlansByIds, planRunIds, planRunScope } from "@/server/plans/repo";
 import { getActiveConfig } from "@/server/config/repo";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
 import { planProductSanitize, type ProductSanitizeOps } from "@/server/store-json/sanitize-plan";
@@ -43,18 +43,28 @@ export interface ApplyOptions {
   dryRun: boolean;
   /** Align sizes (delete orphans, realign pa_taglia) before pricing. */
   sanitize: boolean;
-  /** Store variation ids priceable on KicksDB — zero-stock ones are kept + made available. */
-  kicksdbVariationIds: number[];
-  /** Store product ids in the preview — cleanup never touches products outside it. */
-  previewedProductIds: number[];
   /**
-   * Store product ids owned by a finite-stock FEED (e.g. GoldenSneakers).
-   * The KicksDB-semantics cleanup must NOT touch them: its ghost rule would
-   * delete legitimately sold-out sizes and its make-available rule would turn
-   * 1-pair sizes into unmanaged sell-on-demand. Their standardization path is
-   * the rebuild, which writes real managed stock.
+   * The preview run being applied. EVERYTHING the run covers is read from it
+   * here: its plan ids, the store products it previewed, the variations its
+   * source can price, and which of those products a feed owns.
+   *
+   * The browser used to send all four back as arrays it had built by walking
+   * every plan — which is why it had to be holding every plan, and why a large
+   * store could not be synced at all. It now names the run and says only what
+   * the operator changed about it.
    */
-  feedProductIds?: number[];
+  runId: string;
+  /**
+   * Which of the run's "update" rows to write:
+   *  - "all": every one, minus `excluded` — what the tab starts in, and the
+   *    only mode under which rows past the visible page are written;
+   *  - "listed": only the rows in `selections`, for a hand-picked apply.
+   */
+  priceScope: "all" | "listed";
+  /** priceScope "listed": exactly what to write. */
+  selections?: ApplySelection[];
+  /** priceScope "all": rows the operator unticked on the page they were shown. */
+  excluded?: ApplySelection[];
   /**
    * Fill an empty global_unique_id with the source's GTIN, for every variant
    * of every previewed plan — not only the ones selected for a price change.
@@ -62,8 +72,6 @@ export interface ApplyOptions {
    * and a product priced correctly would otherwise never get one.
    */
   backfillGtins?: boolean;
-  /** Plan ids in the preview — the scope of that back-fill. */
-  planIds?: string[];
 }
 
 export interface ApplyChange {
@@ -108,6 +116,16 @@ export interface CleanupSummary {
   feedTrimmed: number;
 }
 
+/**
+ * Rows of each detail list the outcome carries back.
+ *
+ * A whole-store apply plans one change per variation — hundreds of thousands
+ * of them on a large shop — and the panel shows a dozen. Sending the rest was
+ * a payload that grew with the store for nothing. The counts beside each list
+ * are the real totals, so nothing is hidden, only unsent.
+ */
+const OUTCOME_SAMPLE = 50;
+
 export interface ApplyOutcome {
   auditId: string;
   dryRun: boolean;
@@ -115,11 +133,14 @@ export interface ApplyOutcome {
   products: number; // products touched (cleanup and/or prices)
   variations: number; // price writes planned
   updated: number; // price writes executed
-  failed: { stockxVariantId: string; error: string }[];
-  changes: ApplyChange[]; // price writes (post-cleanup targets only)
+  failed: { stockxVariantId: string; error: string }[]; // sample
+  failedTotal: number;
+  changes: ApplyChange[]; // sample of the price writes (post-cleanup targets only)
+  changesTotal: number;
   droppedByCleanup: number; // price writes aimed at deleted variations
   cleanup: CleanupSummary | null; // null when sanitize was off
-  cleanupDetails: CleanupDetail[];
+  cleanupDetails: CleanupDetail[]; // sample
+  cleanupDetailsTotal: number;
   /** Empty global_unique_id fields filled from the source (never overwritten). */
   gtinsWritten: number;
 }
@@ -147,53 +168,88 @@ async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promi
  *    one before anything is written.
  */
 async function collectChanges(
-  selections: ApplySelection[],
+  planIds: string[],
+  isSelected: (planId: string, variantId: string) => boolean,
   options: {
     gtinByVariation: ReadonlyMap<number, string>;
-    /** Every plan in the preview — the scope of the identifier back-fill. */
-    planIds: string[];
     backfillGtins: boolean;
   },
 ): Promise<ApplyChange[]> {
   const { gtinByVariation, backfillGtins } = options;
-  const selectedByPlan = new Map(selections.map((s) => [s.planId, new Set(s.variantIds)]));
-  const planIds = [...new Set([...selectedByPlan.keys(), ...(backfillGtins ? options.planIds : [])])];
-
   const changes: ApplyChange[] = [];
-  for (const planId of planIds) {
-    const plan = await getPlanById(planId);
-    if (!plan) continue;
-    const wanted = selectedByPlan.get(planId) ?? new Set<string>();
-    for (const item of plan.items) {
-      const selected = wanted.has(item.stockxVariantId) && item.action === "update";
-      if (item.storeProductId == null || item.storeVariationId == null) continue;
-      // Belt and braces: a plan saved before the id was known would aim at
-      // variation 0, which Woo rejects — and which the UI shows as a pile of
-      // rows sharing one identity.
-      if (item.storeVariationId <= 0) continue;
 
-      const gtin = backfillGtins ? normalizeGtin(item.upc).gtin : null;
-      const newGtin =
-        gtin && !(gtinByVariation.get(item.storeVariationId) ?? "").trim() ? gtin : null;
-      // "create" rows need upsertProduct and are out of scope for prices, but
-      // they are also not on the store, so they carry no identifier either.
-      const writesPrice = selected && (item.proposedPrice != null || item.stockQuantity != null);
-      if (!writesPrice && newGtin == null) continue;
+  // Read in chunks. One SELECT per plan meant one database round-trip per
+  // product — twenty thousand of them before the first price was written.
+  for (const part of chunk(planIds, 200)) {
+    const plans = await getPlansByIds(part);
+    for (const planId of part) {
+      const plan = plans.get(planId);
+      if (!plan) continue;
+      for (const item of plan.items) {
+        const selected = item.action === "update" && isSelected(planId, item.stockxVariantId);
+        if (item.storeProductId == null || item.storeVariationId == null) continue;
+        // Belt and braces: a plan saved before the id was known would aim at
+        // variation 0, which Woo rejects — and which the UI shows as a pile of
+        // rows sharing one identity.
+        if (item.storeVariationId <= 0) continue;
 
-      changes.push({
-        sku: plan.sku,
-        sizeLabel: item.sizeLabel,
-        stockxVariantId: item.stockxVariantId,
-        storeProductId: item.storeProductId,
-        storeVariationId: item.storeVariationId,
-        currentPrice: item.currentPrice,
-        newPrice: writesPrice ? item.proposedPrice : null,
-        newStock: writesPrice ? (item.stockQuantity ?? null) : null,
-        newGtin,
-      });
+        const gtin = backfillGtins ? normalizeGtin(item.upc).gtin : null;
+        const newGtin =
+          gtin && !(gtinByVariation.get(item.storeVariationId) ?? "").trim() ? gtin : null;
+        // "create" rows need upsertProduct and are out of scope for prices, but
+        // they are also not on the store, so they carry no identifier either.
+        const writesPrice = selected && (item.proposedPrice != null || item.stockQuantity != null);
+        if (!writesPrice && newGtin == null) continue;
+
+        changes.push({
+          sku: plan.sku,
+          sizeLabel: item.sizeLabel,
+          stockxVariantId: item.stockxVariantId,
+          storeProductId: item.storeProductId,
+          storeVariationId: item.storeVariationId,
+          currentPrice: item.currentPrice,
+          newPrice: writesPrice ? item.proposedPrice : null,
+          newStock: writesPrice ? (item.stockQuantity ?? null) : null,
+          newGtin,
+        });
+      }
     }
   }
   return changes;
+}
+
+/**
+ * What the apply is allowed to write, resolved from the RUN rather than from
+ * the browser.
+ *
+ * "all" is the posture the tab starts in: every update row the run produced,
+ * minus the ones the operator unticked among those actually shown. That is
+ * what makes a store larger than one page syncable at all — the rows past the
+ * page were never unticked, so they are written, exactly as they would have
+ * been when the browser still received every one of them.
+ */
+async function resolveSelection(
+  options: ApplyOptions,
+): Promise<{ planIds: string[]; isSelected: (planId: string, variantId: string) => boolean }> {
+  const backfill = options.backfillGtins !== false;
+
+  if (options.priceScope === "listed") {
+    const listed = new Map(
+      (options.selections ?? []).map((s) => [s.planId, new Set(s.variantIds)]),
+    );
+    // The back-fill is deliberately wider than the price selection, so it needs
+    // the whole run even when the prices are a hand-picked few.
+    const planIds = backfill ? await planRunIds(options.runId) : [...listed.keys()];
+    return { planIds, isSelected: (p, v) => listed.get(p)?.has(v) ?? false };
+  }
+
+  const excluded = new Map(
+    (options.excluded ?? []).map((s) => [s.planId, new Set(s.variantIds)]),
+  );
+  return {
+    planIds: await planRunIds(options.runId),
+    isSelected: (p, v) => !excluded.get(p)?.has(v),
+  };
 }
 
 function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
@@ -221,13 +277,14 @@ function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
   return s;
 }
 
-export async function applySync(
-  selections: ApplySelection[],
-  options: ApplyOptions,
-): Promise<ApplyOutcome> {
+export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   // Read regardless of `sanitize`: the cleanup needs it, and so does the GTIN
   // back-fill (which must know what the store already holds).
   const snapshot = await getActiveSnapshot().catch(() => null);
+
+  // The run's own scope, read in SQL. These three sets used to arrive from the
+  // browser, which could only build them while it held every plan.
+  const scope = await planRunScope(options.runId);
 
   // 1. Plan the cleanup over the previewed products. Two regimes:
   //    - KicksDB-owned: the classic sanitize (ghosts, duplicates, pa_taglia).
@@ -235,9 +292,9 @@ export async function applySync(
   //      never listed (KicksDB-era leftovers keep selling otherwise), keep
   //      feed-known sizes (their qty is written by the stock sync), realign
   //      pa_taglia. The KicksDB ghost/make-available rules never apply here.
-  const previewed = new Set(options.previewedProductIds);
-  const feedOwned = new Set(options.feedProductIds ?? []);
-  const keepAvailable = new Set(options.kicksdbVariationIds);
+  const previewed = new Set(scope.previewedProductIds);
+  const feedOwned = new Set(scope.feedProductIds);
+  const keepAvailable = new Set(scope.kicksdbVariationIds);
   const cleanupOps: ProductSanitizeOps[] = [];
   if (options.sanitize && snapshot) {
     const feedSkus = snapshot.products
@@ -271,9 +328,9 @@ export async function applySync(
       if (v.global_unique_id) gtinByVariation.set(v.id, String(v.global_unique_id));
     }
   }
-  const allChanges = await collectChanges(selections, {
+  const { planIds, isSelected } = await resolveSelection(options);
+  const allChanges = await collectChanges(planIds, isSelected, {
     gtinByVariation,
-    planIds: options.planIds ?? [],
     backfillGtins: options.backfillGtins !== false,
   });
   const changes = allChanges.filter((c) => !deletedIds.has(c.storeVariationId));
@@ -320,10 +377,13 @@ export async function applySync(
       variations: changes.length,
       updated: 0,
       failed: [],
-      changes,
+      failedTotal: 0,
+      changes: changes.slice(0, OUTCOME_SAMPLE),
+      changesTotal: changes.length,
       droppedByCleanup,
       cleanup,
-      cleanupDetails,
+      cleanupDetails: cleanupDetails.slice(0, OUTCOME_SAMPLE),
+      cleanupDetailsTotal: cleanupDetails.length,
       gtinsWritten: changes.filter((c) => c.newGtin).length,
     };
   }
@@ -415,11 +475,14 @@ export async function applySync(
     products: productIds.length,
     variations: changes.length,
     updated,
-    failed,
-    changes,
+    failed: failed.slice(0, OUTCOME_SAMPLE),
+    failedTotal: failed.length,
+    changes: changes.slice(0, OUTCOME_SAMPLE),
+    changesTotal: changes.length,
     droppedByCleanup,
     cleanup,
-    cleanupDetails,
+    cleanupDetails: cleanupDetails.slice(0, OUTCOME_SAMPLE),
+    cleanupDetailsTotal: cleanupDetails.length,
     gtinsWritten: changes.filter((c) => c.newGtin).length,
   };
 }

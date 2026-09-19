@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
 import { parseStoreModel, type StoreModel } from "./model";
 import {
+  indexStoreProducts,
   resolveFromModel,
   normSize,
   variationEuSize,
@@ -203,6 +204,52 @@ describe("resolveFromModel", () => {
     const map = resolveFromModel(m, source());
     expect(map.get("v-425")?.saleActive).toBe(true);
     expect(map.get("v-42")?.saleActive).toBe(false); // no sale
+  });
+});
+
+/**
+ * The index exists because the scan it replaces was quadratic: one pass over
+ * the WHOLE store per product previewed, each comparison allocating two strings
+ * inside skuKey(). On a 20 000-product store that is 200 million comparisons,
+ * and the collector never caught up. Its only job is to answer exactly what the
+ * scan answered.
+ */
+describe("indexStoreProducts", () => {
+  it("answers identically to the scan it replaces", () => {
+    const index = indexStoreProducts(model);
+    const scanned = resolveFromModel(model, source());
+    const indexed = resolveFromModel(index, source());
+    expect([...indexed.entries()]).toEqual([...scanned.entries()]);
+  });
+
+  it("is keyed canonically, so case and padding still match", () => {
+    const index = indexStoreProducts(model);
+    const messy = { ...source(), sku: `  ${model.products[0].sku.toLowerCase()}  ` };
+    expect(resolveFromModel(index, messy).size).toBe(resolveFromModel(model, messy).size);
+    expect(resolveFromModel(index, messy).size).toBeGreaterThan(0);
+  });
+
+  it("keeps the FIRST product of a duplicated SKU, exactly as find() did", () => {
+    const m: StoreModel = structuredClone(model);
+    const twin = structuredClone(m.products[0]);
+    twin.id = 999999;
+    m.products.push(twin); // same SKU, later in the file
+    const index = indexStoreProducts(m);
+    expect(index.get(m.products[0].sku.toUpperCase())?.id).toBe(m.products[0].id);
+    expect(resolveFromModel(index, source()).get("v-425")?.storeProductId).toBe(
+      resolveFromModel(m, source()).get("v-425")?.storeProductId,
+    );
+  });
+
+  it("skips products with no usable SKU rather than keying on an empty string", () => {
+    const m: StoreModel = structuredClone(model);
+    m.products.push({ ...structuredClone(m.products[0]), id: 111, sku: "   " });
+    expect(indexStoreProducts(m).has("")).toBe(false);
+  });
+
+  it("returns empty for a SKU the store does not carry", () => {
+    const index = indexStoreProducts(model);
+    expect(resolveFromModel(index, { ...source(), sku: "ZZ0000-000" }).size).toBe(0);
   });
 });
 

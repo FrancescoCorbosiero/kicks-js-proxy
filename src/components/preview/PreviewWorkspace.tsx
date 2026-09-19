@@ -14,7 +14,7 @@ import { debugMatch, debugBulkPrices } from "@/server/actions/debug";
 import { setProductSaleRule, setVariationManualPrice } from "@/server/actions/overrides";
 import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
-import { emptySummary, isActionable, summarize } from "@/lib/plan";
+import { emptySummary, isActionable, type PlanSummary } from "@/lib/plan";
 import { parseSkus } from "@/lib/skus";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n/provider";
@@ -58,7 +58,11 @@ export function PreviewWorkspace({
 
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  // A PAGE of the run — "load from store" can cover a catalog of any size, and
+  // what the browser is handed has to stop somewhere.
   const [plans, setPlans] = React.useState<PreviewPlan[]>([]);
+  const [runTotals, setRunTotals] = React.useState<PlanSummary>(emptySummary());
+  const [runProducts, setRunProducts] = React.useState(0);
   const [stats, setStats] = React.useState<FetchStats | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [allOpen, setAllOpen] = React.useState(false);
@@ -98,6 +102,8 @@ export function PreviewWorkspace({
     if (!res.ok) {
       setError(res.error ?? "Unknown error");
       setPlans([]);
+      setRunTotals(emptySummary());
+      setRunProducts(0);
       setStats(null);
       setSelected(new Set());
       return;
@@ -113,6 +119,8 @@ export function PreviewWorkspace({
     setError(null);
     setStats(res.stats ?? null);
     setPlans(res.plans);
+    setRunTotals(res.totals ?? emptySummary());
+    setRunProducts(res.products ?? res.plans.length);
     setSelected(next);
     setAllOpen(res.plans.length <= 3); // auto-expand only for small result sets
   }
@@ -225,14 +233,13 @@ export function PreviewWorkspace({
     });
   }
 
-  const totals = plans.reduce((acc, p) => {
-    const s = summarize(p.plan.items);
-    acc.update += s.update;
-    acc.create += s.create;
-    acc.noop += s.noop;
-    acc.skip += s.skip;
-    return acc;
-  }, emptySummary());
+  // Counts over the whole run. The quick-select buttons below act on the page,
+  // because a row that was never rendered cannot be ticked — but the headline
+  // has to describe the run, or a store larger than one page reads as smaller
+  // than it is.
+  const totals = runTotals;
+  const shown = plans.length;
+  const hidden = Math.max(0, runProducts - shown);
   const selectedCount = selected.size;
 
   // Build apply selections (only plans with selected variants) and the set of
@@ -418,13 +425,18 @@ export function PreviewWorkspace({
       )}
 
       {stats?.notFound && stats.notFound.length > 0 && (
-        <NotFoundCard foundSkus={plans.map((p) => p.sku)} notFound={stats.notFound} />
+        <NotFoundCard
+          foundSkus={plans.map((p) => p.sku)}
+          notFound={stats.notFound}
+          foundTotal={runProducts}
+          missingTotal={stats.notFoundTotal ?? stats.notFound.length}
+        />
       )}
 
       {plans.length > 0 && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-xs">
-            <span className="font-semibold tnum">{t.results.products(plans.length)}</span>
+            <span className="font-semibold tnum">{t.results.products(runProducts)}</span>
             <span className="text-line-strong">·</span>
             <Badge variant="update">{t.results.update(totals.update)}</Badge>
             <Badge variant="create">{t.results.create(totals.create)}</Badge>
@@ -448,6 +460,12 @@ export function PreviewWorkspace({
               {allOpen ? t.results.collapseAll : t.results.expandAll}
             </Button>
           </div>
+
+          {hidden > 0 && (
+            <p className="rounded-lg border border-line bg-surface-2 px-4 py-2 text-xs text-muted tnum">
+              {t.results.shownOf(shown, runProducts)}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-1.5 px-1 text-sm">
             <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-faint">{t.results.quickSelect}</span>

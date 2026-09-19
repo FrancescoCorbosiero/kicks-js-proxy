@@ -127,25 +127,35 @@ export async function getSyncState(): Promise<SyncPageState> {
   };
 }
 
+/**
+ * A per-product list of ticked (or unticked) variants. Bounded: it can only
+ * ever describe rows the operator was actually SHOWN, which is one page.
+ */
+const SelectionList = z
+  .array(z.object({ planId: z.uuid(), variantIds: z.array(z.string().min(1)).min(1) }))
+  .max(1000)
+  .default([]);
+
 const ApplySchema = z
   .object({
-    selections: z
-      .array(z.object({ planId: z.string().min(1), variantIds: z.array(z.string().min(1)).min(1) }))
-      .default([]),
+    // The preview run. The apply reads its scope from the database instead of
+    // being handed every plan id, product id and variation id by the browser —
+    // arrays that grew with the store and could not be built at all once the
+    // preview stopped shipping every plan.
+    runId: z.uuid(),
+    /** "all": every update row of the run minus `excluded`. "listed": only `selections`. */
+    priceScope: z.enum(["all", "listed"]).default("all"),
+    selections: SelectionList,
+    excluded: SelectionList,
     dryRun: z.boolean(),
     // Align sizes before pricing: delete orphan/duplicate variations and
     // realign pa_taglia (variants + parent option list). Default on.
     sanitize: z.boolean().default(true),
-    kicksdbVariationIds: z.array(z.number()).default([]),
-    previewedProductIds: z.array(z.number()).default([]),
-    // Feed-owned products (finite stock) — excluded from KicksDB-style cleanup.
-    feedProductIds: z.array(z.number()).default([]),
     // Fill empty GTINs from the source across the whole preview, not just the
     // price selection (a correctly-priced row is a noop and never selectable).
     backfillGtins: z.boolean().default(true),
-    planIds: z.array(z.string().min(1)).default([]),
   })
-  .refine((v) => v.selections.length > 0 || v.sanitize || (v.backfillGtins && v.planIds.length > 0), {
+  .refine((v) => v.priceScope === "all" || v.selections.length > 0 || v.sanitize || v.backfillGtins, {
     message: "Nothing to do: no price selection, no cleanup, no identifiers to fill.",
   });
 
@@ -199,7 +209,7 @@ export async function listRebuildableSkus(): Promise<{
 }> {
   try {
     const { listCatalogEntries } = await import("@/server/catalog/repo");
-    const { getActiveSnapshot } = await import("@/server/store-json/repo");
+    const { listStoreSkus } = await import("@/server/store-json/repo");
     const { activeFeedSkus, GS_FEED } = await import("@/server/feeds/repo");
     const { skuKey } = await import("@/lib/skus");
 
@@ -207,10 +217,10 @@ export async function listRebuildableSkus(): Promise<{
     const entries = await listCatalogEntries(config.source.market);
     const gsSkus = await activeFeedSkus(GS_FEED);
     const known = new Set<string>([...entries.map((e) => skuKey(e.sku)), ...gsSkus]);
-    const snapshot = await getActiveSnapshot();
-    const storeSkus = new Set(
-      (snapshot?.products ?? []).map((p) => (p.sku ? skuKey(p.sku) : "")).filter(Boolean),
-    );
+    // The SKU set out of the jsonb, NOT the snapshot blob. Deserializing the
+    // whole store to ask "does it carry this SKU" is megabytes of live object
+    // graph per click, on the same tab a pull is already stressing.
+    const storeSkus = await listStoreSkus();
     const skus = [...known].filter((s) => storeSkus.has(s));
     return { ok: true, skus, catalogOnly: known.size - skus.length };
   } catch (e) {
@@ -229,14 +239,14 @@ export async function applySyncPrices(
   const parsed = ApplySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
-    const outcome = await applySync(parsed.data.selections, {
+    const outcome = await applySync({
+      runId: parsed.data.runId,
+      priceScope: parsed.data.priceScope,
+      selections: parsed.data.selections,
+      excluded: parsed.data.excluded,
       dryRun: parsed.data.dryRun,
       sanitize: parsed.data.sanitize,
-      kicksdbVariationIds: parsed.data.kicksdbVariationIds,
-      previewedProductIds: parsed.data.previewedProductIds,
-      feedProductIds: parsed.data.feedProductIds,
       backfillGtins: parsed.data.backfillGtins,
-      planIds: parsed.data.planIds,
     });
     return { ok: true, outcome };
   } catch (e) {
