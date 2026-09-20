@@ -17,7 +17,10 @@ import "server-only";
  * Only what it can say cheaply, in a form that is readable at a glance:
  *   [heap]  +842MB   heap 1204MB / 1280MB   rss 1890MB   ext 12MB   up 214s
  *
- * ON in development, never in production, silenced with HEAP_WATCH=off. It
+ * ON in development, silenced with HEAP_WATCH=off, and available in a
+ * production build with HEAP_WATCH=on — because "does it still die when the
+ * dev server is out of the picture?" is the test that splits an app bug from a
+ * tooling one, and it needs to report numbers to be worth running. It
  * speaks only when the heap moves by 25 MB or more, so an ordinary session
  * prints almost nothing — and the one session that matters prints the answer
  * without anybody having to have switched it on beforehand.
@@ -33,8 +36,12 @@ let started = false;
 
 export function startHeapWatch(): void {
   if (started) return;
-  if (process.env.NODE_ENV === "production") return;
-  if (process.env.HEAP_WATCH === "off") return;
+  // Dev by default. In a production build it stays quiet unless asked for —
+  // which is exactly what a "does it still die outside the dev server?" run
+  // needs, and that run is worthless if it cannot report a number.
+  const explicit = process.env.HEAP_WATCH;
+  if (explicit === "off") return;
+  if (process.env.NODE_ENV === "production" && explicit !== "on") return;
   started = true;
 
   const everyMs = Math.max(1000, Number(process.env.HEAP_WATCH_MS ?? 5000));

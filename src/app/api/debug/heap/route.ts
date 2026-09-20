@@ -25,20 +25,30 @@ export const maxDuration = 300;
  * by Retained Size. The top row is what is holding the memory, and "Retainers"
  * at the bottom shows the chain that keeps it alive.
  *
- * DEVELOPMENT ONLY. A snapshot stops the world for seconds and writes a file
- * the size of the heap, so this must never be reachable on a live deployment.
+ * Reading the numbers (GET) is free, so a production build will answer it when
+ * HEAP_WATCH=on — the "is it still dying without the dev server?" run needs to
+ * be able to report something. WRITING a snapshot (POST) stays development
+ * only whatever the flag says: it stops the world for seconds and writes a
+ * file the size of the heap, which is not something a live deployment should
+ * ever do on request.
  */
-function devOnly(): NextResponse | null {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
-  }
-  return null;
+const notFound = () => NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+
+/** GET: cheap, so allowed in a production build when explicitly asked for. */
+function statsAllowed(): NextResponse | null {
+  if (process.env.NODE_ENV !== "production") return null;
+  return process.env.HEAP_WATCH === "on" ? null : notFound();
+}
+
+/** POST: never outside development, flag or no flag. */
+function snapshotAllowed(): NextResponse | null {
+  return process.env.NODE_ENV === "production" ? notFound() : null;
 }
 
 const mb = (n: number) => Math.round(n / 1024 / 1024);
 
 export async function GET() {
-  const blocked = devOnly();
+  const blocked = statsAllowed();
   if (blocked) return blocked;
 
   const m = process.memoryUsage();
@@ -55,7 +65,7 @@ export async function GET() {
 }
 
 export async function POST() {
-  const blocked = devOnly();
+  const blocked = snapshotAllowed();
   if (blocked) return blocked;
 
   const before = process.memoryUsage();
