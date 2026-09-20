@@ -21,10 +21,33 @@ npm ci
 cp .env.example .env            # KicksDB key, Woo REST creds, DB/Redis URLs
 docker compose up -d            # local Postgres + Redis (dev only)
 npm run db:migrate              # apply migrations (creates all tables)
-npm run dev                     # http://localhost:3000 (operator dashboard)
+npm run serve                   # http://localhost:3000 (operator dashboard)
 ```
 
 All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are persisted.
+
+### Use `npm run serve`, not `npm run dev`
+
+`npm run dev` is for editing the code. It keeps every module graph it has
+compiled so it can hot-swap them, and it never gives that memory back — which
+is fine for an hour of editing and fatal for a day of running a shop. It does
+not depend on how big the shop is. Measured on a 400-product store, 706 kB of
+data, hitting four pages twenty-five times:
+
+```
+                        heap at start   after 25 rounds   RSS
+  npm run dev              222 MB           570 MB       1066 -> 1530 MB
+  npm run serve             56 MB            55 MB        182 ->  192 MB
+```
+
+Dev climbs about 14 MB a round and keeps climbing; a few hundred rounds is an
+ordinary working day, and the default 4 GB heap is where that ends — "FATAL
+ERROR: Ineffective mark-compacts near heap limit", after a request too small
+to have caused it. The production server does not move: same pages, same data,
+flat at 56 MB.
+
+So: `npm run dev` while changing code, `npm run serve` to actually use the app.
+After pulling changes, run `npm run serve` again — it rebuilds first.
 
 ## The catalog (core domain)
 
