@@ -1,13 +1,17 @@
 import "server-only";
-import { asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { Plan } from "@core/core-spine";
 import { db } from "@/server/db/client";
-import { plans } from "@/server/db/schema";
+import { applyAudit, plans } from "@/server/db/schema";
 import { rowsOf } from "@/server/db/rows";
 import { summarize, type PlanSummary } from "@/lib/plan";
 
-/** Plans are per-run scratch data; anything older than this is unreachable. */
-const PLAN_RETENTION_DAYS = 7;
+/**
+ * Preview runs kept. A preview SUPERSEDES the one before it — the tab holds
+ * exactly one run id — so older runs are dead the moment a new preview lands.
+ * Three, not one, so two browser tabs each mid-run cannot delete each other's.
+ */
+const KEEP_RUNS = 3;
 
 /** Rows per INSERT. A whole-store preview is tens of thousands of plans. */
 const INSERT_CHUNK = 250;
@@ -15,15 +19,39 @@ const INSERT_CHUNK = 250;
 const READ_CHUNK = 200;
 
 /**
- * Delete plan rows older than the retention window. A plan only matters between
- * a preview and its export/apply in the same session, so old rows are dead
- * weight — without this the table grows by one row per product per preview run,
- * forever. Best-effort: called at the start of a preview run.
+ * Drop every preview run but the most recent few.
+ *
+ * A whole-store preview writes ONE ROW PER PRODUCT — 22 000 of them on this
+ * shop, with the plan items as jsonb. The retention this replaces was seven
+ * DAYS, which is the wrong axis entirely: the rows are scratch between a
+ * preview and its apply, and each new preview makes the last one unreachable.
+ * Clicking preview eight times left 176 150 rows and 154 MB behind, every one
+ * of them dead, and the prune that was supposed to clear them kept them all
+ * because none had aged a week. It also scanned the whole table each time,
+ * since nothing indexes created_at.
+ *
+ * Bounded by RUNS now. Rows an audit still points at are never removed, and
+ * rows from before runs existed (run_id null) are scratch by definition.
+ * Best-effort: called at the start of a preview run.
  */
-export async function prunePlans(retentionDays = PLAN_RETENTION_DAYS): Promise<void> {
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+export async function prunePlans(keepRuns = KEEP_RUNS): Promise<void> {
   try {
-    await db.delete(plans).where(lt(plans.createdAt, cutoff));
+    await db.execute(sql`
+      delete from ${plans} p
+      where not exists (
+              select 1 from ${applyAudit} a where a.plan_id = p.id
+            )
+        and (
+              p.run_id is null
+              or p.run_id not in (
+                   select run_id from ${plans}
+                   where run_id is not null
+                   group by run_id
+                   order by max(created_at) desc
+                   limit ${keepRuns}
+                 )
+            )
+    `);
   } catch (e) {
     console.warn("[plans] prune skipped:", e instanceof Error ? e.message : String(e));
   }
