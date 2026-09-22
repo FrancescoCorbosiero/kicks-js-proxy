@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPoisonedDataError } from "./poison";
+import { isPoisonedDataError, isNoProductsFoundError } from "./poison";
 
 /** The exact failure observed in production: KicksDB's Go code dies on a
  *  product whose sell_faster is negative, 500ing the whole batch call. */
@@ -36,5 +36,31 @@ describe("isPoisonedDataError", () => {
     expect(isPoisonedDataError(httpError(undefined))).toBe(false);
     expect(isPoisonedDataError(new Error("fetch failed"))).toBe(false);
     expect(isPoisonedDataError(null)).toBe(false);
+  });
+});
+
+describe("isNoProductsFoundError", () => {
+  // Copied from a live sync: 2300 store products, KicksDB holding none of the
+  // first fifty, and the whole run reported as "KicksDB unreachable".
+  const OBSERVED_EMPTY =
+    '{"$schema":"https://api.kicks.dev/schemas/ErrorModel.json","title":"Internal Server Error",' +
+    '"status":500,"detail":"cannot load prices",' +
+    '"errors":[{"message":"rpc error: code = Unknown desc = no products found"}]}';
+
+  it("recognizes the observed empty-result 500", () => {
+    expect(isNoProductsFoundError(httpError(500, OBSERVED_EMPTY))).toBe(true);
+  });
+
+  it("does not confuse it with a poisoned-data 500", () => {
+    expect(isNoProductsFoundError(httpError(500, OBSERVED_BODY))).toBe(false);
+    expect(isPoisonedDataError(httpError(500, OBSERVED_EMPTY))).toBe(false);
+  });
+
+  it("leaves a genuine outage alone", () => {
+    expect(isNoProductsFoundError(httpError(500, "Internal Server Error"))).toBe(false);
+    expect(isNoProductsFoundError(httpError(502, "Bad Gateway"))).toBe(false);
+    expect(isNoProductsFoundError(httpError(429, "Too Many Requests"))).toBe(false);
+    expect(isNoProductsFoundError(new Error("fetch failed"))).toBe(false);
+    expect(isNoProductsFoundError(null)).toBe(false);
   });
 });

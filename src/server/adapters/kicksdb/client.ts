@@ -8,7 +8,7 @@ import {
 } from "@core/core-spine";
 import { chunk, requestJson, type HttpError, type RetryPolicy, DEFAULT_RETRY } from "../http";
 import { skuKey } from "@/lib/skus";
-import { isPoisonedDataError } from "./poison";
+import { isNoProductsFoundError, isPoisonedDataError } from "./poison";
 import {
   KicksPricesResponseSchema,
   KicksProductsResponseSchema,
@@ -32,6 +32,14 @@ const HARD_MAX_BATCH = 50;
 
 /** Bisection probes hit deterministic 500s — don't burn the full retry budget. */
 const BISECT_RETRY: RetryPolicy = { attempts: 2, backoffMs: 300, timeoutMs: 20_000 };
+
+/**
+ * "No products found" is a settled answer wearing a 500. Retrying it just
+ * waits out the backoff to be told the same thing — on a feed-owned store
+ * that is minutes of sleep per sync — so it is final on the first reply.
+ */
+const emptyIsFatal = (status: number | undefined, body: string): boolean =>
+  isNoProductsFoundError({ status, body });
 
 const DEFAULT_QUERY: KicksQueryOptions = {
   sort: "release_date",
@@ -118,11 +126,21 @@ export class KicksDbSource implements SourcePort {
 
     const out: SourceProduct[] = [];
     const failed: string[] = [];
+    const absent: string[] = [];
     let lastError: unknown;
     let poisonSeen = false;
 
-    /** Fetch one sub-batch into `out`; false (+ lastError) on any failure. */
-    const tryPart = async (part: string[], retry: RetryPolicy): Promise<boolean> => {
+    /**
+     * Fetch one sub-batch into `out`.
+     *  - "ok": rows were returned (possibly zero, if the API said so politely)
+     *  - "absent": the API answered that it holds NONE of these SKUs. A real
+     *    answer, not a failure — nothing to add, nothing to bisect.
+     *  - "fail": something went wrong; `lastError` carries it.
+     */
+    const tryPart = async (
+      part: string[],
+      retry: RetryPolicy,
+    ): Promise<"ok" | "absent" | "fail"> => {
       try {
         const raw = await requestJson(
           this.url("stockx/prices"),
@@ -131,21 +149,28 @@ export class KicksDbSource implements SourcePort {
             headers: this.headers(),
             body: JSON.stringify({ market, skus: part, show_sizes: true }),
           },
-          retry,
+          { ...retry, fatal: emptyIsFatal },
         );
         const parsed = KicksPricesResponseSchema.parse(raw);
         for (const p of parsed.data) out.push(mapKicksPrices(p, market));
-        return true;
+        return "ok";
       } catch (e) {
+        // "no products found" is the API reporting an empty result through a
+        // 500. Reading it as downtime aborted whole syncs of stores whose
+        // products simply live on a supplier feed instead of StockX.
+        if (isNoProductsFoundError(e)) {
+          absent.push(...part);
+          return "absent";
+        }
         lastError = e;
         poisonSeen ||= isPoisonedDataError(e);
-        return false;
+        return "fail";
       }
     };
 
     const bisect = async (part: string[]): Promise<void> => {
       if (part.length === 0) return;
-      if (await tryPart(part, BISECT_RETRY)) return;
+      if ((await tryPart(part, BISECT_RETRY)) !== "fail") return;
       if (part.length === 1) {
         failed.push(part[0]);
         return;
@@ -156,24 +181,27 @@ export class KicksDbSource implements SourcePort {
     };
 
     for (const part of chunk(skus, this.batchSize)) {
-      if (await tryPart(part, this.retry)) continue;
+      if ((await tryPart(part, this.retry)) !== "fail") continue;
       if (part.length === 1) {
         failed.push(part[0]);
         continue;
       }
 
       const midIdx = Math.floor(part.length / 2);
-      const c1ok = await tryPart([part[0]], BISECT_RETRY);
-      const c2ok = await tryPart([part[midIdx]], BISECT_RETRY);
+      const c1 = await tryPart([part[0]], BISECT_RETRY);
+      const c2 = await tryPart([part[midIdx]], BISECT_RETRY);
       // Both canaries dead → real outage — UNLESS any failure carried the
       // poisoned-data signature, in which case the canaries themselves are
       // just poisoned SKUs (they gather at the queue head) and bisection
-      // must continue.
-      if (!c1ok && !c2ok && !poisonSeen) throw lastError;
+      // must continue. A canary that came back "absent" is not dead at all:
+      // the API answered it, so the API is up.
+      if (c1 === "fail" && c2 === "fail" && !poisonSeen) throw lastError;
 
-      // Poisoned data, not an outage: isolate the bad SKUs. Successfully
-      // fetched canaries are already in `out` and excluded from the search.
-      const rest = part.filter((_, i) => (i !== 0 || !c1ok) && (i !== midIdx || !c2ok));
+      // Not an outage: isolate the bad SKUs. Canaries already answered for —
+      // fetched or reported absent — are excluded from the search.
+      const rest = part.filter(
+        (_, i) => (i !== 0 || c1 === "fail") && (i !== midIdx || c2 === "fail"),
+      );
       await bisect(rest);
     }
 
@@ -181,6 +209,12 @@ export class KicksDbSource implements SourcePort {
       console.warn(
         `[kicksdb] batch prices: ${failed.length} SKU(s) skipped — the API errors on them: ` +
           `${failed.slice(0, 10).join(", ")}${failed.length > 10 ? ", …" : ""}`,
+      );
+    }
+    if (absent.length > 0) {
+      console.info(
+        `[kicksdb] batch prices: ${absent.length} SKU(s) not on StockX — ` +
+          `priced by their own source, if any.`,
       );
     }
     // The API may split one SKU across several entries — one plan per SKU,
@@ -240,12 +274,21 @@ export class KicksDbSource implements SourcePort {
     if (opts.sort) params.sort = opts.sort;
     for (const [k, v] of Object.entries(opts.filters ?? {})) params[`filters[${k}]`] = v;
 
-    const raw = await requestJson(
-      this.url("stockx/products", params),
-      { method: "GET", headers: this.headers() },
-      this.retry,
-    );
-    return KicksProductsResponseSchema.parse(raw);
+    try {
+      const raw = await requestJson(
+        this.url("stockx/products", params),
+        { method: "GET", headers: this.headers() },
+        { ...this.retry, fatal: emptyIsFatal },
+      );
+      return KicksProductsResponseSchema.parse(raw);
+    } catch (e) {
+      // This API states "nothing matched" with a 500 on its prices endpoint.
+      // Wherever that signature turns up, it is the empty page it means — and
+      // reading it as an error would file a SKU that simply does not exist
+      // under "could not verify" instead of "rejected".
+      if (isNoProductsFoundError(e)) return { data: [], meta: null };
+      throw e;
+    }
   }
 
   /** True once `meta` says the page just read was the last one. */
