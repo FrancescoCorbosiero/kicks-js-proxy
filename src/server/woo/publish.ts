@@ -350,7 +350,11 @@ export async function publishProducts(
         // Close the loop that kept this product on the list: read back what
         // the store actually has and record THAT. Not the plan — the plan is
         // what we would have written, not what is there.
-        if (!dryRun) {
+        // Only when the store product carries a parent SKU. A variable product
+        // with the SKU only on its variations is invisible to the snapshot's
+        // SKU index either way, so recording it would not stop the re-offering
+        // — it would just append another unkeyed row on every single run.
+        if (!dryRun && (onStore.sku ?? "").trim() !== "") {
           try {
             reconciled.push(toStoreProduct(onStore, await client.getAllVariations(onStore.id)));
           } catch {
