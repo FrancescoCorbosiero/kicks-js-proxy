@@ -20,7 +20,7 @@ describe("fetchProductsCached", () => {
   it("caches the whole query result", async () => {
     const cache = new MemoryCache();
     const getProduct = vi.fn(async () => [product("X"), product("Y")]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct, findBySku: vi.fn() };
 
     const first = await fetchProductsCached(source, cache, "Air Max", "IT", 60);
     expect(first.fetched).toBe(1);

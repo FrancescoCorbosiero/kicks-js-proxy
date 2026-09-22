@@ -183,15 +183,12 @@ export async function auditPrices(input: { sku: string }): Promise<PriceAuditRes
 
     const [entry, liveProducts, rawBulk, snapshot] = await Promise.all([
       getCatalogEntry(market, key),
-      source.getProduct(key, market, 1).catch((e) => e as Error),
+      source.findBySku(key, market).catch((e) => e as Error),
       source.fetchPricesRaw([key], market).catch((e) => e as Error),
       getActiveSnapshot().catch(() => null),
     ]);
 
-    const liveProduct =
-      Array.isArray(liveProducts)
-        ? (liveProducts.find((p) => skuKey(p.sku) === key) ?? null)
-        : null;
+    const liveProduct = liveProducts instanceof Error ? null : liveProducts;
     const productError = liveProducts instanceof Error ? liveProducts.message : null;
 
     // Raw bulk rows for this SKU, grouped by variant id — every entry, every

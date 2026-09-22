@@ -2,7 +2,7 @@ import type { SourcePort, SourceProduct } from "@core/core-spine";
 import type { Cache } from "@/server/cache/memory";
 
 /** Just the read methods we need — lets tests pass a fake source. */
-export type SourceLike = Pick<SourcePort, "getPricesBatch" | "getProduct">;
+export type SourceLike = Pick<SourcePort, "getPricesBatch" | "getProduct" | "findBySku">;
 
 export interface FetchResult {
   products: SourceProduct[];

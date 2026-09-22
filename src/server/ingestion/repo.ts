@@ -20,7 +20,7 @@ export async function createIngestionRun(source: string, market: string): Promis
 
 export async function accumulateIngestionRun(
   runId: string,
-  counts: { requested: number; added: number; known: number; rejected: number },
+  counts: { requested: number; added: number; known: number; rejected: number; failed?: number },
   error?: string,
 ): Promise<void> {
   await db
@@ -30,6 +30,7 @@ export async function accumulateIngestionRun(
       added: sql`${ingestionRuns.added} + ${counts.added}`,
       known: sql`${ingestionRuns.known} + ${counts.known}`,
       rejected: sql`${ingestionRuns.rejected} + ${counts.rejected}`,
+      failed: sql`${ingestionRuns.failed} + ${counts.failed ?? 0}`,
       ...(error ? { error } : {}),
       finishedAt: new Date(),
     })
@@ -44,6 +45,7 @@ export interface IngestionHistoryEntry {
   added: number;
   known: number;
   rejected: number;
+  failed: number;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -58,6 +60,7 @@ function toEntry(r: IngestionRunRow): IngestionHistoryEntry {
     added: r.added,
     known: r.known,
     rejected: r.rejected,
+    failed: r.failed,
     error: r.error,
     startedAt: r.startedAt.toISOString(),
     finishedAt: r.finishedAt?.toISOString() ?? null,

@@ -643,10 +643,19 @@ export const en: Dictionary = {
     known: (n) => `${n} already known`,
     rejected: (n) => `${n} rejected`,
     rejectedList: "Show rejected SKUs",
+    rejectedHint:
+      "KicksDB answered and has no product with this style code. Re-importing them changes nothing.",
+    unverified: (n) => `${n} unverified`,
+    unverifiedList: "Show unverified SKUs",
+    unverifiedHint:
+      "KicksDB did not answer for these SKUs: rate limit, timeout or a service error. That is not a verdict on the style code — try them again.",
+    retryUnverified: (n) => `Retry ${n} SKUs`,
     failed: "Import failed",
     historyTitle: "Import history",
     historyEmpty: "No imports recorded.",
-    historyLine: (added, known, rejected) => `+${added} · ${known} known · ${rejected} rejected`,
+    historyLine: (added, known, rejected, failed) =>
+      `+${added} · ${known} known · ${rejected} rejected` +
+      (failed > 0 ? ` · ${failed} unverified` : ""),
     sources: { manual: "manual", file: "file" },
   },
   margins: {

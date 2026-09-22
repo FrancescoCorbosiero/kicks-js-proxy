@@ -19,7 +19,10 @@ interface RunState {
   processed: number;
   added: number;
   known: number;
+  /** KicksDB answered: no such product. Re-importing changes nothing. */
   rejected: string[];
+  /** KicksDB did not answer. Re-importing is exactly the fix. */
+  unverified: { sku: string; error: string }[];
   catalogTotal: number | null;
   error: string | null;
   done: boolean;
@@ -43,6 +46,8 @@ export function ImportWorkspace({
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [running, setRunning] = React.useState(false);
   const [run, setRun] = React.useState<RunState | null>(null);
+  /** Which frontend opened the last run — a retry belongs to the same one. */
+  const [lastSource, setLastSource] = React.useState<"manual" | "file">("manual");
   const [history, setHistory] = React.useState(initialHistory);
 
   const manualSkus = React.useMemo(() => extractSkus(text), [text]);
@@ -65,12 +70,14 @@ export function ImportWorkspace({
   async function runImport(skus: string[], source: "manual" | "file") {
     if (skus.length === 0 || running) return;
     setRunning(true);
+    setLastSource(source);
     const state: RunState = {
       total: skus.length,
       processed: 0,
       added: 0,
       known: 0,
       rejected: [],
+      unverified: [],
       catalogTotal: null,
       error: null,
       done: false,
@@ -90,6 +97,7 @@ export function ImportWorkspace({
         state.added += res.added ?? 0;
         state.known += res.known ?? 0;
         state.rejected.push(...(res.rejected ?? []));
+        state.unverified.push(...(res.failed ?? []));
         state.catalogTotal = res.total ?? state.catalogTotal;
         setRun({ ...state });
       }
@@ -218,13 +226,45 @@ export function ImportWorkspace({
             <span className={run.rejected.length > 0 ? "text-skip" : undefined}>
               {t.importPage.rejected(run.rejected.length)}
             </span>
+            {run.unverified.length > 0 && (
+              <span className="text-warn">{t.importPage.unverified(run.unverified.length)}</span>
+            )}
           </div>
           {run.error && <p className="mt-2 text-sm text-skip">{run.error}</p>}
           {run.done && run.rejected.length > 0 && (
             <details className="mt-2 text-xs text-muted">
               <summary className="cursor-pointer font-medium">{t.importPage.rejectedList}</summary>
+              <p className="mt-1 text-muted">{t.importPage.rejectedHint}</p>
               <p className="mt-1 font-mono">{run.rejected.join(", ")}</p>
             </details>
+          )}
+          {/* Unverified is the actionable half: KicksDB never answered, so the
+              SKUs are still unknown rather than absent. One click re-runs them. */}
+          {run.done && run.unverified.length > 0 && (
+            <div className="mt-2 rounded-lg border border-warn/40 bg-warn/5 p-2.5">
+              <details className="text-xs text-muted">
+                <summary className="cursor-pointer font-medium text-warn">
+                  {t.importPage.unverifiedList}
+                </summary>
+                <p className="mt-1">{t.importPage.unverifiedHint}</p>
+                <ul className="mt-1 space-y-0.5 font-mono">
+                  {run.unverified.map((f) => (
+                    <li key={f.sku}>
+                      {f.sku} — <span className="text-faint">{f.error}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                disabled={running}
+                onClick={() => runImport(run.unverified.map((f) => f.sku), lastSource)}
+              >
+                {t.importPage.retryUnverified(run.unverified.length)}
+              </Button>
+            </div>
           )}
         </section>
       )}
@@ -246,7 +286,7 @@ export function ImportWorkspace({
                 </span>
                 <span className="text-xs text-faint">{h.market}</span>
                 <span className="ml-auto text-xs text-muted tnum">
-                  {t.importPage.historyLine(h.added, h.known, h.rejected)}
+                  {t.importPage.historyLine(h.added, h.known, h.rejected, h.failed)}
                 </span>
                 {h.error && <span className="w-full text-xs text-skip">{h.error}</span>}
               </li>

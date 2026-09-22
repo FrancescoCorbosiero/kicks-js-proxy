@@ -1,0 +1,1 @@
+ALTER TABLE "ingestion_runs" ADD COLUMN "failed" integer DEFAULT 0 NOT NULL;

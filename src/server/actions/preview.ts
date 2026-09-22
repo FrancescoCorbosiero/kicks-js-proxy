@@ -225,15 +225,24 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     // Without a KicksDB account there is nothing to resolve there: the feed
     // overlay below is the whole answer, and a query (which only KicksDB can
     // serve) is simply empty rather than an error.
-    const empty: { products: import("@core/core-spine").SourceProduct[]; fromCache: number; fetched: number; notFound: string[] } =
-      { products: [], fromCache: 0, fetched: 0, notFound: [] };
+    const empty: {
+      products: import("@core/core-spine").SourceProduct[];
+      fromCache: number;
+      fetched: number;
+      notFound: string[];
+      failed: import("@/server/catalog/service").SkuFailure[];
+    } = { products: [], fromCache: 0, fetched: 0, notFound: [], failed: [] };
     // SKU mode resolves through the persistent catalog (smart cache, upsert on
     // fresh fetch). Query mode uses the Redis whole-result cache.
     const result = !kicksdbConfigured()
       ? { ...empty, notFound: parsed.data.mode === "skus" ? [...parsed.data.skus!] : [] }
       : parsed.data.mode === "skus"
         ? await resolveSkusViaCatalog(source, dbCatalogStore, parsed.data.skus!, market, ttl)
-        : { ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)), notFound: [] as string[] };
+        : {
+            ...(await fetchProductsCached(source, cache, parsed.data.query!, market, ttl)),
+            notFound: [] as string[],
+            failed: [] as import("@/server/catalog/service").SkuFailure[],
+          };
 
     // Ownership: GS-owned SKUs swap their variant set + pricing to the feed.
     const overlayScope =
@@ -241,6 +250,16 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     const overlaid = await overlayGsOwnership(result.products, overlayScope, market, overrides);
     result.products = overlaid.products;
     result.notFound = result.notFound.filter((s) => !overlaid.gsSkus.has(skuKey(s)));
+    result.failed = result.failed.filter((f) => !overlaid.gsSkus.has(skuKey(f.sku)));
+
+    // A lookup that errored is not a SKU that does not exist. It never joins
+    // notFound (the card there offers to copy "the missing ones" — these are
+    // not missing, they are unanswered) and says so on its own line instead.
+    const skuWarning =
+      result.failed.length > 0
+        ? `${result.failed.length} SKU non verificati: KicksDB non ha risposto ` +
+          `(${result.failed[0].error}). Riprovali.`
+        : undefined;
 
     const term = parsed.data.mode === "query" ? parsed.data.query! : null;
     // Only the store products these results match against — read once the
@@ -284,6 +303,7 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     return {
       ok: true,
       runId,
+      warning: skuWarning,
       plans: page.take(),
       totals,
       products: plans.length,
@@ -416,6 +436,14 @@ export async function previewFromStore(
         catalogAdded += growth.added;
         catalogRejected += growth.rejected.length;
         catalogSeen = true;
+        // Growth here is best-effort, but an unanswered lookup is not a
+        // rejection and must not be counted as one — nor silently dropped.
+        if (growth.failed.length > 0) {
+          console.warn(
+            `[catalog] ${growth.failed.length} SKU(s) unverified (KicksDB did not answer): ` +
+              growth.failed.slice(0, 5).map((f) => f.sku).join(", "),
+          );
+        }
       } catch (e) {
         console.warn("[catalog] growth skipped:", errMessage(e));
       }

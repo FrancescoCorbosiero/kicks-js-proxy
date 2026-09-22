@@ -208,7 +208,10 @@ export const ingestionRuns = pgTable(
     requested: integer("requested").notNull().default(0),
     added: integer("added").notNull().default(0),
     known: integer("known").notNull().default(0),
+    // "KicksDB has no such product" — a real answer, re-running changes nothing.
     rejected: integer("rejected").notNull().default(0),
+    // "KicksDB did not answer" (429/timeout/5xx) — re-running is the fix.
+    failed: integer("failed").notNull().default(0),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),

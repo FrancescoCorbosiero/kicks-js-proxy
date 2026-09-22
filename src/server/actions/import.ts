@@ -20,6 +20,10 @@ import {
  * Large imports are chunked by the client (each SKU costs one verification
  * call): the first chunk opens an ingestion run, later chunks pass `runId`
  * back and accumulate into the same history row.
+ *
+ * A SKU that does not join comes back as either `rejected` (KicksDB has no
+ * such product) or `failed` (KicksDB could not be reached). Only the second
+ * is worth re-importing, so the two never share a list.
  */
 
 const ImportSchema = z.object({
@@ -37,7 +41,10 @@ export interface ImportResult {
   requested?: number;
   added?: number;
   known?: number;
+  /** KicksDB answered and has no such product — re-importing changes nothing. */
   rejected?: string[];
+  /** KicksDB never answered (429/timeout/5xx) — re-importing is the fix. */
+  failed?: { sku: string; error: string }[];
   /** Catalog size after the chunk. */
   total?: number;
 }
@@ -60,13 +67,17 @@ export async function importSkus(input: z.infer<typeof ImportSchema>): Promise<I
   try {
     const growth = await growCatalogFromSkus(source, dbCatalogStore, parsed.data.skus, market);
     const requested = parsed.data.skus.length;
-    const known = Math.max(0, requested - growth.added - growth.rejected.length);
+    const known = Math.max(
+      0,
+      requested - growth.added - growth.rejected.length - growth.failed.length,
+    );
     if (runId) {
       await accumulateIngestionRun(runId, {
         requested,
         added: growth.added,
         known,
         rejected: growth.rejected.length,
+        failed: growth.failed.length,
       }).catch(() => {});
     }
     return {
@@ -76,6 +87,7 @@ export async function importSkus(input: z.infer<typeof ImportSchema>): Promise<I
       added: growth.added,
       known,
       rejected: growth.rejected,
+      failed: growth.failed,
       total: growth.total,
     };
   } catch (e) {
@@ -83,7 +95,7 @@ export async function importSkus(input: z.infer<typeof ImportSchema>): Promise<I
     if (runId) {
       await accumulateIngestionRun(
         runId,
-        { requested: parsed.data.skus.length, added: 0, known: 0, rejected: 0 },
+        { requested: parsed.data.skus.length, added: 0, known: 0, rejected: 0, failed: 0 },
         message,
       ).catch(() => {});
     }

@@ -660,11 +660,19 @@ export const it = {
     known: (n: number) => `${n} già in catalogo`,
     rejected: (n: number) => `${n} rifiutati`,
     rejectedList: "Mostra gli SKU rifiutati",
+    rejectedHint:
+      "KicksDB ha risposto e non ha nessun prodotto con questo codice. Reimportarli non cambia niente.",
+    unverified: (n: number) => `${n} non verificati`,
+    unverifiedList: "Mostra gli SKU non verificati",
+    unverifiedHint:
+      "KicksDB non ha risposto per questi SKU: limite di richieste, timeout o errore del servizio. Non è un verdetto sul codice — riprovali.",
+    retryUnverified: (n: number) => `Riprova ${n} SKU`,
     failed: "Importazione fallita",
     historyTitle: "Storico importazioni",
     historyEmpty: "Nessuna importazione registrata.",
-    historyLine: (added: number, known: number, rejected: number) =>
-      `+${added} · ${known} noti · ${rejected} rifiutati`,
+    historyLine: (added: number, known: number, rejected: number, failed: number) =>
+      `+${added} · ${known} noti · ${rejected} rifiutati` +
+      (failed > 0 ? ` · ${failed} non verificati` : ""),
     sources: { manual: "manuale", file: "file" },
   },
   margins: {

@@ -6,7 +6,8 @@ import {
   type SourcePort,
   type SourceProduct,
 } from "@core/core-spine";
-import { chunk, requestJson, type RetryPolicy, DEFAULT_RETRY } from "../http";
+import { chunk, requestJson, type HttpError, type RetryPolicy, DEFAULT_RETRY } from "../http";
+import { skuKey } from "@/lib/skus";
 import { isPoisonedDataError } from "./poison";
 import {
   KicksPricesResponseSchema,
@@ -37,6 +38,32 @@ const DEFAULT_QUERY: KicksQueryOptions = {
   limit: 10,
   display: { traits: true, variants: true, identifiers: true, prices: true },
 };
+
+/** Result pages a SKU lookup scans before calling a style code absent. */
+const SKU_LOOKUP_PAGES = 5;
+
+/** Filtered probes that may come back useless before the filter is written off. */
+const SKU_FILTER_BUDGET = 3;
+
+/**
+ * Whether this KicksDB build understands `filters[sku_cleaned]` — learned at
+ * runtime, remembered for the process. It lives here and not on the instance
+ * because getSource() builds a fresh client per request, which would forget
+ * the answer and re-probe forever.
+ */
+let skuFilterSupport: "unknown" | "supported" | "unsupported" = "unknown";
+let skuFilterMisses = 0;
+
+/** Reset the learned filter support — tests only. */
+export function __resetSkuFilterSupport(): void {
+  skuFilterSupport = "unknown";
+  skuFilterMisses = 0;
+}
+
+/** The punctuation-free spelling KicksDB indexes as `sku_cleaned`. */
+function cleanSku(sku: string): string {
+  return sku.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 
 /**
  * Typed KicksDB (StockX) client implementing the SourcePort. Knows about auth,
@@ -194,33 +221,151 @@ export class KicksDbSource implements SourcePort {
     );
   }
 
+  /** One GET /stockx/products page. `sort` is omitted when not given, which
+   *  leaves the API on its own relevance ranking. */
+  private async searchPage(opts: {
+    query: string;
+    market: string;
+    page?: number;
+    sort?: string;
+    filters?: Record<string, string>;
+  }) {
+    const params: Record<string, string> = {
+      query: opts.query,
+      market: opts.market,
+      limit: String(this.query.limit),
+      ...this.displayParams(),
+    };
+    if (opts.page != null) params.page = String(opts.page);
+    if (opts.sort) params.sort = opts.sort;
+    for (const [k, v] of Object.entries(opts.filters ?? {})) params[`filters[${k}]`] = v;
+
+    const raw = await requestJson(
+      this.url("stockx/products", params),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    return KicksProductsResponseSchema.parse(raw);
+  }
+
+  /** True once `meta` says the page just read was the last one. */
+  private static isLastPage(parsed: { data: unknown[]; meta?: { current_page: number; per_page: number; total: number } | null }): boolean {
+    const meta = parsed.meta;
+    if (!meta || parsed.data.length === 0) return true;
+    return meta.current_page * meta.per_page >= meta.total;
+  }
+
   /**
    * GET /stockx/products. Follows pagination (meta.current_page/per_page/total)
    * up to `maxPages` so a query can return more than one page of products.
+   *
+   * This is the BROWSE path — a human-typed term, ranked by the configured
+   * sort. Looking a style code up is a different question with a different
+   * answer: use findBySku.
    */
   async getProduct(query: string, market: string, maxPages = 3): Promise<SourceProduct[]> {
     const out: SourceProduct[] = [];
 
     for (let page = 1; page <= maxPages; page++) {
-      const raw = await requestJson(
-        this.url("stockx/products", {
-          query,
-          market,
-          sort: this.query.sort,
-          limit: String(this.query.limit),
-          page: String(page),
-          ...this.displayParams(),
-        }),
-        { method: "GET", headers: this.headers() },
-        this.retry,
-      );
-      const parsed = KicksProductsResponseSchema.parse(raw);
+      const parsed = await this.searchPage({ query, market, page, sort: this.query.sort });
       for (const p of parsed.data) out.push(mapKicksProduct(p, market));
-
-      const meta = parsed.meta;
-      if (!meta || parsed.data.length === 0) break;
-      if (meta.current_page * meta.per_page >= meta.total) break;
+      if (KicksDbSource.isLastPage(parsed)) break;
     }
     return out;
+  }
+
+  /**
+   * The one product whose style code IS `sku`, or null when StockX has no such
+   * product. Errors THROW — "the API could not answer" and "the answer is no"
+   * are different facts and callers act on them differently.
+   *
+   * Why this exists instead of filtering getProduct(): a style code is not a
+   * search term. The browse path sends sort=release_date, which re-orders the
+   * matches by date and buries the exact one under every loosely-related shoe
+   * in a crowded family — the newest Nike Mind colorway outranks the HQ4307-600
+   * you actually asked for. Scanning a fixed 30 results then declared the SKU
+   * nonexistent. Here the exact match is what we look for, we stop the moment
+   * we have it (usually one call, fewer than the three the old path always
+   * spent), and only a genuine miss pays for the deeper scan.
+   */
+  async findBySku(sku: string, market: string, maxPages = SKU_LOOKUP_PAGES): Promise<SourceProduct | null> {
+    const want = skuKey(sku);
+
+    // 1. The exact index, when this API build has one: no ranking to lose to.
+    if (skuFilterSupport !== "unsupported") {
+      const hit = await this.findViaSkuFilter(sku, market, want);
+      if (hit) return hit;
+    }
+
+    // 2. Relevance search. Omitting `sort` is the point: an exact style-code
+    //    match is what relevance ranks first and what release_date scatters.
+    for (let page = 1; page <= maxPages; page++) {
+      const parsed = await this.searchPage({ query: sku, market, page });
+      const hit = parsed.data.find((p) => skuKey(p.sku) === want);
+      if (hit) return mapKicksProduct(hit, market);
+      if (KicksDbSource.isLastPage(parsed)) break;
+    }
+    return null;
+  }
+
+  /**
+   * One call against KicksDB's punctuation-free SKU index (v3.3 added
+   * `sku_cleaned` to `filters`). Treated as a probe, not a dependency: the
+   * exact parameter spelling is not confirmed against a live key, so a 4xx
+   * (parameter not understood), a run of valid-but-useless answers (parameter
+   * ignored), or a run of 5xx (parameter fatal) retires it for the process and
+   * the caller's relevance search takes over.
+   *
+   * Returns null rather than throwing on every failure but one: a 429 is the
+   * API rate-limiting the caller, which a second query shape would only hit
+   * again, so that one propagates immediately.
+   */
+  private async findViaSkuFilter(
+    sku: string,
+    market: string,
+    want: string,
+  ): Promise<SourceProduct | null> {
+    try {
+      const parsed = await this.searchPage({
+        query: sku,
+        market,
+        filters: { sku_cleaned: cleanSku(sku) },
+      });
+      const hit = parsed.data.find((p) => skuKey(p.sku) === want);
+      if (hit) {
+        skuFilterSupport = "supported";
+        return mapKicksProduct(hit, market);
+      }
+      // A miss proves nothing on its own (the SKU may simply not exist), so
+      // only an unbroken run of them, before the filter has ever worked,
+      // counts as evidence that it is being ignored.
+      if (skuFilterSupport === "unknown" && ++skuFilterMisses >= SKU_FILTER_BUDGET) {
+        skuFilterSupport = "unsupported";
+      }
+      return null;
+    } catch (e) {
+      const status = (e as HttpError).status;
+
+      // Rate limiting is the whole API's answer, not this parameter's. Running
+      // the fallback search would double the load on an endpoint already
+      // telling us to slow down, and burn quota to reach the same 429 — so the
+      // caller gets the failure now, which is the honest report anyway.
+      if (status === 429) throw e;
+
+      // Any other 4xx means this build does not understand the parameter.
+      if (status != null && status >= 400 && status < 500) {
+        skuFilterSupport = "unsupported";
+        return null;
+      }
+
+      // 5xx/network: probably the API having a bad moment, in which case the
+      // fallback search reports it properly. But a filter that ONLY ever
+      // explodes is indistinguishable from one that is not supported, so it
+      // spends the same budget as an ignored one.
+      if (skuFilterSupport === "unknown" && ++skuFilterMisses >= SKU_FILTER_BUDGET) {
+        skuFilterSupport = "unsupported";
+      }
+      return null;
+    }
   }
 }

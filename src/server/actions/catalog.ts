@@ -4,7 +4,6 @@ import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { listCatalogEntries, upsertCatalog } from "@/server/catalog/repo";
-import { skuKey } from "@/lib/skus";
 import type { CatalogItem } from "@/lib/catalog";
 
 export interface CatalogListResult {
@@ -63,8 +62,7 @@ export async function refreshCatalogProduct(
     const config = await getActiveConfig();
     const source = getSource(config);
     const { market, sku } = parsed.data;
-    const list = await source.getProduct(sku, market);
-    const product = list.find((p) => skuKey(p.sku) === skuKey(sku));
+    const product = await source.findBySku(sku, market);
     if (!product) return { ok: false, error: `No exact KicksDB match for ${sku}` };
     await upsertCatalog(market, [product]);
     return { ok: true };
