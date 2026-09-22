@@ -27,6 +27,7 @@ import {
   type PublishPlan,
 } from "./publish-plan";
 import { buildIdentityResolver } from "./identity";
+import { toStoreProduct } from "./store-product";
 import { getWooClient, type WooClient } from "./client";
 
 /**
@@ -238,6 +239,13 @@ export async function publishProducts(
 
   const reports: PublishProductReport[] = [];
   const published: { plan: PublishPlan; product: StoreProductModel }[] = [];
+  /**
+   * Products the live check found the store already carrying. They are skipped,
+   * correctly — but the ONLY reason they were offered is that the snapshot did
+   * not know about them, and skipping used to leave it not knowing. So the tab
+   * offered them again on the very next render, and on every render after that.
+   */
+  const reconciled: StoreProductModel[] = [];
   // Identity fields this store's REST schema refused — reported once, not per
   // product, and never fatal.
   const identityRejected = new Set<string>();
@@ -339,6 +347,18 @@ export async function publishProducts(
         report.action = "skip";
         report.storeProductId = onStore.id;
         report.reason = "alreadyOnStore";
+        // Close the loop that kept this product on the list: read back what
+        // the store actually has and record THAT. Not the plan — the plan is
+        // what we would have written, not what is there.
+        if (!dryRun) {
+          try {
+            reconciled.push(toStoreProduct(onStore, await client.getAllVariations(onStore.id)));
+          } catch {
+            // Unreadable right now: leave the snapshot alone rather than file a
+            // product with no sizes, which would make the sync skip its prices.
+            // The next run tries again.
+          }
+        }
         return;
       }
 
@@ -429,8 +449,8 @@ export async function publishProducts(
   // re-serialized cost ~140 MB in and ~140 MB out PER BATCH on a large shop,
   // and the tab sends batch after batch: that churn, next to a dev server's own
   // footprint, is what ran the heap out mid-publish.
-  if (!dryRun && published.length > 0) {
-    await upsertSnapshotProducts(published.map((p) => p.product));
+  if (!dryRun && (published.length > 0 || reconciled.length > 0)) {
+    await upsertSnapshotProducts([...published.map((p) => p.product), ...reconciled]);
   }
 
   const failed = reports.filter((r) => r.error != null).length;
