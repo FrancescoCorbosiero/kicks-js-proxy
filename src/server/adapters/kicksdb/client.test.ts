@@ -199,3 +199,113 @@ describe("findBySku under a failing API", () => {
     expect(calls.filter((u) => u.searchParams.has("filters[sku_cleaned]"))).toHaveLength(3);
   });
 });
+
+/**
+ * The observed body: KicksDB reporting an empty result through a 500. Seen on
+ * a live sync of 2300 store products, where it aborted the whole run as
+ * "KicksDB unreachable — only feed-owned products were planned."
+ */
+const EMPTY_500 =
+  '{"$schema":"https://api.kicks.dev/schemas/ErrorModel.json","title":"Internal Server Error",' +
+  '"status":500,"detail":"cannot load prices",' +
+  '"errors":[{"message":"rpc error: code = Unknown desc = no products found"}]}';
+
+/** Answers POST /stockx/prices per request, reading back the posted SKUs. */
+function stubPrices(answer: (skus: string[]) => Page | { status: number; body?: string }) {
+  const posted: string[][] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const skus = (JSON.parse(String(init?.body ?? "{}")) as { skus?: string[] }).skus ?? [];
+      posted.push(skus);
+      const res = answer(skus);
+      if ("status" in res) return new Response(res.body ?? "nope", { status: res.status });
+      return new Response(JSON.stringify(res), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  return posted;
+}
+
+function priceRow(sku: string) {
+  return { product_id: `id-${sku}`, sku, variants: [] };
+}
+
+describe("getPricesBatch when KicksDB holds none of the SKUs", () => {
+  it("treats the empty-result 500 as zero rows, not as an outage", async () => {
+    stubPrices(() => ({ status: 500, body: EMPTY_500 }));
+
+    // This used to throw, and the caller turned the throw into
+    // "KicksDB unreachable", discarding a whole sync.
+    await expect(source().getPricesBatch(["A", "B", "C"], "IT")).resolves.toEqual([]);
+  });
+
+  it("does not bisect a set the API already answered for", async () => {
+    const posted = stubPrices(() => ({ status: 500, body: EMPTY_500 }));
+
+    await source().getPricesBatch(["A", "B", "C", "D"], "IT");
+    // One call. Bisecting 'none of these exist' just asks the same question
+    // in smaller pieces, and retrying a settled answer only adds backoff.
+    expect(posted).toHaveLength(1);
+  });
+
+  it("still prices the SKUs it does hold when another chunk is empty", async () => {
+    const s = new KicksDbSource({
+      baseUrl: "https://api.kicks.dev/v3",
+      apiKey: "test-key",
+      batchChunkSize: 2, // force two chunks
+      retry: { attempts: 1, backoffMs: 1, timeoutMs: 5_000 },
+    });
+    stubPrices((skus) =>
+      skus.includes("KNOWN")
+        ? { data: [priceRow("KNOWN")] }
+        : { status: 500, body: EMPTY_500 },
+    );
+
+    const got = await s.getPricesBatch(["GONE1", "GONE2", "KNOWN", "GONE3"], "IT");
+    expect(got.map((p) => p.sku)).toEqual(["KNOWN"]);
+  });
+
+  it("does not spend the retry budget on a settled answer", async () => {
+    const posted = stubPrices(() => ({ status: 500, body: EMPTY_500 }));
+    const s = new KicksDbSource({
+      baseUrl: "https://api.kicks.dev/v3",
+      apiKey: "test-key",
+      // Four attempts with backoff: on a feed-owned store that is minutes of
+      // sleep per sync, spent to be told the same thing four times.
+      retry: { attempts: 4, backoffMs: 1, timeoutMs: 5_000 },
+    });
+
+    await s.getPricesBatch(["A", "B"], "IT");
+    expect(posted).toHaveLength(1);
+  });
+
+  it("still retries, and then raises, a genuine outage", async () => {
+    // A 500 with no such signature is what downtime actually looks like.
+    const posted = stubPrices(() => ({ status: 500, body: "Internal Server Error" }));
+    const s = new KicksDbSource({
+      baseUrl: "https://api.kicks.dev/v3",
+      apiKey: "test-key",
+      retry: { attempts: 3, backoffMs: 1, timeoutMs: 5_000 },
+    });
+
+    await expect(s.getPricesBatch(["A", "B", "C"], "IT")).rejects.toThrow();
+    expect(posted.length).toBeGreaterThan(1); // the budget is still spent here
+  });
+});
+
+describe("findBySku when the API reports emptiness as a 500", () => {
+  it("reads it as 'no such product', not as a failed lookup", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(EMPTY_500, { status: 500 })),
+    );
+
+    // null puts the SKU in `rejected` (KicksDB answered: no). A throw would
+    // put it in `failed`, telling the operator to retry something that can
+    // only ever come back the same way.
+    await expect(source().findBySku("NOSUCH-001", "IT")).resolves.toBeNull();
+  });
+});

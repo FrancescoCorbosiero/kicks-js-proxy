@@ -9,6 +9,13 @@ export interface RetryPolicy {
   attempts: number; // total tries, including the first
   backoffMs: number; // base; grows exponentially (backoff * 2^n) with jitter
   timeoutMs: number; // per-attempt
+  /**
+   * Opt out of retrying a response that isRetryable() would otherwise retry.
+   * For APIs that report a settled fact through a 5xx — KicksDB answers "I
+   * hold none of these SKUs" with a 500 — where every retry is guaranteed to
+   * earn the same answer more slowly.
+   */
+  fatal?: (status: number | undefined, body: string) => boolean;
 }
 
 export const DEFAULT_RETRY: RetryPolicy = { attempts: 4, backoffMs: 500, timeoutMs: 20_000 };
@@ -73,6 +80,10 @@ export async function requestJsonWithHeaders<T = unknown>(
       const body = await res.text().catch(() => "");
       lastErr = makeError(`HTTP ${res.status} for ${url}: ${body.slice(0, 500)}`, res.status, body);
 
+      // Checked here because the retry path below never reaches the catch: it
+      // just sleeps and loops. Checked again there so that throwing from here
+      // is not undone by our own handler re-reading the 500 as retryable.
+      if (policy.fatal?.(res.status, body)) throw lastErr;
       if (!isRetryable(res.status) || attempt === policy.attempts - 1) throw lastErr;
 
       const wait = retryAfterMs(res) ?? backoff(policy.backoffMs, attempt);
@@ -83,6 +94,7 @@ export async function requestJsonWithHeaders<T = unknown>(
           ? (err as HttpError)
           : makeError(`Request to ${url} failed: ${(err as Error).message}`);
       lastErr = e;
+      if (policy.fatal?.(e.status, e.body ?? "")) throw e;
       if (!isRetryable(e.status) || attempt === policy.attempts - 1) throw e;
       await sleep(backoff(policy.backoffMs, attempt));
     } finally {
