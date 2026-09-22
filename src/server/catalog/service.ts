@@ -16,24 +16,22 @@ export interface SkuResolveResult {
   products: SourceProduct[];
   fromCache: number; // SKUs served from the fresh catalog
   fetched: number; // SKUs fetched live from KicksDB
-  notFound: string[]; // SKUs with no matching StockX product
+  notFound: string[]; // SKUs StockX genuinely has no product for
+  failed: SkuFailure[]; // SKUs KicksDB could not answer for — worth retrying
+}
+
+/** A SKU whose lookup errored out. Not a verdict on the SKU — on the request. */
+export interface SkuFailure {
+  sku: string;
+  error: string;
 }
 
 /** Outcome of growing the ever-increasing catalog from a set of SKUs. */
 export interface CatalogGrowth {
   total: number; // total unique SKUs in the catalog (this market) after growth
   added: number; // brand-new, GET-verified SKUs inserted this run
-  rejected: string[]; // new SKUs that were NOT fetchable on KicksDB (no GET 200 match)
-}
-
-/** Fetch one product by exact SKU via the (working) products endpoint. */
-async function fetchProductBySku(
-  source: SourceLike,
-  sku: string,
-  market: string,
-): Promise<SourceProduct | null> {
-  const list = await source.getProduct(sku, market);
-  return list.find((p) => skuKey(p.sku) === skuKey(sku)) ?? null;
+  rejected: string[]; // new SKUs StockX has no product for (a real answer: "no")
+  failed: SkuFailure[]; // new SKUs whose lookup errored (429/5xx/timeout) — retry
 }
 
 /**
@@ -72,19 +70,32 @@ export async function resolveSkusViaCatalog(
   // cold manual SKU list resolves in parallel instead of one-by-one.
   const fetchedProducts: SourceProduct[] = [];
   const notFound: string[] = [];
+  const failed: SkuFailure[] = [];
   await forEachLimit(misses, 6, async (sku) => {
-    const product = await fetchProductBySku(source, sku, market);
-    if (product) {
-      fetchedProducts.push(product);
-      products.push(product);
-    } else {
-      notFound.push(sku);
+    try {
+      const product = await source.findBySku(sku, market);
+      if (product) {
+        fetchedProducts.push(product);
+        products.push(product);
+      } else {
+        notFound.push(sku);
+      }
+    } catch (e) {
+      // One rate-limited SKU used to abort the whole preview. It is now its
+      // own line in the report; every other SKU still resolves.
+      failed.push({ sku, error: errorText(e) });
     }
   });
 
   await store.upsert(market, fetchedProducts);
 
-  return { products, fromCache, fetched: fetchedProducts.length, notFound };
+  return { products, fromCache, fetched: fetchedProducts.length, notFound, failed };
+}
+
+/** Readable one-liner for an unknown thrown value. */
+function errorText(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  return message.length > 200 ? `${message.slice(0, 200)}…` : message;
 }
 
 /** Run an async task over items with a bounded number of concurrent workers. */
@@ -107,11 +118,17 @@ async function forEachLimit<T>(
  *
  * The catalog is unique by (market, sku) and entries are permanent: a SKU
  * already present is left untouched and never removed. Each genuinely new SKU
- * is confirmed against KicksDB with a GET /stockx/products lookup; ONLY SKUs
- * that return a matching product (HTTP 200) are added, so every catalog entry
- * is guaranteed fetchable. SKUs whose GET errors, 404s, or returns no exact
- * match are reported in `rejected` and NOT added. Verification cost is paid
- * once per new SKU — repeat uploads of known SKUs are free.
+ * is confirmed against KicksDB with an exact-SKU lookup; ONLY SKUs that
+ * resolve to a matching product are added, so every catalog entry is
+ * guaranteed fetchable. Verification cost is paid once per new SKU — repeat
+ * uploads of known SKUs are free.
+ *
+ * The two ways a SKU can fail to join are reported apart, because the operator
+ * does different things about them: `rejected` means KicksDB answered and has
+ * no such product (re-importing changes nothing), `failed` means KicksDB never
+ * answered — a 429, a timeout, a 5xx (re-importing is exactly the fix). Folding
+ * both into one list is what made a rate-limited import look like twelve dead
+ * style codes.
  */
 export async function growCatalogFromSkus(
   source: SourceLike,
@@ -132,18 +149,19 @@ export async function growCatalogFromSkus(
 
   const verified: SourceProduct[] = [];
   const rejected: string[] = [];
+  const failed: SkuFailure[] = [];
 
   await forEachLimit(candidates, opts.concurrency ?? 6, async (sku) => {
     try {
-      const product = await fetchProductBySku(source, sku, market);
+      const product = await source.findBySku(sku, market);
       if (product) verified.push(product);
-      else rejected.push(sku); // 200 but no exact-SKU match
-    } catch {
-      rejected.push(sku); // non-200 / network — treat as not fetchable
+      else rejected.push(sku); // KicksDB answered: no such product
+    } catch (e) {
+      failed.push({ sku, error: errorText(e) }); // KicksDB did not answer
     }
   });
 
   await store.upsert(market, verified);
 
-  return { total: await store.count(market), added: verified.length, rejected };
+  return { total: await store.count(market), added: verified.length, rejected, failed };
 }

@@ -621,7 +621,14 @@ function baseItem(
 export interface SourcePort {
     /** Up to 50 SKUs per call -> caller chunks. */
     getPricesBatch(skus: string[], market: string): Promise<SourceProduct[]>;
+    /** Free-text BROWSE: ranked matches for a human-typed term. */
     getProduct(query: string, market: string): Promise<SourceProduct[]>;
+    /**
+     * Exact style-code LOOKUP: the product whose SKU is `sku`, or null when the
+     * source genuinely has none. Throws when the source could not answer —
+     * "no such product" and "ask again later" must never collapse into one.
+     */
+    findBySku(sku: string, market: string): Promise<SourceProduct | null>;
 }
 
 export interface ApplyResult {

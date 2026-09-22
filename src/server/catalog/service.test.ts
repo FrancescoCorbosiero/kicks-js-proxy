@@ -4,6 +4,21 @@ import { skuKey } from "@/lib/skus";
 import type { SourceLike } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus, type CatalogStore } from "./service";
 
+/**
+ * A source built around the exact-SKU port. Its lookup can answer three ways —
+ * a product, null for "no such product", or a throw for "could not answer" —
+ * and the catalog acts differently on each, so the fake models all three.
+ */
+function fakeSource(findBySku: (sku: string, market: string) => Promise<SourceProduct | null>) {
+  const spy = vi.fn(findBySku);
+  const source: SourceLike = {
+    getPricesBatch: vi.fn(),
+    getProduct: vi.fn(async () => []),
+    findBySku: spy,
+  };
+  return { source, findBySku: spy };
+}
+
 function product(sku: string): SourceProduct {
   return {
     stockxId: `id-${sku}`,
@@ -53,83 +68,84 @@ function fakeStore() {
 describe("resolveSkusViaCatalog", () => {
   it("fetches on cold catalog and serves the warm second call from cache", async () => {
     const { store } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => [product(q)]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const { source, findBySku } = fakeSource(async (sku) => product(sku));
 
     const first = await resolveSkusViaCatalog(source, store, ["A", "B"], "IT", 60);
     expect(first.fetched).toBe(2);
     expect(first.fromCache).toBe(0);
     expect(first.products.map((p) => p.sku).sort()).toEqual(["A", "B"]);
-    expect(getProduct).toHaveBeenCalledTimes(2);
+    expect(findBySku).toHaveBeenCalledTimes(2);
 
     const second = await resolveSkusViaCatalog(source, store, ["A", "B"], "IT", 60);
     expect(second.fromCache).toBe(2);
     expect(second.fetched).toBe(0);
-    expect(getProduct).toHaveBeenCalledTimes(2); // no new fetches
+    expect(findBySku).toHaveBeenCalledTimes(2); // no new fetches
   });
 
   it("refetches once the catalog entry goes stale (past TTL)", async () => {
     const { store, setNow } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => [product(q)]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const { source, findBySku } = fakeSource(async (sku) => product(sku));
 
     await resolveSkusViaCatalog(source, store, ["A"], "IT", 60); // fetched at 10_000
     setNow(10_000 + 61_000); // 61s later, TTL 60s -> stale
     const res = await resolveSkusViaCatalog(source, store, ["A"], "IT", 60);
     expect(res.fetched).toBe(1);
-    expect(getProduct).toHaveBeenCalledTimes(2);
+    expect(findBySku).toHaveBeenCalledTimes(2);
   });
 
-  it("reports SKUs that resolve to no StockX product as notFound", async () => {
+  it("reports SKUs the source has no product for as notFound", async () => {
     const { store } = fakeStore();
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct: vi.fn(async () => []) };
+    const { source } = fakeSource(async () => null);
 
     const res = await resolveSkusViaCatalog(source, store, ["NOPE"], "IT", 60);
     expect(res.notFound).toEqual(["NOPE"]);
+    expect(res.failed).toEqual([]);
     expect(res.products).toHaveLength(0);
     expect(res.fetched).toBe(0);
   });
 
-  it("keeps only the exact-SKU match from a fuzzy products query", async () => {
+  it("keeps a failed lookup out of notFound and resolves the rest", async () => {
     const { store } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => [product("DIFFERENT"), product(q)]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const { source } = fakeSource(async (sku) => {
+      if (sku === "BOOM") throw new Error("HTTP 429 rate limited");
+      return product(sku);
+    });
 
-    const res = await resolveSkusViaCatalog(source, store, ["CT8012-047"], "IT", 60);
-    expect(res.products.map((p) => p.sku)).toEqual(["CT8012-047"]);
+    const res = await resolveSkusViaCatalog(source, store, ["A", "BOOM", "B"], "IT", 60);
+    // One rate-limited SKU used to abort the entire preview.
+    expect(res.products.map((p) => p.sku).sort()).toEqual(["A", "B"]);
+    expect(res.notFound).toEqual([]);
+    expect(res.failed).toEqual([{ sku: "BOOM", error: "HTTP 429 rate limited" }]);
   });
 
   it("de-duplicates SKUs differing only by case/whitespace", async () => {
     const { store } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => [product(q.trim())]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const { source, findBySku } = fakeSource(async (sku) => product(sku.trim()));
 
     const res = await resolveSkusViaCatalog(source, store, ["abc", "ABC", " abc "], "IT", 60);
     expect(res.products).toHaveLength(1);
-    expect(getProduct).toHaveBeenCalledTimes(1);
+    expect(findBySku).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("growCatalogFromSkus", () => {
-  it("adds only GET-verified new SKUs and grows the unique catalog", async () => {
+  it("adds only verified new SKUs and grows the unique catalog", async () => {
     const { store } = fakeStore();
-    // "GHOST" returns 200 but no exact match -> rejected; others verify.
-    const getProduct = vi.fn(async (q: string) =>
-      skuKey(q) === "GHOST" ? [product("OTHER")] : [product(q)],
+    const { source, findBySku } = fakeSource(async (sku) =>
+      skuKey(sku) === "GHOST" ? null : product(sku),
     );
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
 
     const res = await growCatalogFromSkus(source, store, ["A", "B", "GHOST"], "IT");
     expect(res.added).toBe(2);
     expect(res.rejected).toEqual(["GHOST"]);
+    expect(res.failed).toEqual([]);
     expect(res.total).toBe(2);
-    expect(getProduct).toHaveBeenCalledTimes(3);
+    expect(findBySku).toHaveBeenCalledTimes(3);
   });
 
   it("skips SKUs already in the catalog (permanent, verified once)", async () => {
     const { store } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => [product(q)]);
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
+    const { source, findBySku } = fakeSource(async (sku) => product(sku));
 
     const first = await growCatalogFromSkus(source, store, ["A", "B"], "IT");
     expect(first.added).toBe(2);
@@ -138,20 +154,55 @@ describe("growCatalogFromSkus", () => {
     const second = await growCatalogFromSkus(source, store, ["a", "B", "C"], "IT");
     expect(second.added).toBe(1);
     expect(second.total).toBe(3);
-    expect(getProduct).toHaveBeenCalledTimes(3); // 2 first run + 1 for C
+    expect(findBySku).toHaveBeenCalledTimes(3); // 2 first run + 1 for C
   });
 
-  it("rejects (never adds) SKUs whose GET errors out", async () => {
+  /**
+   * The bug this whole change exists for: a rate-limited or timed-out lookup
+   * was filed next to genuinely absent style codes, so the operator read
+   * "12 rejected" and went looking for twelve bad SKUs that were all fine.
+   */
+  it("separates an unanswered lookup from a genuine rejection", async () => {
     const { store } = fakeStore();
-    const getProduct = vi.fn(async (q: string) => {
-      if (skuKey(q) === "BOOM") throw new Error("HTTP 404");
-      return [product(q)];
+    const { source } = fakeSource(async (sku) => {
+      if (sku === "BOOM") throw new Error("HTTP 429 for /stockx/products");
+      if (sku === "GHOST") return null;
+      return product(sku);
     });
-    const source: SourceLike = { getPricesBatch: vi.fn(), getProduct };
 
-    const res = await growCatalogFromSkus(source, store, ["A", "BOOM"], "IT");
+    const res = await growCatalogFromSkus(source, store, ["A", "GHOST", "BOOM"], "IT");
     expect(res.added).toBe(1);
-    expect(res.rejected).toEqual(["BOOM"]);
+    expect(res.rejected).toEqual(["GHOST"]); // the API said no
+    expect(res.failed).toEqual([{ sku: "BOOM", error: "HTTP 429 for /stockx/products" }]);
     expect(res.total).toBe(1);
+  });
+
+  it("leaves a failed SKU out of the catalog so a retry can still add it", async () => {
+    const { store } = fakeStore();
+    let down = true;
+    const { source } = fakeSource(async (sku) => {
+      if (down) throw new Error("HTTP 503");
+      return product(sku);
+    });
+
+    const first = await growCatalogFromSkus(source, store, ["A"], "IT");
+    expect(first.added).toBe(0);
+    expect(first.failed.map((f) => f.sku)).toEqual(["A"]);
+
+    down = false;
+    const retry = await growCatalogFromSkus(source, store, ["A"], "IT");
+    expect(retry.added).toBe(1);
+    expect(retry.failed).toEqual([]);
+  });
+
+  it("truncates a runaway error message instead of carrying it to the UI", async () => {
+    const { store } = fakeStore();
+    const { source } = fakeSource(async () => {
+      throw new Error("x".repeat(500));
+    });
+
+    const res = await growCatalogFromSkus(source, store, ["A"], "IT");
+    expect(res.failed[0].error).toHaveLength(201); // 200 chars + the ellipsis
+    expect(res.failed[0].error.endsWith("\u2026")).toBe(true);
   });
 });

@@ -229,7 +229,12 @@ function ActivityRow({ item, t }: { item: ActivityItem; t: Dictionary }) {
               : source === "store:woo"
                 ? d.act.wooRegister
                 : d.act.preview;
-    detail = t.importPage.historyLine(item.run.added, item.run.known, item.run.rejected);
+    detail = t.importPage.historyLine(
+      item.run.added,
+      item.run.known,
+      item.run.rejected,
+      item.run.failed,
+    );
     dotClass = item.run.error ? "bg-skip" : "bg-down";
   }
 

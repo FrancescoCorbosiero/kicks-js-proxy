@@ -1,7 +1,6 @@
 import "server-only";
 import { getActiveConfig } from "@/server/config/repo";
 import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
-import { skuKey } from "@/lib/skus";
 import { listSkusMissingMetadata, touchCatalogSkus, upsertCatalog } from "./repo";
 
 /**
@@ -40,11 +39,12 @@ export async function backfillCatalogMetadata(limit: number): Promise<EnrichOutc
   const worker = async () => {
     for (let sku = pending.shift(); sku !== undefined; sku = pending.shift()) {
       try {
-        const list = await source.getProduct(sku, market);
-        const product = list.find((p) => skuKey(p.sku) === skuKey(sku));
+        const product = await source.findBySku(sku, market);
         if (product) fetched.push(product);
         else missed.push(sku);
       } catch {
+        // Backfill is a rotating queue, so a miss and an error cost the same
+        // here: both send the SKU to the back and it is tried again next pass.
         missed.push(sku);
       }
     }
