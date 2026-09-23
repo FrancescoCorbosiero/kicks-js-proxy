@@ -496,6 +496,10 @@ export const it = {
       loading: "Calcolo…",
       seeded: (n: number) => `Anteprima limitata a ${n} SKU`,
       clearSeed: "Tutto lo store",
+      progress: (done: number, total: number) => `Calcolo… ${done} / ${total} SKU`,
+      cancel: "Ferma",
+      failed: "L'anteprima si è fermata prima della fine dello store. Non è stato scritto nulla: ricalcolala.",
+      ceiling: "L'anteprima ha raggiunto il limite di passi prima della fine dello store. Non è stato scritto nulla: ricalcolala.",
       needSnapshot: "Serve lo stato dello store: esegui prima un pull (o carica un file da /preview).",
     },
     apply: {

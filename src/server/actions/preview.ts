@@ -30,7 +30,16 @@ import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server
 import { isExactMatch } from "@/lib/match";
 import { skuKey } from "@/lib/skus";
 import { emptySummary, type PlanSummary, type PreviewPlan } from "@/lib/plan";
-import { PREVIEW_PAGE_LIMIT, PreviewPage } from "@/lib/preview-page";
+import { PREVIEW_PAGE_LIMIT, PreviewPage, pagePreviewPlans } from "@/lib/preview-page";
+import {
+  cancelSyncRun,
+  commitSyncStep,
+  createSyncRun,
+  dropUncommittedPlans,
+  failSyncRun,
+  getSyncRun,
+} from "@/server/sync/runs";
+import type { StoreSyncRunRow } from "@/server/db/schema";
 import type { StoreProductModel } from "@/server/store-json/model";
 
 /**
@@ -346,12 +355,167 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
   }
 }
 
+/** Everything one store chunk contributes to a run's report. */
+interface ChunkOutcome {
+  plans: PreviewPlan[];
+  /** The chunk's misses (all of them — the caller caps the list). */
+  notFound: string[];
+  delisted: number;
+  warning?: string;
+  /** Null when catalog growth was skipped for this chunk. */
+  catalog: { total: number; added: number; rejected: number } | null;
+}
+
+interface ChunkContext {
+  config: import("@core/config").AppConfig;
+  market: string;
+  source: ReturnType<typeof getSource>;
+  overrides: StoreOverrides;
+  runId: string;
+  seen: Set<string>;
+}
+
+/**
+ * Plan ONE slice of the store's SKUs and persist its plans under the run. The
+ * unit both the one-shot preview and the stepped sync are made of.
+ */
+async function previewStoreChunk(part: string[], ctx: ChunkContext): Promise<ChunkOutcome> {
+  const { config, market, source, overrides, runId, seen } = ctx;
+  // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
+  // from the local feed tables, so asking KicksDB about it is pointless at
+  // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
+  // heard of, and a failing batch used to throw and take the whole sync down
+  // with it — the feed sitting right there in the DB, unread.
+  const { owned, delisted } = await gsFeedStatus(part, market, overrides);
+  // Delisted SKUs still go to KicksDB — for a PRICE only (their stock is 0
+  // whatever it answers).
+  const kicksSkus = part.filter((s) => !owned.has(skuKey(s)));
+  // The store products THIS chunk matches against — keyed by canonical
+  // SKU, which is exactly what resolveFromModel wants as its index.
+  const storeIndex = await getSnapshotProductsBySkus(part);
+
+  // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
+  // 50 SKUs. Product names come from the snapshot (the bulk response carries
+  // no title/brand).
+  const secondary = await fetchSecondarySource(kicksSkus, {
+    // The delisted are plannable without KicksDB too (stock 0 needs no price).
+    ownedCount: owned.size + delisted.size,
+    configured: kicksdbConfigured(),
+    fetch: (p) => source.getPricesBatch(p, market),
+    describeError: errMessage,
+  });
+  const fetched = secondary.products;
+
+  for (const p of fetched) {
+    const name = storeIndex.get(skuKey(p.sku))?.name;
+    if (name) p.title = name;
+  }
+  // The bulk price endpoint carries no identifiers; the catalog (filled from
+  // the per-product endpoint) does. Without this the sync could never write
+  // a GTIN for a KicksDB product, only for feed-owned ones.
+  const enriched = carryIdentifiers(
+    fetched,
+    fetched.length > 0
+      ? await getAnyBySkus(market, fetched.map((p) => p.sku)).catch(() => new Map())
+      : new Map(),
+  );
+
+  // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
+  // carry is covered by the feed, not missing.
+  const merged = mergeGsOwned(enriched, owned).products;
+
+  // Delisting: every store size of a product the supplier dropped is planned
+  // at stock 0 — KicksDB variants kept for their price when it covers the
+  // SKU, bare store sizes for the rest.
+  const products: typeof merged = [];
+  const delistedProducts: typeof merged = [];
+  const pricedDelisted = new Map<string, (typeof merged)[number]>();
+  for (const p of merged) {
+    if (delisted.has(skuKey(p.sku))) pricedDelisted.set(skuKey(p.sku), p);
+    else products.push(p);
+  }
+  for (const s of part) {
+    const key = skuKey(s);
+    if (!delisted.has(key)) continue;
+    const store = storeIndex.get(key);
+    const p = store ? delistedSource(s, store, pricedDelisted.get(key), market) : null;
+    if (p) delistedProducts.push(p);
+  }
+
+  const returned = new Set(products.map((p) => skuKey(p.sku)));
+  const notFound = part.filter((s) => !returned.has(skuKey(s)) && !delisted.has(skuKey(s)));
+
+  // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
+  // call returned and add only those fetchable on KicksDB (feed-owned
+  // products are excluded — the catalog stays KicksDB-pure). Best-effort — a
+  // catalog failure must never break the preview.
+  let catalog: ChunkOutcome["catalog"] = null;
+  try {
+    const growth = await growCatalogFromSkus(
+      source,
+      dbCatalogStore,
+      [...products, ...pricedDelisted.values()]
+        .filter((p) => (p.source ?? "kicksdb") === "kicksdb")
+        .map((p) => p.sku),
+      market,
+    );
+    catalog = { total: growth.total, added: growth.added, rejected: growth.rejected.length };
+    // Growth here is best-effort, but an unanswered lookup is not a
+    // rejection and must not be counted as one — nor silently dropped.
+    if (growth.failed.length > 0) {
+      console.warn(
+        `[catalog] ${growth.failed.length} SKU(s) unverified (KicksDB did not answer): ` +
+          growth.failed.slice(0, 5).map((f) => f.sku).join(", "),
+      );
+    }
+  } catch (e) {
+    console.warn("[catalog] growth skipped:", errMessage(e));
+  }
+
+  const plans = await planChunk(
+    [...products, ...delistedProducts],
+    config,
+    storeIndex,
+    market,
+    null,
+    overrides,
+    runId,
+    seen,
+    delisted,
+  );
+  return { plans, notFound, delisted: delisted.size, warning: secondary.warning, catalog };
+}
+
+/** The SKUs a store preview walks: the override (deduped), else the snapshot's. */
+async function storePreviewSkus(skusOverride?: string[]): Promise<string[] | PreviewResult> {
+  // The SKU LIST, not the store. The snapshot is one jsonb row holding every
+  // product — reading it here to learn which SKUs exist, and to match against
+  // them, kept ~150 MB of object graph alive for the whole run. The list comes
+  // out of SQL already deduped by canonical key, and each chunk reads back
+  // only the products it is about to match.
+  if ((await getSnapshotInfo()) == null) {
+    return { ok: false, error: "Upload a store snapshot first.", plans: [] };
+  }
+  const skus =
+    skusOverride && skusOverride.length > 0
+      ? [...new Map(skusOverride.map((s) => [skuKey(s), s])).values()]
+      : await listStoreSkuSpellings();
+  if (skus.length === 0) {
+    return { ok: false, error: "The store snapshot has no products.", plans: [] };
+  }
+  return skus;
+}
+
 /**
  * File-driven preview: fetch StockX prices for a set of SKUs and preview them
  * against the uploaded store snapshot. With no `skusOverride` it previews the
  * whole file (the primary workflow). With one — e.g. a selection from the KicksDB
  * catalog — it previews just those SKUs, still matched to the snapshot so the
  * export stays a valid Woo re-import.
+ *
+ * ONE server action for the whole store: fine for a selection, too long for a
+ * whole shop on a slow source — the Sync tab walks the store with
+ * startStoreSync / advanceStoreSync instead.
  *
  * The store is walked in chunks. Resolving every SKU at once meant the whole
  * catalog's worth of source products, mappings and plans were live at the same
@@ -363,21 +527,8 @@ export async function previewFromStore(
   skusOverride?: string[],
 ): Promise<PreviewResult> {
   const config = await getActiveConfig();
-  // The SKU LIST, not the store. The snapshot is one jsonb row holding every
-  // product — reading it here to learn which SKUs exist, and to match against
-  // them, kept ~150 MB of object graph alive for the whole run. The list comes
-  // out of SQL already deduped by canonical key, and each chunk below reads
-  // back only the products it is about to match.
-  if ((await getSnapshotInfo()) == null) {
-    return { ok: false, error: "Upload a store snapshot first.", plans: [] };
-  }
-  const skus =
-    skusOverride && skusOverride.length > 0
-      ? [...new Map(skusOverride.map((s) => [skuKey(s), s])).values()]
-      : await listStoreSkuSpellings();
-  if (skus.length === 0) {
-    return { ok: false, error: "The store snapshot has no products.", plans: [] };
-  }
+  const skus = await storePreviewSkus(skusOverride);
+  if (!Array.isArray(skus)) return skus;
 
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
@@ -393,126 +544,25 @@ export async function previewFromStore(
     let notFoundTotal = 0;
     let planned = 0;
     let warning: string | undefined;
-    let catalogTotal = 0;
-    let catalogAdded = 0;
-    let catalogRejected = 0;
-    let catalogSeen = false;
+    let catalog: CatalogStats | undefined;
     let delistedTotal = 0;
 
     for (const part of chunk(skus, PREVIEW_CHUNK)) {
-      // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
-      // from the local feed tables, so asking KicksDB about it is pointless at
-      // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
-      // heard of, and a failing batch used to throw and take the whole sync down
-      // with it — the feed sitting right there in the DB, unread.
-      const { owned, delisted } = await gsFeedStatus(part, market, overrides);
-      // Delisted SKUs still go to KicksDB — for a PRICE only (their stock is 0
-      // whatever it answers).
-      const kicksSkus = part.filter((s) => !owned.has(skuKey(s)));
-      // The store products THIS chunk matches against — keyed by canonical
-      // SKU, which is exactly what resolveFromModel wants as its index.
-      const storeIndex = await getSnapshotProductsBySkus(part);
-
-      // Bulk endpoint (show_sizes) returns EU sizes + prices in one call, chunked at
-      // 50 SKUs. Product names come from the snapshot (the bulk response carries
-      // no title/brand).
-      const secondary = await fetchSecondarySource(kicksSkus, {
-        // The delisted are plannable without KicksDB too (stock 0 needs no price).
-        ownedCount: owned.size + delisted.size,
-        configured: kicksdbConfigured(),
-        fetch: (p) => source.getPricesBatch(p, market),
-        describeError: errMessage,
-      });
-      const fetched = secondary.products;
-      warning ??= secondary.warning;
-
-      for (const p of fetched) {
-        const name = storeIndex.get(skuKey(p.sku))?.name;
-        if (name) p.title = name;
+      const out = await previewStoreChunk(part, { config, market, source, overrides, runId, seen });
+      warning ??= out.warning;
+      notFoundTotal += out.notFound.length;
+      for (const s of out.notFound) if (notFound.length < NOT_FOUND_LIMIT) notFound.push(s);
+      delistedTotal += out.delisted;
+      if (out.catalog) {
+        catalog = {
+          total: out.catalog.total,
+          added: (catalog?.added ?? 0) + out.catalog.added,
+          rejected: (catalog?.rejected ?? 0) + out.catalog.rejected,
+        };
       }
-      // The bulk price endpoint carries no identifiers; the catalog (filled from
-      // the per-product endpoint) does. Without this the sync could never write
-      // a GTIN for a KicksDB product, only for feed-owned ones.
-      const enriched = carryIdentifiers(
-        fetched,
-        fetched.length > 0
-          ? await getAnyBySkus(market, fetched.map((p) => p.sku)).catch(() => new Map())
-          : new Map(),
-      );
-
-      // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
-      // carry is covered by the feed, not missing.
-      const merged = mergeGsOwned(enriched, owned).products;
-
-      // Delisting: every store size of a product the supplier dropped is planned
-      // at stock 0 — KicksDB variants kept for their price when it covers the
-      // SKU, bare store sizes for the rest.
-      const products: typeof merged = [];
-      const delistedProducts: typeof merged = [];
-      const pricedDelisted = new Map<string, (typeof merged)[number]>();
-      for (const p of merged) {
-        if (delisted.has(skuKey(p.sku))) pricedDelisted.set(skuKey(p.sku), p);
-        else products.push(p);
-      }
-      for (const s of part) {
-        const key = skuKey(s);
-        if (!delisted.has(key)) continue;
-        delistedTotal += 1;
-        const store = storeIndex.get(key);
-        const p = store ? delistedSource(s, store, pricedDelisted.get(key), market) : null;
-        if (p) delistedProducts.push(p);
-      }
-
-      const returned = new Set(products.map((p) => skuKey(p.sku)));
-      for (const s of part) {
-        if (returned.has(skuKey(s)) || delisted.has(skuKey(s))) continue;
-        notFoundTotal += 1;
-        if (notFound.length < NOT_FOUND_LIMIT) notFound.push(s);
-      }
-
-      // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
-      // call returned and add only those fetchable on KicksDB (feed-owned
-      // products are excluded — the catalog stays KicksDB-pure). Best-effort — a
-      // catalog failure must never break the preview.
-      try {
-        const growth = await growCatalogFromSkus(
-          source,
-          dbCatalogStore,
-          [...products, ...pricedDelisted.values()]
-            .filter((p) => (p.source ?? "kicksdb") === "kicksdb")
-            .map((p) => p.sku),
-          market,
-        );
-        catalogTotal = growth.total;
-        catalogAdded += growth.added;
-        catalogRejected += growth.rejected.length;
-        catalogSeen = true;
-        // Growth here is best-effort, but an unanswered lookup is not a
-        // rejection and must not be counted as one — nor silently dropped.
-        if (growth.failed.length > 0) {
-          console.warn(
-            `[catalog] ${growth.failed.length} SKU(s) unverified (KicksDB did not answer): ` +
-              growth.failed.slice(0, 5).map((f) => f.sku).join(", "),
-          );
-        }
-      } catch (e) {
-        console.warn("[catalog] growth skipped:", errMessage(e));
-      }
-
-      const plans = await planChunk(
-        [...products, ...delistedProducts],
-        config,
-        storeIndex,
-        market,
-        null,
-        overrides,
-        runId,
-        seen,
-        delisted,
-      );
-      planned += plans.length;
-      for (const p of plans) addSummary(totals, p.summary);
-      page.add(plans);
+      planned += out.plans.length;
+      for (const p of out.plans) addSummary(totals, p.summary);
+      page.add(out.plans);
     }
 
     return {
@@ -529,12 +579,161 @@ export async function previewFromStore(
         notFound,
         notFoundTotal,
         delisted: delistedTotal,
-        catalog: catalogSeen
-          ? { total: catalogTotal, added: catalogAdded, rejected: catalogRejected }
-          : undefined,
+        catalog,
       },
     };
   } catch (e) {
     return { ok: false, error: errMessage(e), plans: [] };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* The stepped store sync                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * SKUs one advance step plans. Small on purpose: a step is one server action,
+ * and it has to come back well inside any request timeout even when every SKU
+ * goes to KicksDB (bulk prices + catalog GET-verification of the new ones).
+ * The memory knee above is irrelevant at this size.
+ */
+const SYNC_STEP_SKUS = 250;
+
+export interface StoreSyncProgress {
+  runId: string;
+  status: StoreSyncRunRow["status"];
+  /** SKUs planned so far, of `total`. */
+  cursor: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+  /**
+   * The plans THIS step produced (a page of them — the browser keeps the
+   * run's best page itself). Empty on a status-only answer.
+   */
+  plans: PreviewPlan[];
+  /** Set once `done`: the whole run's report, exactly what previewFromStore returns. */
+  result?: PreviewResult;
+}
+
+function syncProgress(
+  run: StoreSyncRunRow,
+  plans: PreviewPlan[] = [],
+): StoreSyncProgress {
+  const done = run.status === "done";
+  return {
+    runId: run.id,
+    status: run.status,
+    cursor: run.cursor,
+    total: run.skus.length,
+    done,
+    error: run.error,
+    plans,
+    result: done ? syncRunResult(run) : undefined,
+  };
+}
+
+/** The report of a finished run. `plans` is left to the browser, which holds the page. */
+function syncRunResult(run: StoreSyncRunRow): PreviewResult {
+  return {
+    ok: true,
+    warning: run.warning ?? undefined,
+    runId: run.id,
+    plans: [],
+    totals: run.totals,
+    products: run.planned,
+    stats: {
+      products: run.planned,
+      fromCache: 0,
+      fetched: run.planned,
+      notFound: run.notFound,
+      notFoundTotal: run.notFoundTotal,
+      delisted: run.delisted,
+      catalog: run.catalog ?? undefined,
+    },
+  };
+}
+
+/**
+ * Open a stepped sync over the store (or a SKU selection of it). Always a NEW
+ * run: a sync is a reading of the store at one moment, and a half-finished one
+ * from earlier describes a store that may have moved since.
+ */
+export async function startStoreSync(
+  marketOverride?: string,
+  skusOverride?: string[],
+): Promise<{ ok: boolean; error?: string; progress?: StoreSyncProgress }> {
+  try {
+    const config = await getActiveConfig();
+    const skus = await storePreviewSkus(skusOverride);
+    if (!Array.isArray(skus)) return { ok: false, error: skus.error };
+    await prunePlans(); // best-effort retention: plans are per-run scratch data
+    const run = await createSyncRun(marketOverride ?? config.source.market, skus);
+    return { ok: true, progress: syncProgress(run) };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
+  }
+}
+
+/**
+ * Plan the next SYNC_STEP_SKUS of a running sync. The cursor and the report's
+ * counts move only once the step's plans are saved, so a step that dies
+ * half-way (a timeout, a crash) is simply planned again by the next call —
+ * its orphaned plans are dropped first.
+ */
+export async function advanceStoreSync(
+  runId: string,
+): Promise<{ ok: boolean; error?: string; progress?: StoreSyncProgress }> {
+  try {
+    const run = await getSyncRun(runId);
+    if (!run) return { ok: false, error: "Unknown sync run." };
+    if (run.status !== "running") return { ok: true, progress: syncProgress(run) };
+
+    await dropUncommittedPlans(run);
+    const part = run.skus.slice(run.cursor, run.cursor + SYNC_STEP_SKUS);
+    let out: ChunkOutcome;
+    try {
+      const config = await getActiveConfig();
+      out = await previewStoreChunk(part, {
+        config,
+        market: run.market,
+        source: getSource(config),
+        overrides: await getOverrides(),
+        runId,
+        seen: new Set<string>(),
+      });
+    } catch (e) {
+      // The step had an answer to give and could not: the run is not a
+      // reading of the store any more, and must not be applied as one.
+      return { ok: true, progress: syncProgress(await failSyncRun(runId, errMessage(e))) };
+    }
+
+    const totals = { ...run.totals };
+    for (const p of out.plans) addSummary(totals, p.summary);
+    const next = await commitSyncStep(run, {
+      cursor: run.cursor + part.length,
+      planned: run.planned + out.plans.length,
+      totals,
+      notFound: [...run.notFound, ...out.notFound].slice(0, NOT_FOUND_LIMIT),
+      notFoundTotal: run.notFoundTotal + out.notFound.length,
+      delisted: run.delisted + out.delisted,
+      warning: run.warning ?? out.warning ?? null,
+      catalog: out.catalog
+        ? {
+            total: out.catalog.total,
+            added: (run.catalog?.added ?? 0) + out.catalog.added,
+            rejected: (run.catalog?.rejected ?? 0) + out.catalog.rejected,
+          }
+        : run.catalog,
+    });
+    return { ok: true, progress: syncProgress(next, pagePreviewPlans(out.plans)) };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
+  }
+}
+
+/** Stop a running sync. Its plans stay (pruned like any run) but it can never be applied. */
+export async function cancelStoreSync(runId: string): Promise<{ ok: boolean }> {
+  await cancelSyncRun(runId);
+  return { ok: true };
 }

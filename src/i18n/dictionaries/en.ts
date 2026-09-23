@@ -482,6 +482,10 @@ export const en: Dictionary = {
       loading: "Computing…",
       seeded: (n) => `Preview limited to ${n} SKUs`,
       clearSeed: "Whole store",
+      progress: (done: number, total: number) => `Computing… ${done} / ${total} SKUs`,
+      cancel: "Stop",
+      failed: "The preview stopped before the end of the store. Nothing was written; compute it again.",
+      ceiling: "The preview reached the step limit before the end of the store. Nothing was written; compute it again.",
       needSnapshot: "Store state required: run a pull first (or upload a file at /preview).",
     },
     apply: {
