@@ -35,7 +35,15 @@ export async function dropUncommittedPlans(run: StoreSyncRunRow): Promise<void> 
 
 type StepCounts = Pick<
   StoreSyncRunRow,
-  "cursor" | "planned" | "totals" | "notFound" | "notFoundTotal" | "delisted" | "warning" | "catalog"
+  | "cursor"
+  | "planned"
+  | "totals"
+  | "notFound"
+  | "notFoundTotal"
+  | "delisted"
+  | "unanswered"
+  | "warning"
+  | "catalog"
 >;
 
 /**

@@ -26,6 +26,7 @@ import {
   mergeGsOwned,
 } from "@/server/feeds/ownership";
 import { getOverrides } from "@/server/overrides/repo";
+import { activeFeedSkus, GS_FEED } from "@/server/feeds/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
 import { skuKey } from "@/lib/skus";
@@ -94,6 +95,11 @@ export interface FetchStats {
    * at stock 0. An answer, not an absence — they never join `notFound`.
    */
   delisted?: number;
+  /**
+   * SKUs KicksDB failed to answer for (an outage mid-run). Not missing —
+   * unanswered. They never join `notFound`.
+   */
+  unanswered?: number;
   catalog?: CatalogStats;
 }
 
@@ -360,6 +366,8 @@ interface ChunkOutcome {
   plans: PreviewPlan[];
   /** The chunk's misses (all of them — the caller caps the list). */
   notFound: string[];
+  /** SKUs KicksDB could not answer for — kept apart from notFound. */
+  unanswered: number;
   delisted: number;
   warning?: string;
   /** Null when catalog growth was skipped for this chunk. */
@@ -373,6 +381,17 @@ interface ChunkContext {
   overrides: StoreOverrides;
   runId: string;
   seen: Set<string>;
+  /**
+   * The GS feed is in use on this install. Then a KicksDB failure never sinks
+   * the run — whichever slice it lands in — because the feed products are
+   * still plannable; its SKUs are reported as unanswered instead.
+   */
+  feedInUse: boolean;
+}
+
+/** Whether the GS feed carries anything at all — decides if KicksDB is the sole source. */
+async function feedInUse(): Promise<boolean> {
+  return (await activeFeedSkus(GS_FEED)).size > 0;
 }
 
 /**
@@ -400,6 +419,7 @@ async function previewStoreChunk(part: string[], ctx: ChunkContext): Promise<Chu
   const secondary = await fetchSecondarySource(kicksSkus, {
     // The delisted are plannable without KicksDB too (stock 0 needs no price).
     ownedCount: owned.size + delisted.size,
+    soleSource: !ctx.feedInUse && owned.size + delisted.size === 0,
     configured: kicksdbConfigured(),
     fetch: (p) => source.getPricesBatch(p, market),
     describeError: errMessage,
@@ -443,7 +463,12 @@ async function previewStoreChunk(part: string[], ctx: ChunkContext): Promise<Chu
   }
 
   const returned = new Set(products.map((p) => skuKey(p.sku)));
-  const notFound = part.filter((s) => !returned.has(skuKey(s)) && !delisted.has(skuKey(s)));
+  const unasked = new Set(secondary.unanswered.map(skuKey));
+  const notFound = part.filter(
+    (s) => !returned.has(skuKey(s)) && !delisted.has(skuKey(s)) && !unasked.has(skuKey(s)),
+  );
+  // A delisted SKU KicksDB did not answer is still zeroed — it counts as delisted.
+  const unanswered = part.filter((s) => unasked.has(skuKey(s)) && !delisted.has(skuKey(s))).length;
 
   // Grow the ever-increasing catalog: GET-verify the brand-new SKUs the bulk
   // call returned and add only those fetchable on KicksDB (feed-owned
@@ -483,7 +508,7 @@ async function previewStoreChunk(part: string[], ctx: ChunkContext): Promise<Chu
     seen,
     delisted,
   );
-  return { plans, notFound, delisted: delisted.size, warning: secondary.warning, catalog };
+  return { plans, notFound, unanswered, delisted: delisted.size, warning: secondary.warning, catalog };
 }
 
 /** The SKUs a store preview walks: the override (deduped), else the snapshot's. */
@@ -546,9 +571,20 @@ export async function previewFromStore(
     let warning: string | undefined;
     let catalog: CatalogStats | undefined;
     let delistedTotal = 0;
+    let unansweredTotal = 0;
+    const feed = await feedInUse();
 
     for (const part of chunk(skus, PREVIEW_CHUNK)) {
-      const out = await previewStoreChunk(part, { config, market, source, overrides, runId, seen });
+      const out = await previewStoreChunk(part, {
+        config,
+        market,
+        source,
+        overrides,
+        runId,
+        seen,
+        feedInUse: feed,
+      });
+      unansweredTotal += out.unanswered;
       warning ??= out.warning;
       notFoundTotal += out.notFound.length;
       for (const s of out.notFound) if (notFound.length < NOT_FOUND_LIMIT) notFound.push(s);
@@ -579,6 +615,7 @@ export async function previewFromStore(
         notFound,
         notFoundTotal,
         delisted: delistedTotal,
+        unanswered: unansweredTotal,
         catalog,
       },
     };
@@ -649,6 +686,7 @@ function syncRunResult(run: StoreSyncRunRow): PreviewResult {
       notFound: run.notFound,
       notFoundTotal: run.notFoundTotal,
       delisted: run.delisted,
+      unanswered: run.unanswered,
       catalog: run.catalog ?? undefined,
     },
   };
@@ -701,6 +739,7 @@ export async function advanceStoreSync(
         overrides: await getOverrides(),
         runId,
         seen: new Set<string>(),
+        feedInUse: await feedInUse(),
       });
     } catch (e) {
       // The step had an answer to give and could not: the run is not a
@@ -717,6 +756,7 @@ export async function advanceStoreSync(
       notFound: [...run.notFound, ...out.notFound].slice(0, NOT_FOUND_LIMIT),
       notFoundTotal: run.notFoundTotal + out.notFound.length,
       delisted: run.delisted + out.delisted,
+      unanswered: run.unanswered + out.unanswered,
       warning: run.warning ?? out.warning ?? null,
       catalog: out.catalog
         ? {

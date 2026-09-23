@@ -42,7 +42,7 @@ describe.skipIf(!enabled)("sync runs (real SQL)", () => {
     expect(await syncRunApplicable(run.id)).toBe(false);
 
     await savePlans([plan("A")], "IT", run.id);
-    const r1 = await commitSyncStep(run, { cursor: 1, planned: 1, totals: { update: 1, create: 0, noop: 0, skip: 0 }, notFound: [], notFoundTotal: 0, delisted: 0, warning: null, catalog: null });
+    const r1 = await commitSyncStep(run, { cursor: 1, planned: 1, totals: { update: 1, create: 0, noop: 0, skip: 0 }, notFound: [], notFoundTotal: 0, delisted: 0, unanswered: 0, warning: null, catalog: null });
     expect(r1.cursor).toBe(1);
     expect(r1.status).toBe("running");
 
@@ -53,11 +53,11 @@ describe.skipIf(!enabled)("sync runs (real SQL)", () => {
     expect(left.map((p) => p.sku)).toEqual(["A"]);
 
     // stale commit (started from cursor 0) is refused
-    const stale = await commitSyncStep(run, { cursor: 2, planned: 9, totals: r1.totals, notFound: [], notFoundTotal: 0, delisted: 0, warning: null, catalog: null });
+    const stale = await commitSyncStep(run, { cursor: 2, planned: 9, totals: r1.totals, notFound: [], notFoundTotal: 0, delisted: 0, unanswered: 0, warning: null, catalog: null });
     expect(stale.cursor).toBe(1);
     expect(stale.planned).toBe(1);
 
-    const r2 = await commitSyncStep(r1, { cursor: 3, planned: 3, totals: r1.totals, notFound: ["C"], notFoundTotal: 1, delisted: 2, warning: "w", catalog: { total: 5, added: 1, rejected: 0 } });
+    const r2 = await commitSyncStep(r1, { cursor: 3, planned: 3, totals: r1.totals, notFound: ["C"], notFoundTotal: 1, delisted: 2, unanswered: 0, warning: "w", catalog: { total: 5, added: 1, rejected: 0 } });
     expect(r2.status).toBe("done");
     expect(r2.finishedAt).not.toBeNull();
     expect(r2.notFound).toEqual(["C"]);

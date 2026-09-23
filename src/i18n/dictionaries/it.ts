@@ -472,6 +472,8 @@ export const it = {
         `Il sync riprezza solo ciò che è già sul negozio. ${n} ${n === 1 ? "prodotto è" : "prodotti sono"} a catalogo ma non ancora pubblicati: creali dalla scheda Pubblica.`,
       delisted: (n: number) =>
         `${n} ${n === 1 ? "prodotto delistato" : "prodotti delistati"} dal fornitore: stock a 0 nel piano, così ${n === 1 ? "smette" : "smettono"} di essere acquistabil${n === 1 ? "e" : "i"}. Lo stock torna da solo quando il feed ${n === 1 ? "lo" : "li"} rimette.`,
+      unanswered: (n: number) =>
+        `${n} SKU non verificat${n === 1 ? "o" : "i"}: KicksDB non ha risposto, quindi il prezzo è rimasto com'era. Non sono mancanti — rilancia la sync più tardi.`,
       publishLink: "Vai a Pubblica",
     },
     pull: {
