@@ -1,0 +1,1 @@
+ALTER TABLE "store_sync_runs" ADD COLUMN "unanswered" integer DEFAULT 0 NOT NULL;

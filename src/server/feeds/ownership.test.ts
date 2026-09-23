@@ -57,7 +57,7 @@ describe("fetchSecondarySource", () => {
     const fetch = vi.fn();
     const res = await fetchSecondarySource([], { ownedCount: 12, configured: true, fetch });
     expect(fetch).not.toHaveBeenCalled();
-    expect(res).toEqual({ products: [] });
+    expect(res).toEqual({ products: [], unanswered: [] });
   });
 
   it("warns instead of failing when KicksDB is not configured", async () => {
@@ -77,7 +77,26 @@ describe("fetchSecondarySource", () => {
       },
     });
     expect(res.products).toEqual([]);
+    expect(res.unanswered).toEqual(["CZ0790"]); // unanswered, not missing
     expect(res.warning).toMatch(/503 Service Unavailable/);
+  });
+
+  it("a slice with no feed product is not a store without a feed (soleSource)", async () => {
+    const res = await fetchSecondarySource(["CZ0790"], {
+      ownedCount: 0, // this slice: all KicksDB products
+      soleSource: false, // the store: the feed is in use
+      configured: true,
+      fetch: async () => {
+        throw new Error("fetch failed");
+      },
+    });
+    expect(res.unanswered).toEqual(["CZ0790"]);
+    expect(res.warning).toMatch(/fetch failed/);
+  });
+
+  it("an unconfigured KicksDB leaves nothing unanswered — there was nothing to ask", async () => {
+    const res = await fetchSecondarySource(["A", "B"], { ownedCount: 0, configured: false, fetch: vi.fn() });
+    expect(res.unanswered).toEqual([]);
   });
 
   it("still fails loudly when KicksDB was the only source in play", async () => {

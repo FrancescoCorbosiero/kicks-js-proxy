@@ -268,6 +268,8 @@ export const storeSyncRuns = pgTable("store_sync_runs", {
   notFound: jsonb("not_found").$type<string[]>().notNull().default([]),
   notFoundTotal: integer("not_found_total").notNull().default(0),
   delisted: integer("delisted").notNull().default(0),
+  // SKUs KicksDB could not answer for — "could not ask", never "not found".
+  unanswered: integer("unanswered").notNull().default(0),
   warning: text("warning"),
   catalog: jsonb("catalog").$type<{ total: number; added: number; rejected: number }>(),
   error: text("error"),

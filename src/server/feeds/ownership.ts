@@ -150,6 +150,11 @@ export interface SecondaryFetch {
   products: SourceProduct[];
   /** Set when the source was skipped or failed but the run still stands. */
   warning?: string;
+  /**
+   * SKUs the source failed to answer for — a retry may succeed.
+   * "I could not ask" — never to be counted as "it does not exist".
+   */
+  unanswered: string[];
 }
 
 /**
@@ -164,31 +169,40 @@ export interface SecondaryFetch {
  *    play. Otherwise the feed-owned products are still fully plannable, and
  *    burying them under another provider's outage is what made the sync look
  *    dead on a store the feed covers entirely.
+ *
+ * "Sole source" defaults to "the feed owns none of THESE skus". A caller that
+ * walks the store in slices must say it for the whole store (`soleSource`): a
+ * slice that happens to hold no feed product is not a store without a feed.
  */
 export async function fetchSecondarySource(
   skus: string[],
   opts: {
     ownedCount: number;
+    soleSource?: boolean;
     configured: boolean;
     fetch: (skus: string[]) => Promise<SourceProduct[]>;
     describeError?: (e: unknown) => string;
   },
 ): Promise<SecondaryFetch> {
-  if (skus.length === 0) return { products: [] };
+  if (skus.length === 0) return { products: [], unanswered: [] };
   if (!opts.configured) {
+    // Not "could not ask": there is nothing to ask. No configured source
+    // covers these SKUs — a fact about the install, which a retry won't change.
     return {
       products: [],
-      warning: `KicksDB is not configured — ${skus.length} store product(s) it would price were left untouched.`,
+      unanswered: [],
+      warning: "KicksDB is not configured — the store products it would price were left untouched.",
     };
   }
   try {
-    return { products: await opts.fetch(skus) };
+    return { products: await opts.fetch(skus), unanswered: [] };
   } catch (e) {
-    if (opts.ownedCount === 0) throw e;
+    if (opts.soleSource ?? opts.ownedCount === 0) throw e;
     const describe = opts.describeError ?? ((x: unknown) => (x instanceof Error ? x.message : String(x)));
     return {
       products: [],
-      warning: `KicksDB unreachable (${describe(e)}) — only feed-owned products were planned.`,
+      unanswered: skus,
+      warning: `KicksDB unreachable (${describe(e)}) — the products it prices were left untouched; run the sync again.`,
     };
   }
 }
