@@ -29,6 +29,7 @@ import {
 import { buildIdentityResolver } from "./identity";
 import { toStoreProduct } from "./store-product";
 import { getWooClient, type WooClient } from "./client";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
  * The Publisher — the app's first WRITE path that creates store data instead
@@ -226,6 +227,7 @@ export async function publishProducts(
   options: PublishOptions,
 ): Promise<PublishOutcome> {
   const { dryRun } = options;
+  await assertSnapshotIsThisStore();
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();

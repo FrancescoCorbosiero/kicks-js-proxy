@@ -14,6 +14,7 @@ import { chunk } from "@/server/adapters/http";
 import { skuKey } from "@/lib/skus";
 import { normalizeGtin } from "@/lib/gtin";
 import { getWooClient } from "./client";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
  * The REST sync apply — "patch prices AND sizes":
@@ -278,6 +279,7 @@ function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
 }
 
 export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
+  await assertSnapshotIsThisStore();
   // Read regardless of `sanitize`: the cleanup needs it, and so does the GTIN
   // back-fill (which must know what the store already holds).
   const snapshot = await getActiveSnapshot().catch(() => null);

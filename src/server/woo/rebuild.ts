@@ -20,6 +20,7 @@ import { sourceEuSize } from "@/server/store-json/match";
 import type { StoreProductModel, StoreVariation } from "@/server/store-json/model";
 import { skuKey } from "@/lib/skus";
 import { getWooClient, type WooClient } from "./client";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
  * The Rebuild executor — the sledgehammer for products too inconsistent to
@@ -99,6 +100,7 @@ export async function rebuildProducts(
   dryRun: boolean,
   auditId?: string,
 ): Promise<RebuildOutcome> {
+  await assertSnapshotIsThisStore();
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();

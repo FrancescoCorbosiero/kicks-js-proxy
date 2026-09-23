@@ -26,6 +26,7 @@ import {
   mergeGsOwned,
 } from "@/server/feeds/ownership";
 import { getOverrides } from "@/server/overrides/repo";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 import { activeFeedSkus, GS_FEED } from "@/server/feeds/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
@@ -254,6 +255,11 @@ export async function fetchAndPreview(input: PreviewInput): Promise<PreviewResul
     return { ok: false, error: parsed.error.issues.map((i) => i.message).join("; "), plans: [] };
   }
 
+  try {
+    await assertSnapshotIsThisStore();
+  } catch (e) {
+    return { ok: false, error: errMessage(e), plans: [] };
+  }
   const config = await getActiveConfig();
   const market = parsed.data.market ?? config.source.market;
   const source = getSource(config);
@@ -554,6 +560,13 @@ export async function previewFromStore(
   const config = await getActiveConfig();
   const skus = await storePreviewSkus(skusOverride);
   if (!Array.isArray(skus)) return skus;
+  // Planning one shop against another shop's snapshot yields plans aimed at
+  // the wrong variation ids — refuse before anything is planned.
+  try {
+    await assertSnapshotIsThisStore();
+  } catch (e) {
+    return { ok: false, error: errMessage(e), plans: [] };
+  }
 
   const market = marketOverride ?? config.source.market;
   const source = getSource(config);
@@ -705,6 +718,7 @@ export async function startStoreSync(
     const config = await getActiveConfig();
     const skus = await storePreviewSkus(skusOverride);
     if (!Array.isArray(skus)) return { ok: false, error: skus.error };
+    await assertSnapshotIsThisStore();
     await prunePlans(); // best-effort retention: plans are per-run scratch data
     const run = await createSyncRun(marketOverride ?? config.source.market, skus);
     return { ok: true, progress: syncProgress(run) };

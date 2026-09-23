@@ -147,3 +147,26 @@ describe.skipIf(!enabled)("stepped store sync, solo-GS (no KicksDB), real SQL", 
     expect(res.ok).toBe(false);
   });
 });
+
+describe.skipIf(!enabled)("another shop's database (real SQL)", () => {
+  it("refuses to sync, apply or publish; lets the matching shop through", async () => {
+    const { saveSnapshot, startStoreSync, applySyncPrices } = await load();
+    const { publishProducts } = await import("@/server/woo/publish");
+    const products = [{ id: 1, sku: "A-1", name: "A", variations: [] }];
+
+    // WOO_BASE_URL is https://example.com in this suite.
+    await saveSnapshot({ site_url: "https://othershop.it", products } as never, "rest");
+    const sync = await startStoreSync("IT");
+    expect(sync.ok).toBe(false);
+    expect(sync.error).toMatch(/othershop\.it.*example\.com/);
+    const apply = await applySyncPrices({ runId: "00000000-0000-4000-8000-000000000000", priceScope: "all", selections: [], excluded: [], dryRun: true, sanitize: false, backfillGtins: false });
+    expect(apply.ok).toBe(false);
+    expect(apply.error).toMatch(/sharing one database/);
+    await expect(publishProducts(["A-1"], { dryRun: true })).rejects.toThrow(/sharing one database/);
+
+    // Same shop, spelled differently: allowed.
+    await saveSnapshot({ site_url: "https://www.example.com/", products } as never, "rest");
+    expect((await startStoreSync("IT")).ok).toBe(true);
+  });
+});
+

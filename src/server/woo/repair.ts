@@ -11,6 +11,7 @@ import { buildIdentityResolver } from "./identity";
 import { planRepair, type RepairField, type LiveProduct } from "./repair-plan";
 import { getWooClient, type WooClient } from "./client";
 import type { SourceProduct } from "@core/core-spine";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
  * Self-repair: put back what a product on the store is missing, from the
@@ -116,6 +117,7 @@ export async function repairProducts(
   skus: string[],
   options: { dryRun: boolean; includeGallery?: boolean },
 ): Promise<RepairOutcome> {
+  await assertSnapshotIsThisStore();
   const config = await getActiveConfig();
   const market = config.source.market;
   const client = getWooClient();
