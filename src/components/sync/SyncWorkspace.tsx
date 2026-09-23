@@ -4,7 +4,14 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PlanItem } from "@core/core-spine";
-import { previewFromStore, type PreviewResult, type FetchStats } from "@/server/actions/preview";
+import {
+  advanceStoreSync,
+  cancelStoreSync,
+  startStoreSync,
+  type FetchStats,
+  type PreviewResult,
+  type StoreSyncProgress,
+} from "@/server/actions/preview";
 import {
   advanceStorePull,
   applySyncPrices,
@@ -20,6 +27,7 @@ import type { SnapshotInfo } from "@/server/store-json/repo";
 import type { PricingSummary } from "@/server/config/summary";
 import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, type PlanSummary } from "@/lib/plan";
+import { PREVIEW_PAGE_LIMIT, PreviewPage } from "@/lib/preview-page";
 import { useI18n } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +54,12 @@ function selectionSignature(selections: { planId: string; variantIds: string[] }
  * on the row), so reaching this is "press it again", not "it broke".
  */
 const MAX_PULL_STEPS = 5000;
+
+/**
+ * Sync steps one click will walk — 250 SKUs a step, so 1 250 000 SKUs. A
+ * runaway backstop, like the pull's: a store never gets near it.
+ */
+const MAX_SYNC_STEPS = 5000;
 
 export function SyncWorkspace({
   defaultMarket,
@@ -74,7 +88,12 @@ export function SyncWorkspace({
   const cancelRef = React.useRef(false);
 
   // ----- preview -----
-  const [pending, startTransition] = React.useTransition();
+  const [transitionPending, startTransition] = React.useTransition();
+  // The store sync is walked in steps (one server action each) — see runSync.
+  const [syncing, setSyncing] = React.useState(false);
+  const [syncProgress, setSyncProgress] = React.useState<StoreSyncProgress | null>(null);
+  const syncCancelRef = React.useRef(false);
+  const pending = transitionPending || syncing;
   const [error, setError] = React.useState<string | null>(null);
   // A source was degraded but the run still produced real plans (e.g. KicksDB
   // down or absent while the feed-owned products came through).
@@ -211,9 +230,57 @@ export function SyncWorkspace({
     setApplied(null);
   }
 
-  function loadPreview(skus?: string[]) {
+  /**
+   * Walk the store one step at a time: start a sync run, advance it until the
+   * server says done, keeping the run's best page here as the steps come in.
+   * The report — and the run id the apply needs — arrive only with the LAST
+   * step, so a sync that stops half-way can never be applied as if it were a
+   * reading of the whole store.
+   */
+  async function runSync(skus?: string[]) {
     setError(null);
-    startTransition(async () => applyResult(await previewFromStore(defaultMarket, skus)));
+    setSyncing(true);
+    syncCancelRef.current = false;
+    // The previous run is superseded the moment a new one starts.
+    setRunId(null);
+    setDry(null);
+    setApplied(null);
+    const fail = (message: string) => applyResult({ ok: false, error: message, plans: [] });
+    try {
+      const started = await startStoreSync(defaultMarket, skus);
+      if (!started.ok || !started.progress) return fail(started.error ?? t.sync.preview.failed);
+      const runId = started.progress.runId;
+      setSyncProgress(started.progress);
+      const page = new PreviewPage<PreviewPlan>(PREVIEW_PAGE_LIMIT);
+      for (let step = 0; step < MAX_SYNC_STEPS; step++) {
+        if (syncCancelRef.current) {
+          await cancelStoreSync(runId);
+          fail(""); // clear the half-walked run…
+          setError(null); // …without calling a deliberate stop an error
+          return;
+        }
+        const res = await advanceStoreSync(runId);
+        if (!res.ok || !res.progress) return fail(res.error ?? t.sync.preview.failed);
+        page.add(res.progress.plans);
+        setSyncProgress(res.progress);
+        if (res.progress.status === "failed" || res.progress.status === "cancelled") {
+          return fail(res.progress.error ?? t.sync.preview.failed);
+        }
+        if (res.progress.done && res.progress.result) {
+          return applyResult({ ...res.progress.result, plans: page.take() });
+        }
+      }
+      fail(t.sync.preview.ceiling);
+    } catch (e) {
+      fail(e instanceof Error ? e.message : t.sync.preview.failed);
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  }
+
+  function loadPreview(skus?: string[]) {
+    void runSync(skus);
   }
 
   /**
@@ -495,7 +562,9 @@ export function SyncWorkspace({
               {pulling
                 ? t.sync.pull.pulling
                 : pending
-                  ? t.sync.preview.loading
+                  ? syncProgress
+                    ? t.sync.preview.progress(syncProgress.cursor, syncProgress.total)
+                    : t.sync.preview.loading
                   : t.sync.apply.dryRunning}
             </>
           ) : (
@@ -573,7 +642,18 @@ export function SyncWorkspace({
           )}
           {hasSnapshot && (
             <Button type="button" variant="outline" onClick={() => { setScope(undefined); loadPreview(); }} disabled={pending || pulling}>
-              {pending ? t.sync.preview.loading : plans.length > 0 ? t.sync.preview.refresh : t.sync.preview.button}
+              {pending
+                ? syncProgress
+                  ? t.sync.preview.progress(syncProgress.cursor, syncProgress.total)
+                  : t.sync.preview.loading
+                : plans.length > 0
+                  ? t.sync.preview.refresh
+                  : t.sync.preview.button}
+            </Button>
+          )}
+          {syncing && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => { syncCancelRef.current = true; }}>
+              {t.sync.preview.cancel}
             </Button>
           )}
         </div>
@@ -650,6 +730,12 @@ export function SyncWorkspace({
           >
             {t.sync.scope.publishLink} →
           </Link>
+        </p>
+      )}
+
+      {(stats?.delisted ?? 0) > 0 && (
+        <p className="rounded-lg border border-line bg-surface-2 px-4 py-3 text-xs text-muted">
+          {t.sync.scope.delisted(stats!.delisted!)}
         </p>
       )}
 

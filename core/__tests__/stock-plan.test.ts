@@ -143,3 +143,50 @@ describe("buildPlan with manageStockFromSource", () => {
     expect(plan.items[0].stockQuantity).toBeUndefined();
   });
 });
+
+describe("buildPlan with stockOverride (delisting)", () => {
+  // A KicksDB product: its offer depth is market liquidity, never our stock.
+  const kicks = (variants: SourceVariant[]): SourceProduct => ({ ...product(variants), source: undefined });
+
+  it("zeroes the stock of a priced row while keeping its new price", () => {
+    const plan = buildPlan(
+      kicks([variant("v1", 90, 40)]),
+      config(),
+      new Map([mapping("v1", { currentStock: 3 })]),
+      { stockOverride: 0 },
+    );
+    expect(plan.items[0].action).toBe("update");
+    expect(plan.items[0].proposedPrice).toBe(90);
+    expect(plan.items[0].stockQuantity).toBe(0); // not 40: asks are not stock
+  });
+
+  it("a size nobody prices becomes a stock-only update to 0", () => {
+    const bare: SourceVariant = { stockxVariantId: "b1", sizeLabel: "42", sizeType: "eu", offers: [] };
+    const plan = buildPlan(product([bare]), config(), new Map([mapping("b1", { currentStock: 2 })]), {
+      stockOverride: 0,
+    });
+    expect(plan.items[0].action).toBe("update");
+    expect(plan.items[0].proposedPrice).toBeNull();
+    expect(plan.items[0].stockQuantity).toBe(0);
+  });
+
+  it("already at 0 → nothing to write", () => {
+    const bare: SourceVariant = { stockxVariantId: "b1", sizeLabel: "42", sizeType: "eu", offers: [] };
+    const plan = buildPlan(product([bare]), config(), new Map([mapping("b1", { currentStock: 0 })]), {
+      stockOverride: 0,
+    });
+    expect(plan.items[0].action).toBe("skip");
+  });
+
+  it("a discounted variation still gets its stock zeroed", () => {
+    const plan = buildPlan(
+      kicks([variant("v1", 90, 40)]),
+      config(),
+      new Map([mapping("v1", { currentStock: 3, saleActive: true })]),
+      { stockOverride: 0 },
+    );
+    expect(plan.items[0].action).toBe("update");
+    expect(plan.items[0].proposedPrice).toBeNull();
+    expect(plan.items[0].stockQuantity).toBe(0);
+  });
+});

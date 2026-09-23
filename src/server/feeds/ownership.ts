@@ -1,5 +1,11 @@
-import type { SourceProduct } from "@core/core-spine";
+import type { SourceProduct, SourceVariant } from "@core/core-spine";
 import { skuKey } from "@/lib/skus";
+import {
+  resolveFromModel,
+  variationEuSize,
+  variationSizeLabel,
+} from "@/server/store-json/match";
+import type { StoreProductModel } from "@/server/store-json/model";
 
 /**
  * How the sources are mixed once ownership is known. Pure module — no DB, no
@@ -47,6 +53,97 @@ export function mergeGsOwned(
     if (!replaced.has(sku)) out.push(gs.product); // feed-only: KicksDB had nothing
   }
   return { products: out, gsSkus: new Set(owned.keys()) };
+}
+
+/**
+ * What the feed says about the SKUs asked for. Three answers, kept apart:
+ *
+ *  - `owned`: at least one ACTIVE row — the feed is the product's truth;
+ *  - `delisted`: the feed HAS carried it, and every row is now inactive. The
+ *    supplier said "no", which is not "I don't know": the store must stop
+ *    selling it (stock 0), whoever still prices it;
+ *  - absent from both: the feed has never carried it (or a pin hands it to
+ *    KicksDB) — not the feed's business.
+ */
+export interface GsFeedStatus {
+  owned: Map<string, GsOwnedProduct>;
+  /** Canonical keys (skuKey) of the delisted SKUs. */
+  delisted: Set<string>;
+}
+
+/** Prefix of the variant ids synthesized for a delisted product's store sizes. */
+export const DELISTED_VARIANT_PREFIX = "delisted:";
+
+/**
+ * The source product a DELISTED SKU is planned from, so the ordinary pipeline
+ * (buildPlan with `stockOverride: 0`) writes stock 0 to every store variation.
+ *
+ * Stock only ever enters a plan through a SourceProduct's variants, and a
+ * delisted product nobody else covers has none — so its sizes come from the one
+ * place that still knows them: the store's own variations. With `priced` (the
+ * KicksDB product, when KicksDB covers the SKU) its variants that land on a
+ * store variation are kept, so they are repriced; every store size they do not
+ * reach is added bare (no offers → no price, stock only). KicksDB sizes the
+ * store does not have are dropped: nothing is created for a product the
+ * supplier stopped selling.
+ *
+ * Null when the store has nothing to zero.
+ */
+export function delistedSource(
+  sku: string,
+  store: StoreProductModel,
+  priced: SourceProduct | undefined,
+  market: string,
+): SourceProduct | null {
+  const index = new Map([[skuKey(store.sku), store]]);
+  const variationEu = new Map<number, string>();
+  for (const vrt of store.variations) {
+    if (!(vrt.id > 0)) continue; // not a write target (see resolveFromModel)
+    const eu = variationEuSize(store.sku, vrt);
+    if (eu) variationEu.set(vrt.id, eu);
+  }
+
+  const kept: SourceVariant[] = [];
+  const coveredEu = new Set<string>();
+  if (priced) {
+    const mappings = resolveFromModel(index, priced);
+    for (const v of priced.variants) {
+      const m = mappings.get(v.stockxVariantId);
+      if (!m) continue;
+      kept.push(v);
+      const eu = variationEu.get(m.storeVariationId);
+      if (eu) coveredEu.add(eu);
+    }
+  }
+
+  const bare: SourceVariant[] = [];
+  const seenEu = new Set<string>();
+  for (const vrt of store.variations) {
+    const eu = variationEu.get(vrt.id);
+    if (!eu || coveredEu.has(eu) || seenEu.has(eu)) continue;
+    seenEu.add(eu);
+    bare.push({
+      stockxVariantId: `${DELISTED_VARIANT_PREFIX}${skuKey(sku)}:${eu}`,
+      sizeLabel: variationSizeLabel(store.sku, vrt) ?? eu,
+      sizeType: "eu",
+      sizes: [{ system: "eu", size: eu }],
+      offers: [],
+    });
+  }
+
+  if (kept.length === 0 && bare.length === 0) return null;
+  if (priced) return { ...priced, variants: [...kept, ...bare] };
+  return {
+    stockxId: sku,
+    sku,
+    title: store.name ?? sku,
+    brand: "",
+    image: "",
+    market,
+    currency: "EUR", // the feed's currency (gsOffersToSource); nothing is priced anyway
+    source: "goldensneakers",
+    variants: bare,
+  };
 }
 
 export interface SecondaryFetch {

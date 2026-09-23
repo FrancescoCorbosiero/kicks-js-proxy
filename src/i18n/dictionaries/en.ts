@@ -457,6 +457,8 @@ export const en: Dictionary = {
     scope: {
       unpublished: (n: number) =>
         `The sync only reprices what the store already carries. ${n} catalog product${n === 1 ? " is" : "s are"} not on the store yet — create them from the Publish tab.`,
+      delisted: (n: number) =>
+        `${n} product${n === 1 ? "" : "s"} delisted by the supplier — planned at stock 0 so ${n === 1 ? "it stops" : "they stop"} selling. The stock comes back on its own when the feed lists ${n === 1 ? "it" : "them"} again.`,
       publishLink: "Go to Publish",
     },
     pull: {
@@ -480,6 +482,10 @@ export const en: Dictionary = {
       loading: "Computing…",
       seeded: (n) => `Preview limited to ${n} SKUs`,
       clearSeed: "Whole store",
+      progress: (done: number, total: number) => `Computing… ${done} / ${total} SKUs`,
+      cancel: "Stop",
+      failed: "The preview stopped before the end of the store. Nothing was written; compute it again.",
+      ceiling: "The preview reached the step limit before the end of the store. Nothing was written; compute it again.",
       needSnapshot: "Store state required: run a pull first (or upload a file at /preview).",
     },
     apply: {

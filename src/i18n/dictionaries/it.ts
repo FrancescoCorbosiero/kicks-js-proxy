@@ -470,6 +470,8 @@ export const it = {
     scope: {
       unpublished: (n: number) =>
         `Il sync riprezza solo ciò che è già sul negozio. ${n} ${n === 1 ? "prodotto è" : "prodotti sono"} a catalogo ma non ancora pubblicati: creali dalla scheda Pubblica.`,
+      delisted: (n: number) =>
+        `${n} ${n === 1 ? "prodotto delistato" : "prodotti delistati"} dal fornitore: stock a 0 nel piano, così ${n === 1 ? "smette" : "smettono"} di essere acquistabil${n === 1 ? "e" : "i"}. Lo stock torna da solo quando il feed ${n === 1 ? "lo" : "li"} rimette.`,
       publishLink: "Vai a Pubblica",
     },
     pull: {
@@ -494,6 +496,10 @@ export const it = {
       loading: "Calcolo…",
       seeded: (n: number) => `Anteprima limitata a ${n} SKU`,
       clearSeed: "Tutto lo store",
+      progress: (done: number, total: number) => `Calcolo… ${done} / ${total} SKU`,
+      cancel: "Ferma",
+      failed: "L'anteprima si è fermata prima della fine dello store. Non è stato scritto nulla: ricalcolala.",
+      ceiling: "L'anteprima ha raggiunto il limite di passi prima della fine dello store. Non è stato scritto nulla: ricalcolala.",
       needSnapshot: "Serve lo stato dello store: esegui prima un pull (o carica un file da /preview).",
     },
     apply: {

@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SourceProduct } from "@core/core-spine";
-import { carryIdentifiers, fetchSecondarySource, mergeGsOwned, type GsOwnedProduct } from "./ownership";
+import {
+  carryIdentifiers,
+  DELISTED_VARIANT_PREFIX,
+  delistedSource,
+  fetchSecondarySource,
+  mergeGsOwned,
+  type GsOwnedProduct,
+} from "./ownership";
 
 function product(sku: string, over: Partial<SourceProduct> = {}): SourceProduct {
   return {
@@ -142,5 +149,47 @@ describe("carryIdentifiers", () => {
     expect(carryIdentifiers(fetched, new Map())).toBe(fetched);
     expect(carryIdentifiers(fetched, new Map([["ZZ0000", product("ZZ0000")]]))[0].variants[0].upc)
       .toBeUndefined();
+  });
+});
+
+describe("delistedSource", () => {
+  const store = {
+    id: 7,
+    sku: "M990JJ3",
+    name: "New Balance 990v3",
+    variations: [
+      { id: 71, sku: "M990JJ3-42", regular_price: "200", attributes: { attribute_pa_taglia: "42" } },
+      { id: 72, sku: "M990JJ3-43", regular_price: "200", attributes: { attribute_pa_taglia: "43" } },
+      { id: 0, sku: "M990JJ3-44", attributes: { attribute_pa_taglia: "44" } }, // no real id
+    ],
+  };
+  const kicksVariant = (id: string, eu: string) => ({
+    stockxVariantId: id,
+    sizeLabel: eu,
+    sizeType: "eu",
+    sizes: [{ system: "eu", size: eu }],
+    offers: [{ deliveryType: "standard" as const, lowestAsk: 150, asks: 9 }],
+  });
+
+  it("uncovered: one bare variant per store size, nothing priced", () => {
+    const p = delistedSource("M990JJ3", store, undefined, "IT")!;
+    expect(p.source).toBe("goldensneakers");
+    expect(p.title).toBe("New Balance 990v3");
+    expect(p.variants.map((v) => v.sizeLabel)).toEqual(["42", "43"]);
+    expect(p.variants.every((v) => v.offers.length === 0)).toBe(true);
+    expect(p.variants.every((v) => v.stockxVariantId.startsWith(DELISTED_VARIANT_PREFIX))).toBe(true);
+  });
+
+  it("covered: keeps the KicksDB variants that land on the store, adds the rest bare", () => {
+    const priced = product("M990JJ3", {
+      variants: [kicksVariant("k42", "42"), kicksVariant("k47", "47")], // 47 not on the store
+    });
+    const p = delistedSource("M990JJ3", store, priced, "IT")!;
+    expect(p.source).toBeUndefined(); // KicksDB pricing rules still apply
+    expect(p.variants.map((v) => v.stockxVariantId)).toEqual(["k42", `${DELISTED_VARIANT_PREFIX}M990JJ3:43`]);
+  });
+
+  it("null when the store has no writable variation", () => {
+    expect(delistedSource("X", { id: 1, sku: "X", variations: [] }, undefined, "IT")).toBeNull();
   });
 });

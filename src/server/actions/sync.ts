@@ -18,6 +18,7 @@ import { wooConfigured } from "@/server/woo/client";
 import { getActiveConfig } from "@/server/config/repo";
 import { countUnpublishedCandidates } from "@/server/catalog/repo";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
+import { syncRunApplicable } from "@/server/sync/runs";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -239,6 +240,9 @@ export async function applySyncPrices(
   const parsed = ApplySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid input" };
   try {
+    if (!(await syncRunApplicable(parsed.data.runId))) {
+      return { ok: false, error: "This sync did not finish walking the store — run it again before applying." };
+    }
     const outcome = await applySync({
       runId: parsed.data.runId,
       priceScope: parsed.data.priceScope,

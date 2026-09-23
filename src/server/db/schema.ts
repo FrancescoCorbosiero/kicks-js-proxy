@@ -247,6 +247,38 @@ export const storePullRuns = pgTable("store_pull_runs", {
 export type StorePullRunRow = typeof storePullRuns.$inferSelect;
 
 /**
+ * A whole-store sync preview, walked in steps like the pull: the SKU list is
+ * frozen at start, `cursor` is how many of them are planned, and the counts
+ * the final report needs accumulate here — so no single server action has to
+ * chew through the whole store. The row id IS the plans' run id.
+ */
+export const storeSyncRuns = pgTable("store_sync_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status", { enum: ["running", "done", "failed", "cancelled"] })
+    .notNull()
+    .default("running"),
+  market: text("market").notNull(),
+  skus: jsonb("skus").$type<string[]>().notNull(),
+  // SKUs of `skus` already planned (0-based offset of the next step).
+  cursor: integer("cursor").notNull().default(0),
+  planned: integer("planned").notNull().default(0),
+  totals: jsonb("totals")
+    .$type<{ update: number; create: number; noop: number; skip: number }>()
+    .notNull(),
+  notFound: jsonb("not_found").$type<string[]>().notNull().default([]),
+  notFoundTotal: integer("not_found_total").notNull().default(0),
+  delisted: integer("delisted").notNull().default(0),
+  warning: text("warning"),
+  catalog: jsonb("catalog").$type<{ total: number; added: number; rejected: number }>(),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+export type StoreSyncRunRow = typeof storeSyncRuns.$inferSelect;
+
+/**
  * External-feed offers: one row per (feed, sku, size). The KicksDB catalog
  * stays pure — feed data lives here and a product-level ownership switch
  * decides which source drives a product. Rows are deactivated (never deleted)
