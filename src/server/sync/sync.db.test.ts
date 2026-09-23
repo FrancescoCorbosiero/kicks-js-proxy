@@ -67,6 +67,20 @@ describe.skipIf(!enabled)("sync runs (real SQL)", () => {
     expect((await getSyncRun(run.id))!.status).toBe("done");
   });
 
+  it("never drops the plans of a step that DID commit (sub-millisecond commits)", async () => {
+    const { eq, db, plans, savePlans, commitSyncStep, createSyncRun, dropUncommittedPlans } = await load();
+    let run = await createSyncRun("IT", Array.from({ length: 200 }, (_, i) => `S${i}`));
+    const counts = (r: typeof run) => ({ planned: r.planned + 1, totals: r.totals, notFound: [], notFoundTotal: 0, delisted: 0, unanswered: 0, warning: null, catalog: null });
+    for (let i = 0; i < 200; i++) {
+      await dropUncommittedPlans(run); // start of a step
+      await savePlans([plan(`S${i}`)], "IT", run.id); // the step's plans…
+      run = await commitSyncStep(run, { cursor: i + 1, ...counts(run) }); // …committed at once
+    }
+    const rows = await db.select().from(plans).where(eq(plans.runId, run.id));
+    expect(run.status).toBe("done");
+    expect(rows.length).toBe(200); // every committed step's plans survive
+  });
+
   it("a failed run is never applicable; a manual preview run always is", async () => {
     const { eq, db, plans, savePlans, cancelSyncRun, commitSyncStep, createSyncRun, dropUncommittedPlans, failSyncRun, getSyncRun, syncRunApplicable } = await load();
     const run = await createSyncRun("IT", ["A"]);
