@@ -475,6 +475,13 @@ export interface BuildPlanOptions {
      * store. Default false — KicksDB behaviour, stock never touched.
      */
     manageStockFromSource?: boolean;
+    /**
+     * Every item's stock is THIS quantity, whatever the variants' offer depth
+     * says. Implies manageStockFromSource. The delisting rule: a product the
+     * supplier no longer carries is written at 0 even when another source
+     * (KicksDB) still prices it — a price is not stock.
+     */
+    stockOverride?: number;
 }
 
 export function buildPlan(
@@ -484,7 +491,7 @@ export function buildPlan(
     options: BuildPlanOptions = {},
 ): Plan {
     const followSaleRule = options.followSaleRule ?? true;
-    const manageStock = options.manageStockFromSource ?? false;
+    const manageStock = (options.manageStockFromSource ?? false) || options.stockOverride != null;
 
     /** Real quantity at the source (offer depth of the primary offer). */
     const qtyOf = (v: SourceVariant): number => {
@@ -495,7 +502,7 @@ export function buildPlan(
 
     const items = product.variants.map<PlanItem>((v) => {
         const m = mappings.get(v.stockxVariantId);
-        const qty = manageStock ? qtyOf(v) : undefined;
+        const qty = manageStock ? (options.stockOverride ?? qtyOf(v)) : undefined;
         // Unmanaged store stock counts as drift: finite supply must be managed.
         const stockChanged =
             manageStock && m != null && (m.currentStock == null || m.currentStock !== qty);

@@ -653,6 +653,12 @@ export function SyncWorkspace({
         </p>
       )}
 
+      {(stats?.delisted ?? 0) > 0 && (
+        <p className="rounded-lg border border-line bg-surface-2 px-4 py-3 text-xs text-muted">
+          {t.sync.scope.delisted(stats!.delisted!)}
+        </p>
+      )}
+
       {stats?.notFound && stats.notFound.length > 0 && (
         <NotFoundCard
           foundSkus={plans.map((p) => p.sku)}

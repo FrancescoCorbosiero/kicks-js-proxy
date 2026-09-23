@@ -3,7 +3,7 @@ import type { SourceProduct } from "@core/core-spine";
 import { ownerPinFor, type StoreOverrides } from "@/server/overrides/model";
 import { skuKey } from "@/lib/skus";
 import { gsOffersToSource, resolveGsGallery, type GsOffer } from "./goldensneakers-model";
-import { mergeGsOwned, type GsOwnedProduct } from "./ownership";
+import { mergeGsOwned, type GsFeedStatus, type GsOwnedProduct } from "./ownership";
 import { GS_FEED, knownOffersBySku } from "./repo";
 import type { FeedItemRow } from "@/server/db/schema";
 
@@ -43,32 +43,47 @@ function rowToOffer(r: FeedItemRow): GsOffer {
 }
 
 /**
- * The GS-owned products among `skus`, honoring manual pins. Ownership requires
- * at least one ACTIVE row; the variant set then includes deactivated sizes at
- * qty 0. Best-effort: with no feed data everything stays kicksdb-owned.
+ * What the feed says about `skus`, honoring manual pins: owned (at least one
+ * ACTIVE row; the variant set then includes deactivated sizes at qty 0),
+ * delisted (rows exist, none active — the product-level form of the rule
+ * above: zeroed, never forgotten), or neither. Best-effort: with no feed data
+ * everything stays kicksdb-owned.
  */
-export async function gsOwnedProducts(
+export async function gsFeedStatus(
   skus: string[],
   market: string,
   overrides: StoreOverrides | null,
-): Promise<Map<string, GsOwnedProduct>> {
-  const out = new Map<string, GsOwnedProduct>();
+): Promise<GsFeedStatus> {
+  const owned = new Map<string, GsOwnedProduct>();
+  const delisted = new Set<string>();
   const bySku = await knownOffersBySku(GS_FEED, skus);
   for (const [sku, rows] of bySku) {
-    if (!rows.some((r) => r.active)) continue; // fully delisted → back to kicksdb
     if (overrides && ownerPinFor(overrides, sku) === "kicksdb") continue; // pinned back
+    if (!rows.some((r) => r.active)) {
+      delisted.add(skuKey(sku)); // the supplier stopped selling it → stock 0
+      continue;
+    }
     const offers = rows.map(rowToOffer);
     const product = gsOffersToSource(sku, offers, market);
     if (product.variants.length === 0) continue; // nothing sellable
     const stockBySize: Record<string, number> = {};
     for (const o of offers) stockBySize[o.euNorm] = o.quantity;
-    out.set(skuKey(sku), {
+    owned.set(skuKey(sku), {
       product,
       stockBySize,
       knownSizes: new Set(offers.map((o) => o.euNorm)),
     });
   }
-  return out;
+  return { owned, delisted };
+}
+
+/** The GS-owned products among `skus` — see gsFeedStatus. */
+export async function gsOwnedProducts(
+  skus: string[],
+  market: string,
+  overrides: StoreOverrides | null,
+): Promise<Map<string, GsOwnedProduct>> {
+  return (await gsFeedStatus(skus, market, overrides)).owned;
 }
 
 /**
@@ -85,4 +100,4 @@ export async function overlayGsOwnership(
 }
 
 export { mergeGsOwned, fetchSecondarySource } from "./ownership";
-export type { GsOwnedProduct } from "./ownership";
+export type { GsFeedStatus, GsOwnedProduct } from "./ownership";

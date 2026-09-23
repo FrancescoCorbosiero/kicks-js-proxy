@@ -17,8 +17,14 @@ import { fetchProductsCached } from "@/server/kicks/service";
 import { resolveSkusViaCatalog, growCatalogFromSkus } from "@/server/catalog/service";
 import { dbCatalogStore } from "@/server/catalog/store";
 import { getAnyBySkus } from "@/server/catalog/repo";
-import { gsOwnedProducts, overlayGsOwnership } from "@/server/feeds/owner";
-import { carryIdentifiers, fetchSecondarySource, mergeGsOwned } from "@/server/feeds/ownership";
+import { gsFeedStatus, overlayGsOwnership } from "@/server/feeds/owner";
+import {
+  carryIdentifiers,
+  DELISTED_VARIANT_PREFIX,
+  delistedSource,
+  fetchSecondarySource,
+  mergeGsOwned,
+} from "@/server/feeds/ownership";
 import { getOverrides } from "@/server/overrides/repo";
 import { followSaleRuleFor, manualPriceFor, type StoreOverrides } from "@/server/overrides/model";
 import { isExactMatch } from "@/lib/match";
@@ -74,6 +80,11 @@ export interface FetchStats {
   notFound: string[];
   /** Misses in total — `notFound` is capped for the wire. */
   notFoundTotal?: number;
+  /**
+   * Store products the supplier feed has delisted (every row inactive): planned
+   * at stock 0. An answer, not an absence — they never join `notFound`.
+   */
+  delisted?: number;
   catalog?: CatalogStats;
 }
 
@@ -127,6 +138,7 @@ async function planChunk(
   overrides: StoreOverrides,
   runId: string,
   seen: Set<string>,
+  delisted: ReadonlySet<string> = new Set(),
 ): Promise<PreviewPlan[]> {
   // One plan per SKU. Two products for the same SKU (a source returning the
   // style code twice, a feed row overlaid onto its own catalog entry) would
@@ -167,13 +179,26 @@ async function planChunk(
     }
 
     const followSaleRule = followSaleRuleFor(overrides, product.sku);
-    const source = product.source ?? "kicksdb";
+    const isDelisted = delisted.has(skuKey(product.sku));
+    // A delisted product's stock is the feed's (0), even when KicksDB prices it:
+    // saved as feed-owned so the apply's KicksDB cleanup, which makes priced
+    // zero-stock variations available again, never undoes the zeroing.
+    const source = isDelisted ? "goldensneakers" : (product.source ?? "kicksdb");
     const plan = buildPlan(product, config, mappings, {
       followSaleRule,
       // Feeds carry FINITE stock truth: quantities join the diff and are
       // written to the store. KicksDB never touches stock.
       manageStockFromSource: source !== "kicksdb",
+      // No GS, no stock: the price may still come from KicksDB, the stock never.
+      stockOverride: isDelisted ? 0 : undefined,
     });
+    if (isDelisted) {
+      for (const item of plan.items) {
+        if (item.action === "skip" && item.stockxVariantId.startsWith(DELISTED_VARIANT_PREFIX)) {
+          item.reason = "delisted by the supplier — already at 0";
+        }
+      }
+    }
     planned.push({ toSave: { plan, source }, product, euSizes, manualPrices, followSaleRule });
   }
 
@@ -372,6 +397,7 @@ export async function previewFromStore(
     let catalogAdded = 0;
     let catalogRejected = 0;
     let catalogSeen = false;
+    let delistedTotal = 0;
 
     for (const part of chunk(skus, PREVIEW_CHUNK)) {
       // OWNERSHIP FIRST. A feed-owned product's prices, sizes and stock come
@@ -379,7 +405,9 @@ export async function previewFromStore(
       // best: on a supplier-only store it is hundreds of SKUs KicksDB has never
       // heard of, and a failing batch used to throw and take the whole sync down
       // with it — the feed sitting right there in the DB, unread.
-      const owned = await gsOwnedProducts(part, market, overrides);
+      const { owned, delisted } = await gsFeedStatus(part, market, overrides);
+      // Delisted SKUs still go to KicksDB — for a PRICE only (their stock is 0
+      // whatever it answers).
       const kicksSkus = part.filter((s) => !owned.has(skuKey(s)));
       // The store products THIS chunk matches against — keyed by canonical
       // SKU, which is exactly what resolveFromModel wants as its index.
@@ -389,7 +417,8 @@ export async function previewFromStore(
       // 50 SKUs. Product names come from the snapshot (the bulk response carries
       // no title/brand).
       const secondary = await fetchSecondarySource(kicksSkus, {
-        ownedCount: owned.size,
+        // The delisted are plannable without KicksDB too (stock 0 needs no price).
+        ownedCount: owned.size + delisted.size,
         configured: kicksdbConfigured(),
         fetch: (p) => source.getPricesBatch(p, market),
         describeError: errMessage,
@@ -413,10 +442,30 @@ export async function previewFromStore(
 
       // Ownership BEFORE not-found accounting: a GS-owned SKU KicksDB doesn't
       // carry is covered by the feed, not missing.
-      const products = mergeGsOwned(enriched, owned).products;
+      const merged = mergeGsOwned(enriched, owned).products;
+
+      // Delisting: every store size of a product the supplier dropped is planned
+      // at stock 0 — KicksDB variants kept for their price when it covers the
+      // SKU, bare store sizes for the rest.
+      const products: typeof merged = [];
+      const delistedProducts: typeof merged = [];
+      const pricedDelisted = new Map<string, (typeof merged)[number]>();
+      for (const p of merged) {
+        if (delisted.has(skuKey(p.sku))) pricedDelisted.set(skuKey(p.sku), p);
+        else products.push(p);
+      }
+      for (const s of part) {
+        const key = skuKey(s);
+        if (!delisted.has(key)) continue;
+        delistedTotal += 1;
+        const store = storeIndex.get(key);
+        const p = store ? delistedSource(s, store, pricedDelisted.get(key), market) : null;
+        if (p) delistedProducts.push(p);
+      }
+
       const returned = new Set(products.map((p) => skuKey(p.sku)));
       for (const s of part) {
-        if (returned.has(skuKey(s))) continue;
+        if (returned.has(skuKey(s)) || delisted.has(skuKey(s))) continue;
         notFoundTotal += 1;
         if (notFound.length < NOT_FOUND_LIMIT) notFound.push(s);
       }
@@ -429,7 +478,9 @@ export async function previewFromStore(
         const growth = await growCatalogFromSkus(
           source,
           dbCatalogStore,
-          products.filter((p) => (p.source ?? "kicksdb") === "kicksdb").map((p) => p.sku),
+          [...products, ...pricedDelisted.values()]
+            .filter((p) => (p.source ?? "kicksdb") === "kicksdb")
+            .map((p) => p.sku),
           market,
         );
         catalogTotal = growth.total;
@@ -449,7 +500,7 @@ export async function previewFromStore(
       }
 
       const plans = await planChunk(
-        products,
+        [...products, ...delistedProducts],
         config,
         storeIndex,
         market,
@@ -457,6 +508,7 @@ export async function previewFromStore(
         overrides,
         runId,
         seen,
+        delisted,
       );
       planned += plans.length;
       for (const p of plans) addSummary(totals, p.summary);
@@ -476,6 +528,7 @@ export async function previewFromStore(
         fetched: planned,
         notFound,
         notFoundTotal,
+        delisted: delistedTotal,
         catalog: catalogSeen
           ? { total: catalogTotal, added: catalogAdded, rejected: catalogRejected }
           : undefined,

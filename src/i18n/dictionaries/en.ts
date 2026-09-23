@@ -457,6 +457,8 @@ export const en: Dictionary = {
     scope: {
       unpublished: (n: number) =>
         `The sync only reprices what the store already carries. ${n} catalog product${n === 1 ? " is" : "s are"} not on the store yet — create them from the Publish tab.`,
+      delisted: (n: number) =>
+        `${n} product${n === 1 ? "" : "s"} delisted by the supplier — planned at stock 0 so ${n === 1 ? "it stops" : "they stop"} selling. The stock comes back on its own when the feed lists ${n === 1 ? "it" : "them"} again.`,
       publishLink: "Go to Publish",
     },
     pull: {
