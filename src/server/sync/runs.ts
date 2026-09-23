@@ -27,10 +27,24 @@ export async function getSyncRun(runId: string): Promise<StoreSyncRunRow | null>
  * Plans of the run saved AFTER its last committed step belong to a step that
  * never committed (it timed out or crashed between saving and committing).
  * That step is about to be planned again, so they go — otherwise the apply
- * would see those products twice. Both timestamps are the database's clock.
+ * would see those products twice.
+ *
+ * Compared IN SQL, against the stored commit time. The run row read into JS
+ * carries that time truncated to the millisecond, and plans saved within the
+ * same millisecond as the commit then look newer than it: measured, a third of
+ * all commits lost their last plans to the next step that way — products the
+ * report counted and the apply silently never wrote.
  */
 export async function dropUncommittedPlans(run: StoreSyncRunRow): Promise<void> {
-  await db.delete(plans).where(and(eq(plans.runId, run.id), gt(plans.createdAt, run.updatedAt)));
+  await db.delete(plans).where(
+    and(
+      eq(plans.runId, run.id),
+      gt(
+        plans.createdAt,
+        sql`(select ${storeSyncRuns.updatedAt} from ${storeSyncRuns} where ${storeSyncRuns.id} = ${run.id})`,
+      ),
+    ),
+  );
 }
 
 type StepCounts = Pick<

@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { getWooClient } from "@/server/woo/client";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
  * Direct store editing for STORE-ONLY products (source "woo" — no feed
@@ -34,6 +35,7 @@ export async function updateStoreVariation(
 
   try {
     const client = getWooClient();
+    await assertSnapshotIsThisStore();
     const update: Record<string, unknown> = { id: variationId };
     if (price != null) update.regular_price = price.toFixed(2);
     if (stock != null) {

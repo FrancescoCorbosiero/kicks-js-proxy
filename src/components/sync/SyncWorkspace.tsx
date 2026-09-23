@@ -541,6 +541,12 @@ export function SyncWorkspace({
 
   return (
     <div className="space-y-5">
+      {initialState.siteMismatch && (
+        <p role="alert" className="rounded-lg border border-skip/25 bg-skip/10 px-4 py-3 text-sm font-medium text-skip">
+          {t.sync.scope.siteMismatch(initialState.siteMismatch.snapshot, initialState.siteMismatch.connected)}
+        </p>
+      )}
+
       {/* One-click sync: per-owner lookup, one summary, one confirmation */}
       <div className="relative flex flex-wrap items-center gap-4 overflow-hidden rounded-xl border border-accent/40 bg-accent/5 p-4">
         <div className="min-w-0 flex-1">

@@ -474,6 +474,8 @@ export const it = {
         `${n} ${n === 1 ? "prodotto delistato" : "prodotti delistati"} dal fornitore: stock a 0 nel piano, così ${n === 1 ? "smette" : "smettono"} di essere acquistabil${n === 1 ? "e" : "i"}. Lo stock torna da solo quando il feed ${n === 1 ? "lo" : "li"} rimette.`,
       unanswered: (n: number) =>
         `${n} SKU non verificat${n === 1 ? "o" : "i"}: KicksDB non ha risposto, quindi il prezzo è rimasto com'era. Non sono mancanti — rilancia la sync più tardi.`,
+      siteMismatch: (snapshot: string, connected: string) =>
+        `Questo database contiene lo store di ${snapshot}, ma l'app è collegata a ${connected}. Due negozi stanno usando lo stesso database: sync, pubblicazione e applica sono bloccati, così non viene scritto nulla con i dati dell'altro negozio. Punta DATABASE_URL al database di questo negozio.`,
       publishLink: "Vai a Pubblica",
     },
     pull: {

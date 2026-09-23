@@ -67,6 +67,20 @@ describe.skipIf(!enabled)("sync runs (real SQL)", () => {
     expect((await getSyncRun(run.id))!.status).toBe("done");
   });
 
+  it("never drops the plans of a step that DID commit (sub-millisecond commits)", async () => {
+    const { eq, db, plans, savePlans, commitSyncStep, createSyncRun, dropUncommittedPlans } = await load();
+    let run = await createSyncRun("IT", Array.from({ length: 200 }, (_, i) => `S${i}`));
+    const counts = (r: typeof run) => ({ planned: r.planned + 1, totals: r.totals, notFound: [], notFoundTotal: 0, delisted: 0, unanswered: 0, warning: null, catalog: null });
+    for (let i = 0; i < 200; i++) {
+      await dropUncommittedPlans(run); // start of a step
+      await savePlans([plan(`S${i}`)], "IT", run.id); // the step's plans…
+      run = await commitSyncStep(run, { cursor: i + 1, ...counts(run) }); // …committed at once
+    }
+    const rows = await db.select().from(plans).where(eq(plans.runId, run.id));
+    expect(run.status).toBe("done");
+    expect(rows.length).toBe(200); // every committed step's plans survive
+  });
+
   it("a failed run is never applicable; a manual preview run always is", async () => {
     const { eq, db, plans, savePlans, cancelSyncRun, commitSyncStep, createSyncRun, dropUncommittedPlans, failSyncRun, getSyncRun, syncRunApplicable } = await load();
     const run = await createSyncRun("IT", ["A"]);
@@ -133,3 +147,26 @@ describe.skipIf(!enabled)("stepped store sync, solo-GS (no KicksDB), real SQL", 
     expect(res.ok).toBe(false);
   });
 });
+
+describe.skipIf(!enabled)("another shop's database (real SQL)", () => {
+  it("refuses to sync, apply or publish; lets the matching shop through", async () => {
+    const { saveSnapshot, startStoreSync, applySyncPrices } = await load();
+    const { publishProducts } = await import("@/server/woo/publish");
+    const products = [{ id: 1, sku: "A-1", name: "A", variations: [] }];
+
+    // WOO_BASE_URL is https://example.com in this suite.
+    await saveSnapshot({ site_url: "https://othershop.it", products } as never, "rest");
+    const sync = await startStoreSync("IT");
+    expect(sync.ok).toBe(false);
+    expect(sync.error).toMatch(/othershop\.it.*example\.com/);
+    const apply = await applySyncPrices({ runId: "00000000-0000-4000-8000-000000000000", priceScope: "all", selections: [], excluded: [], dryRun: true, sanitize: false, backfillGtins: false });
+    expect(apply.ok).toBe(false);
+    expect(apply.error).toMatch(/sharing one database/);
+    await expect(publishProducts(["A-1"], { dryRun: true })).rejects.toThrow(/sharing one database/);
+
+    // Same shop, spelled differently: allowed.
+    await saveSnapshot({ site_url: "https://www.example.com/", products } as never, "rest");
+    expect((await startStoreSync("IT")).ok).toBe(true);
+  });
+});
+

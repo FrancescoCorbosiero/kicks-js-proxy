@@ -461,6 +461,8 @@ export const en: Dictionary = {
         `${n} product${n === 1 ? "" : "s"} delisted by the supplier — planned at stock 0 so ${n === 1 ? "it stops" : "they stop"} selling. The stock comes back on its own when the feed lists ${n === 1 ? "it" : "them"} again.`,
       unanswered: (n: number) =>
         `${n} SKU${n === 1 ? "" : "s"} not checked: KicksDB did not answer, so ${n === 1 ? "its price was" : "their prices were"} left as they are. They are not missing — run the sync again later.`,
+      siteMismatch: (snapshot: string, connected: string) =>
+        `This database holds the store of ${snapshot}, but this app is connected to ${connected}. Two shops are sharing one database: sync, publish and apply are blocked so nothing is written with the other shop's data. Point DATABASE_URL at this shop's own database.`,
       publishLink: "Go to Publish",
     },
     pull: {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getWooClient } from "@/server/woo/client";
 import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
 import { isSafeDuplicate } from "@/server/store-json/duplicates";
+import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 export interface TrashDuplicateResult {
   ok: boolean;
@@ -27,6 +28,7 @@ export async function trashDuplicateStoreProduct(
 
   try {
     const snapshot = await getActiveSnapshot();
+    await assertSnapshotIsThisStore();
     if (!snapshot) return { ok: false, error: "no store snapshot" };
     if (!isSafeDuplicate(snapshot, productId)) {
       return { ok: false, error: "not a safe duplicate (state changed?) — refresh the page" };

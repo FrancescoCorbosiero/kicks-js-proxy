@@ -19,6 +19,7 @@ import { getActiveConfig } from "@/server/config/repo";
 import { countUnpublishedCandidates } from "@/server/catalog/repo";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
 import { syncRunApplicable } from "@/server/sync/runs";
+import { snapshotSiteMatch } from "@/server/woo/site-guard";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -96,22 +97,30 @@ export interface SyncPageState {
    * broken sync unless the page says so out loud.
    */
   unpublished: number;
+  /**
+   * The database holds ANOTHER shop's snapshot (two installs sharing one
+   * Postgres). Every write refuses while this is set; the page says so first.
+   */
+  siteMismatch: { snapshot: string; connected: string } | null;
 }
 
 /** Everything the sync page header needs (also used to refresh after actions). */
 export async function getSyncState(): Promise<SyncPageState> {
   const config = await getActiveConfig().catch(() => null);
-  const [latest, history, unpublished] = await Promise.all([
+  const [latest, history, unpublished, site] = await Promise.all([
     getLatestPullRun().catch(() => null),
     listApplyHistory().catch(() => [] as ApplyHistoryEntry[]),
     // ONE integer, counted in SQL. This runs on every render of the tab —
     // and a running pull re-renders it once per product page — so it must
     // never be answered by loading the catalog and the snapshot into memory.
     config ? countUnpublishedCandidates(config.source.market) : Promise.resolve(0),
+    snapshotSiteMatch().catch(() => ({ status: "unknown" as const })),
   ]);
   return {
     wooConfigured: wooConfigured(),
     unpublished,
+    siteMismatch:
+      site.status === "mismatch" ? { snapshot: site.snapshot, connected: site.connected } : null,
     runningPull:
       latest && latest.status === "running"
         ? {
