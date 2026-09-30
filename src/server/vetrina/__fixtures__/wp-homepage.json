@@ -1,0 +1,849 @@
+{
+  "page_id": 76,
+  "title": "Home",
+  "link": "http://127.0.0.1:8089/",
+  "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=76&action=edit",
+  "modified_gmt": "2026-09-30 12:55:41",
+  "blocks": [
+    {
+      "path": "0",
+      "name": "core/html",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": null,
+        "labels": []
+      }
+    },
+    {
+      "path": "2",
+      "name": "golden-hive/hero-carousel",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": 5,
+        "labels": [
+          "AP x SWATCH",
+          "NIKE MIND",
+          "JACQUEMUS",
+          "TRAVIS SCOTT 1",
+          "CORTEIZ"
+        ]
+      }
+    },
+    {
+      "path": "4",
+      "name": "golden-hive/trust-badges",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": 5,
+        "labels": [
+          "100% Autentico",
+          "Spedizione Express",
+          "Reso 14 Giorni",
+          "Pagamenti Sicuri",
+          "+500 Recensioni"
+        ]
+      }
+    },
+    {
+      "path": "6",
+      "name": "core/shortcode",
+      "kind": "static",
+      "summary": {
+        "title": "[wd_hustle id=\"3\" type=\"embedded\"/]",
+        "items": null,
+        "labels": []
+      }
+    },
+    {
+      "path": "8.0",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "category:featured-sneakers-originali-streetwear#0",
+        "path": "8.0",
+        "attrs_hash": "02d670c71a576b3ecb853fb4f3e3f539",
+        "title": "PRODOTTI IN TENDENZA",
+        "eyebrow": "Selezione Esclusiva",
+        "background": "gray",
+        "button": {
+          "text": "Esplora le tendenze",
+          "url": ""
+        },
+        "shortcode": "[gh_product_rail category=\"featured-sneakers-originali-streetwear\" limit=\"18\" columns=\"4\" columns_tablet=\"3\"]",
+        "atts": {
+          "category": "featured-sneakers-originali-streetwear",
+          "limit": "18",
+          "columns": "4",
+          "columns_tablet": "3"
+        },
+        "limit": 18,
+        "taxonomy": "product_cat",
+        "terms": [
+          {
+            "id": 6,
+            "slug": "featured-sneakers-originali-streetwear",
+            "name": "Prodotti in tendenza",
+            "count": 32,
+            "link": "http://127.0.0.1:8089/product-category/featured-sneakers-originali-streetwear/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 38,
+            "sku": "80AE10-5",
+            "name": "adidas Samba OG Cloud White 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 175,
+            "price_max": 195,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/adidas-samba-og-cloud-white-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=38&action=edit",
+            "created": "2026-08-30T12:55:40+00:00"
+          },
+          {
+            "id": 73,
+            "sku": "945854-4",
+            "name": "ASICS Gel-NYC Graphite 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 193,
+            "price_max": 213,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/asics-gel-nyc-graphite-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=73&action=edit",
+            "created": "2026-07-23T12:55:41+00:00"
+          },
+          {
+            "id": 53,
+            "sku": "E22681-2",
+            "name": "New Balance 9060 Sea Salt 2",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 218,
+            "price_max": 238,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/new-balance-9060-sea-salt-2/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=53&action=edit",
+            "created": "2026-07-31T12:55:40+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "8.1",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "category:saldi-sneakers-outlet#0",
+        "path": "8.1",
+        "attrs_hash": "42f5ac41488e8ec8284b0404dacd3697",
+        "title": "SALDI",
+        "eyebrow": "Saldi primaverili",
+        "background": "white",
+        "button": {
+          "text": "",
+          "url": ""
+        },
+        "shortcode": "[gh_product_rail category=\"saldi-sneakers-outlet\" limit=\"18\" columns=\"4\" columns_tablet=\"3\"]",
+        "atts": {
+          "category": "saldi-sneakers-outlet",
+          "limit": "18",
+          "columns": "4",
+          "columns_tablet": "3"
+        },
+        "limit": 18,
+        "taxonomy": "product_cat",
+        "terms": [
+          {
+            "id": 7,
+            "slug": "saldi-sneakers-outlet",
+            "name": "Saldi outlet",
+            "count": 14,
+            "link": "http://127.0.0.1:8089/product-category/saldi-sneakers-outlet/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 58,
+            "sku": "046D50-1",
+            "name": "New Balance 1906R Silver 1",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 189,
+            "price_max": 209,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/new-balance-1906r-silver-1/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=58&action=edit",
+            "created": "2026-08-01T12:55:40+00:00"
+          },
+          {
+            "id": 28,
+            "sku": "537C16-1",
+            "name": "Nike Dunk Low Panda 1",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 148,
+            "price_max": 168,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/nike-dunk-low-panda-1/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=28&action=edit",
+            "created": "2026-06-16T12:55:39+00:00"
+          },
+          {
+            "id": 16,
+            "sku": "F63407-1",
+            "name": "Nike Air Force 1 Low '07 White 1",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 178,
+            "price_max": 198,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/nike-air-force-1-low-07-white-1/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=16&action=edit",
+            "created": "2026-07-20T12:55:39+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "8.2",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "category:saldi-sneakers-in-offerta#0",
+        "path": "8.2",
+        "attrs_hash": "e29fd0c10ba5a28897fbdb54a0bd1412",
+        "title": "SNEAKERS",
+        "eyebrow": "Offerte speciale",
+        "background": "white",
+        "button": {
+          "text": "",
+          "url": ""
+        },
+        "shortcode": "[gh_product_rail category=\"saldi-sneakers-in-offerta\" limit=\"18\" columns=\"4\" columns_tablet=\"3\"]",
+        "atts": {
+          "category": "saldi-sneakers-in-offerta",
+          "limit": "18",
+          "columns": "4",
+          "columns_tablet": "3"
+        },
+        "limit": 18,
+        "taxonomy": "product_cat",
+        "terms": [
+          {
+            "id": 8,
+            "slug": "saldi-sneakers-in-offerta",
+            "name": "Sneakers in offerta",
+            "count": 17,
+            "link": "http://127.0.0.1:8089/product-category/saldi-sneakers-in-offerta/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 68,
+            "sku": "CEB62C-5",
+            "name": "ASICS Gel-Kayano 14 Cream 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 219,
+            "price_max": 239,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/asics-gel-kayano-14-cream-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=68&action=edit",
+            "created": "2026-07-29T12:55:41+00:00"
+          },
+          {
+            "id": 73,
+            "sku": "945854-4",
+            "name": "ASICS Gel-NYC Graphite 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 193,
+            "price_max": 213,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/asics-gel-nyc-graphite-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=73&action=edit",
+            "created": "2026-07-23T12:55:41+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "8.3",
+      "name": "golden-hive/category-slider",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": 7,
+        "labels": [
+          "Asics",
+          "Essentials",
+          "New Balance",
+          "Nocta",
+          "Samba & Gazelle",
+          "Travis Scott",
+          "59FIFTY"
+        ]
+      }
+    },
+    {
+      "path": "8.4",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "category:new-nuove-release#0",
+        "path": "8.4",
+        "attrs_hash": "d50dfea031ef0872d22e37bb2686fd29",
+        "title": "NUOVI ARRIVI",
+        "eyebrow": "Release aggiornate",
+        "background": "white",
+        "button": {
+          "text": "Nuove Release",
+          "url": "/product-category/new-nuove-release"
+        },
+        "shortcode": "[gh_product_rail category=\"new-nuove-release\" limit=\"18\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "category": "new-nuove-release",
+          "limit": "18",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 18,
+        "taxonomy": "product_cat",
+        "terms": [
+          {
+            "id": 9,
+            "slug": "new-nuove-release",
+            "name": "Nuove release",
+            "count": 21,
+            "link": "http://127.0.0.1:8089/product-category/new-nuove-release/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 43,
+            "sku": "B8033C-4",
+            "name": "adidas Gazelle Indoor Blue 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 191,
+            "price_max": 211,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/adidas-gazelle-indoor-blue-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=43&action=edit",
+            "created": "2026-08-25T12:55:40+00:00"
+          },
+          {
+            "id": 38,
+            "sku": "80AE10-5",
+            "name": "adidas Samba OG Cloud White 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 175,
+            "price_max": 195,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/adidas-samba-og-cloud-white-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=38&action=edit",
+            "created": "2026-08-30T12:55:40+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "8.5",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "brand:nike-off-white#0",
+        "path": "8.5",
+        "attrs_hash": "73bded055c61b093c0e0a1847472f07c",
+        "title": "Nike Off-White",
+        "eyebrow": "Design Milanese",
+        "background": "white",
+        "button": {
+          "text": "Esplora Nike Off-White",
+          "url": "/marchio/nike/nike-off-white"
+        },
+        "shortcode": "[gh_product_rail brand=\"nike-off-white\" limit=\"15\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "brand": "nike-off-white",
+          "limit": "15",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 15,
+        "taxonomy": "product_brand",
+        "terms": [
+          {
+            "id": 13,
+            "slug": "nike-off-white",
+            "name": "Nike Off-White",
+            "count": 12,
+            "link": "http://127.0.0.1:8089/marchio/nike-off-white/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 13,
+            "sku": "21AA26-4",
+            "name": "Off-White x Air Jordan 1 Retro High Chicago 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 416,
+            "price_max": 436,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/off-white-x-air-jordan-1-retro-high-chicago-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=13&action=edit",
+            "created": "2026-09-10T12:55:39+00:00"
+          },
+          {
+            "id": 8,
+            "sku": "9B66FA-5",
+            "name": "Off-White x Nike Dunk Low Lot 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 256,
+            "price_max": 276,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/off-white-x-nike-dunk-low-lot-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=8&action=edit",
+            "created": "2026-09-15T12:55:39+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "8.6",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "brand:nike-air-force-1#0",
+        "path": "8.6",
+        "attrs_hash": "4be22b19aabdcc0a9c436b7546b594f5",
+        "title": "Nike Air Force 1",
+        "eyebrow": "Il classico incontra l'hype",
+        "background": "white",
+        "button": {
+          "text": "Esplora Nike Air Force",
+          "url": "/marchio/nike/nike-air-force-1"
+        },
+        "shortcode": "[gh_product_rail brand=\"nike-air-force-1\" limit=\"15\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "brand": "nike-air-force-1",
+          "limit": "15",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 15,
+        "taxonomy": "product_brand",
+        "terms": [
+          {
+            "id": 14,
+            "slug": "nike-air-force-1",
+            "name": "Nike Air Force 1",
+            "count": 12,
+            "link": "http://127.0.0.1:8089/marchio/nike-air-force-1/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 18,
+            "sku": "A82413-3",
+            "name": "Nike Air Force 1 Low '07 White 3",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 162,
+            "price_max": 182,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/nike-air-force-1-low-07-white-3/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=18&action=edit",
+            "created": "2026-06-23T12:55:39+00:00"
+          },
+          {
+            "id": 23,
+            "sku": "BF292B-2",
+            "name": "Nike Air Force 1 Low Triple Black 2",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 146,
+            "price_max": 166,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/nike-air-force-1-low-triple-black-2/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=23&action=edit",
+            "created": "2026-08-01T12:55:39+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "10",
+      "name": "golden-hive/brand-marquee",
+      "kind": "static",
+      "summary": {
+        "title": "SHOP BY BRAND",
+        "items": 7,
+        "labels": [
+          "Nike",
+          "Jordan",
+          "Adidas",
+          "New Balance",
+          "Corteiz",
+          "Travis Scott",
+          "Timberland"
+        ]
+      }
+    },
+    {
+      "path": "12.0",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "brand:adidas#0",
+        "path": "12.0",
+        "attrs_hash": "e9c25244b8bd3d0eeb56f7a4c9c9b17d",
+        "title": "ADIDAS",
+        "eyebrow": "Campus, Gazelle, Samba, Spezial",
+        "background": "gray",
+        "button": {
+          "text": "Esplora Adidas",
+          "url": "/marchio/adidas"
+        },
+        "shortcode": "[gh_product_rail brand=\"adidas\" limit=\"15\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "brand": "adidas",
+          "limit": "15",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 15,
+        "taxonomy": "product_brand",
+        "terms": [
+          {
+            "id": 12,
+            "slug": "adidas",
+            "name": "Adidas",
+            "count": 12,
+            "link": "http://127.0.0.1:8089/marchio/adidas/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 43,
+            "sku": "B8033C-4",
+            "name": "adidas Gazelle Indoor Blue 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 191,
+            "price_max": 211,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/adidas-gazelle-indoor-blue-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=43&action=edit",
+            "created": "2026-08-25T12:55:40+00:00"
+          },
+          {
+            "id": 38,
+            "sku": "80AE10-5",
+            "name": "adidas Samba OG Cloud White 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 175,
+            "price_max": 195,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/adidas-samba-og-cloud-white-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=38&action=edit",
+            "created": "2026-08-30T12:55:40+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "12.1",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "brand:new-balance#0",
+        "path": "12.1",
+        "attrs_hash": "976ee4e4775eb339ed7ab3e5bea32c6b",
+        "title": "NEW BALANCE",
+        "eyebrow": "NB 9060, 1906R, NB 550, 530, NB 2002, 2041",
+        "background": "gray",
+        "button": {
+          "text": "Esplora New Balance",
+          "url": "/marchio/new-balance"
+        },
+        "shortcode": "[gh_product_rail brand=\"new-balance\" limit=\"15\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "brand": "new-balance",
+          "limit": "15",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 15,
+        "taxonomy": "product_brand",
+        "terms": [
+          {
+            "id": 17,
+            "slug": "new-balance",
+            "name": "New Balance",
+            "count": 12,
+            "link": "http://127.0.0.1:8089/marchio/new-balance/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 58,
+            "sku": "046D50-1",
+            "name": "New Balance 1906R Silver 1",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 189,
+            "price_max": 209,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/new-balance-1906r-silver-1/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=58&action=edit",
+            "created": "2026-08-01T12:55:40+00:00"
+          },
+          {
+            "id": 63,
+            "sku": "0C608F-6",
+            "name": "New Balance 1906R Silver 6",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 221,
+            "price_max": 241,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/new-balance-1906r-silver-6/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=63&action=edit",
+            "created": "2026-08-27T12:55:40+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "12.2",
+      "name": "golden-hive/shortcode-wrapper",
+      "kind": "rail",
+      "rail": {
+        "key": "brand:asics#0",
+        "path": "12.2",
+        "attrs_hash": "8d5ebc1ccc934e340b76f3cafabe1a50",
+        "title": "ASICS",
+        "eyebrow": "Gel Kayano, NYC, 1130, GT",
+        "background": "gray",
+        "button": {
+          "text": "Esplora Asics",
+          "url": "/marchio/asics"
+        },
+        "shortcode": "[gh_product_rail brand=\"asics\" limit=\"15\" columns=\"5\" columns_tablet=\"3\"]",
+        "atts": {
+          "brand": "asics",
+          "limit": "15",
+          "columns": "5",
+          "columns_tablet": "3"
+        },
+        "limit": 15,
+        "taxonomy": "product_brand",
+        "terms": [
+          {
+            "id": 18,
+            "slug": "asics",
+            "name": "Asics",
+            "count": 12,
+            "link": "http://127.0.0.1:8089/marchio/asics/"
+          }
+        ],
+        "pin": [],
+        "exclude": [],
+        "fallback": "menu_order",
+        "fallback_default": "menu_order",
+        "editable": true,
+        "products": [
+          {
+            "id": 68,
+            "sku": "CEB62C-5",
+            "name": "ASICS Gel-Kayano 14 Cream 5",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 219,
+            "price_max": 239,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/asics-gel-kayano-14-cream-5/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=68&action=edit",
+            "created": "2026-07-29T12:55:41+00:00"
+          },
+          {
+            "id": 73,
+            "sku": "945854-4",
+            "name": "ASICS Gel-NYC Graphite 4",
+            "type": "variable",
+            "status": "publish",
+            "visibility": "visible",
+            "stock_status": "instock",
+            "price": 193,
+            "price_max": 213,
+            "on_sale": false,
+            "image": "http://127.0.0.1:8089/placeholder.png",
+            "permalink": "http://127.0.0.1:8089/product/asics-gel-nyc-graphite-4/",
+            "edit_link": "http://127.0.0.1:8089/wp-admin/post.php?post=73&action=edit",
+            "created": "2026-07-23T12:55:41+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "path": "14",
+      "name": "golden-hive/faq-schema",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": 5,
+        "labels": [
+          "Come posso essere sicuro che i prodotti siano autentici?",
+          "Quali sono i tempi di spedizione?",
+          "Posso restituire o cambiare un prodotto?",
+          "Come posso tracciare il mio ordine?",
+          "Quali metodi di pagamento accettate?"
+        ]
+      }
+    },
+    {
+      "path": "16",
+      "name": "golden-hive/social-buttons",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": null,
+        "labels": []
+      }
+    },
+    {
+      "path": "18",
+      "name": "golden-hive/social-proof",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": 7,
+        "labels": [
+          "Air Jordan 4 Retro",
+          "Nike Dunk Low Panda",
+          "New Balance 550",
+          "Yeezy 350 V2",
+          "Adidas Samba",
+          "Corteiz Hoodie",
+          "New Era 59Fifty"
+        ]
+      }
+    },
+    {
+      "path": "20",
+      "name": "golden-hive/whatsapp-button",
+      "kind": "static",
+      "summary": {
+        "title": null,
+        "items": null,
+        "labels": []
+      }
+    }
+  ]
+}

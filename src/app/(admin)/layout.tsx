@@ -1,0 +1,52 @@
+import type { ReactNode } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { MainNav } from "@/components/MainNav";
+import { getServerDictionary } from "@/i18n/server";
+import { env } from "@/lib/env";
+import { logout } from "@/server/actions/auth";
+
+/** The operator area: every tab of the Hub under one header. */
+export default async function AdminLayout({ children }: { children: ReactNode }) {
+  const { t } = await getServerDictionary();
+
+  return (
+    <>
+      <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
+          <a href="/" className="group flex items-center gap-2.5">
+            <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_4px_12px_-6px] shadow-accent/35 transition-transform group-hover:scale-105">
+              S
+            </span>
+            <span className="flex flex-col leading-none">
+              <span className="text-[13.5px] font-semibold tracking-tight">Store Hub</span>
+              <span className="text-[10.5px] font-medium text-faint">{t.header.tagline}</span>
+            </span>
+          </a>
+
+          <MainNav />
+
+          <div className="ml-auto flex items-center gap-2">
+            <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-muted lg:inline-flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-down" />
+              {t.header.internalTool}
+            </span>
+            <LanguageSwitcher />
+            <ThemeToggle />
+            {env.APP_PASSWORD && (
+              <form action={logout}>
+                <button
+                  type="submit"
+                  className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                >
+                  {t.login.logout}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </header>
+      {children}
+    </>
+  );
+}

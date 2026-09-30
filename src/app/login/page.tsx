@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
+import { hubConfig } from "@/config";
 import { AUTH_COOKIE, sessionToken } from "@/lib/auth";
 import { getServerDictionary } from "@/i18n/server";
 import { LoginForm } from "@/components/auth/LoginForm";
@@ -20,10 +21,10 @@ export default async function LoginPage({
   const sp = await searchParams;
   const { t } = await getServerDictionary();
 
-  if (!env.APP_PASSWORD) redirect("/");
+  if (!env.APP_PASSWORD) redirect(hubConfig.ui.landing);
   const store = await cookies();
   if (store.get(AUTH_COOKIE)?.value === (await sessionToken(env.APP_PASSWORD))) {
-    redirect("/");
+    redirect(hubConfig.ui.landing);
   }
 
   const from = sp.from && sp.from.startsWith("/") && !sp.from.startsWith("//") ? sp.from : "/";
