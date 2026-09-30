@@ -1,24 +1,36 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { MainNav } from "@/components/MainNav";
 import { I18nProvider } from "@/i18n/provider";
 import { getServerDictionary } from "@/i18n/server";
-import { env } from "@/lib/env";
-import { logout } from "@/server/actions/auth";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getServerDictionary();
-  return { title: t.meta.title, description: t.meta.description };
+  return {
+    title: t.meta.title,
+    description: t.meta.description,
+    // Installed from the phone's "Add to Home Screen", the Hub opens full
+    // screen like an app (see app/manifest.ts for the start page).
+    appleWebApp: { capable: true, title: "Store Hub", statusBarStyle: "default" },
+  };
 }
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover", // lets the Vetrina paint under the notch / home indicator
+};
 
 // Apply the saved theme before paint to avoid a flash of the wrong scheme.
 const themeScript = `(function(){try{var t=localStorage.getItem('kx-theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}})();`;
 
+/**
+ * The document shell only. Each area brings its own chrome: the operator
+ * tabs live in (admin)/layout.tsx, the Vetrina's app shell in
+ * (vetrina)/vetrina/layout.tsx.
+ */
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const { locale, t } = await getServerDictionary();
+  const { locale } = await getServerDictionary();
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -26,43 +38,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-screen">
-        <I18nProvider initialLocale={locale}>
-          <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-sm">
-            <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
-              <a href="/" className="group flex items-center gap-2.5">
-                <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_4px_12px_-6px] shadow-accent/35 transition-transform group-hover:scale-105">
-                  S
-                </span>
-                <span className="flex flex-col leading-none">
-                  <span className="text-[13.5px] font-semibold tracking-tight">Store Hub</span>
-                  <span className="text-[10.5px] font-medium text-faint">{t.header.tagline}</span>
-                </span>
-              </a>
-
-              <MainNav />
-
-              <div className="ml-auto flex items-center gap-2">
-                <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-muted lg:inline-flex">
-                  <span className="h-1.5 w-1.5 rounded-full bg-down" />
-                  {t.header.internalTool}
-                </span>
-                <LanguageSwitcher />
-                <ThemeToggle />
-                {env.APP_PASSWORD && (
-                  <form action={logout}>
-                    <button
-                      type="submit"
-                      className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                    >
-                      {t.login.logout}
-                    </button>
-                  </form>
-                )}
-              </div>
-            </div>
-          </header>
-          {children}
-        </I18nProvider>
+        <I18nProvider initialLocale={locale}>{children}</I18nProvider>
       </body>
     </html>
   );

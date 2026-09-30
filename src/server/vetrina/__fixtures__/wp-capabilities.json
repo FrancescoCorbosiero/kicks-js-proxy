@@ -1,0 +1,29 @@
+{
+  "plugin": "golden-hive-blocks",
+  "version": "5.9.0",
+  "api": 1,
+  "features": [
+    "homepage",
+    "rail",
+    "rail-visible",
+    "products",
+    "block-write",
+    "history",
+    "rail-pin",
+    "rail-exclude",
+    "rail-fallback",
+    "archive-follow"
+  ],
+  "fallbacks": [
+    "menu_order",
+    "date",
+    "popularity",
+    "price",
+    "price-desc",
+    "rating"
+  ],
+  "max_ids": 100,
+  "hide_out_of_stock": true,
+  "front_page_id": 76,
+  "site_url": "http://127.0.0.1:8089/"
+}

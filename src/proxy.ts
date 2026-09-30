@@ -15,6 +15,13 @@ import { AUTH_COOKIE, sessionToken } from "@/lib/auth";
  * runtime where the zod env module (with its server-only import) can't go.
  */
 
+/**
+ * The install files of the home-screen app. Browsers fetch the manifest
+ * without cookies, so behind the gate it would be a redirect to /login and the
+ * app would not install. They hold no data: a name, a start page, an icon.
+ */
+const PUBLIC_APP_FILES = new Set(["/manifest.webmanifest", "/icon", "/apple-icon"]);
+
 let cachedToken: { password: string; token: string } | null = null;
 
 async function expectedToken(password: string): Promise<string> {
@@ -29,7 +36,7 @@ export async function proxy(req: NextRequest) {
   if (!password) return NextResponse.next();
 
   const { pathname } = req.nextUrl;
-  if (pathname === "/login" || pathname.startsWith("/api/cron/")) {
+  if (pathname === "/login" || pathname.startsWith("/api/cron/") || PUBLIC_APP_FILES.has(pathname)) {
     return NextResponse.next();
   }
 

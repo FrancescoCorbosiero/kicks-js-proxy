@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Konsta UI (the Vetrina's mobile components): its utilities, variants and
+   base styles. Scoped in practice to the (vetrina) layout, whose markup is
+   the only place its k-* components render. */
+@import "konsta/react/theme.css";
 
 /* Manual dark mode via a `.dark` class on <html> (set before paint in layout). */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -238,4 +242,27 @@ body::after {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ----- Vetrina (Konsta) ----------------------------------------------------
+   Primary is the storefront's black and white: maximum contrast in both
+   themes, gold kept for pins and highlights. Konsta derives --k-color-primary
+   from --color-brand-primary at build time; dark mode flips it here. */
+@theme {
+  --color-brand-primary: #111111;
+}
+/* Konsta's text-primary/bg-primary read --color-primary, which is resolved
+   on :root — so the dark flip must set both, on the app shell. */
+.dark .k-app {
+  --k-color-primary: rgb(255 255 255);
+  --color-primary: rgb(255 255 255);
+}
+.k-app {
+  /* the app shell owns the screen: no body backdrop, no overscroll bounce */
+  overscroll-behavior: none;
+}
+.k-app input,
+.k-app select,
+.k-app textarea {
+  font-size: 16px; /* below 16px iOS zooms the whole page on focus */
 }

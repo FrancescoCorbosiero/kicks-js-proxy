@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { env } from "@/lib/env";
 import { AUTH_COOKIE, AUTH_COOKIE_MAX_AGE, sessionToken } from "@/lib/auth";
 import { getServerDictionary } from "@/i18n/server";
+import { hubConfig } from "@/config";
 
 /**
  * Login/logout for the shared-password gate (see src/middleware.ts). The
@@ -48,8 +49,9 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     maxAge: AUTH_COOKIE_MAX_AGE,
   });
 
+  // No page asked for → the configured landing (the Vetrina, for the shop).
   const from = String(formData.get("from") ?? "");
-  redirect(from.startsWith("/") && !from.startsWith("//") ? from : "/");
+  redirect(from.startsWith("/") && !from.startsWith("//") && from !== "/" ? from : hubConfig.ui.landing);
 }
 
 export async function logout(): Promise<void> {

@@ -4,31 +4,39 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n/provider";
+import { hubConfig } from "@/config";
 
 /**
- * The app tab bar: catalog-centric sections. The file round-trip flow
- * (/preview) intentionally has no tab — the route still works as a fallback.
+ * The app tab bar. Which tabs exist, and in what order, is code config
+ * (hubConfig.ui.nav) — the old UI gets leaner by removing entries there. The
+ * file round-trip flow (/preview) intentionally has no tab — the route still
+ * works as a fallback.
  */
 export function MainNav() {
   const { t } = useI18n();
   const pathname = usePathname();
 
-  const tabs = [
-    { href: "/", label: t.header.navDashboard },
-    { href: "/catalog", label: t.header.navCatalog },
-    { href: "/orders", label: t.header.navOrders },
-    { href: "/pricing", label: t.header.navMargins },
-    { href: "/sync", label: t.header.navSync },
-    { href: "/publish", label: t.header.navPublish },
-    { href: "/import", label: t.header.navImport },
-    { href: "/taxonomies", label: t.header.navTaxonomies },
-    { href: "/feeds", label: t.header.navFeeds },
-  ];
+  const labels: Record<string, string> = {
+    "/vetrina": t.header.navVetrina,
+    "/": t.header.navDashboard,
+    "/catalog": t.header.navCatalog,
+    "/orders": t.header.navOrders,
+    "/pricing": t.header.navMargins,
+    "/sync": t.header.navSync,
+    "/publish": t.header.navPublish,
+    "/import": t.header.navImport,
+    "/taxonomies": t.header.navTaxonomies,
+    "/feeds": t.header.navFeeds,
+  };
+  const tabs = hubConfig.ui.nav
+    .filter((href) => labels[href] != null)
+    .map((href) => ({ href, label: labels[href] }));
 
   return (
     <nav className="ml-2 flex min-w-0 items-center gap-1 overflow-x-auto text-sm sm:ml-4">
       {tabs.map((tab) => {
-        const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+        const active =
+          tab.href === "/" ? pathname === "/" : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         return (
           <Link
             key={tab.href}

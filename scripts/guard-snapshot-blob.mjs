@@ -35,7 +35,7 @@ const ALLOWED = new Set([
   "server/woo/pull.ts", // builds the snapshot
   "server/woo/repair.ts", // walks the whole store to find gaps
   "components/catalog/drawer-data.ts", // one product, read path, not a write loop
-  "app/duplicates/page.tsx",
+  "app/(admin)/duplicates/page.tsx",
   "server/actions/store.ts", // the file upload: the whole model IS the payload
   // The size cleanup plans over every previewed product, so a whole-store sync
   // genuinely looks at all of them. It no longer writes the model back, which

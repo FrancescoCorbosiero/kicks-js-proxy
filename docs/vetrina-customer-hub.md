@@ -1,6 +1,7 @@
 # Vetrina — the customer's homepage editor (design + spec, v1)
 
-Status: **direction proposed, not implemented.**
+Status: **phases 1–2 implemented, phase 3 in part** (see
+[Implementation status](#implementation-status)). Not merged.
 v1 builds on the page-editor idea: the WordPress homepage is the thing being edited,
 and the Hub only adds prices.
 
@@ -33,6 +34,37 @@ Repositories involved:
 | 15–18 | Margins | One % per section. Explicit priority between sections. Precedence: lock > SKU rule > section > brand/family rule, with the safety nets still applied. GoldenSneakers excluded in v1. |
 | 20–21 | Going live | A price edit goes live immediately. A margin change is previewed, then applied to the section right away. |
 | — | Mobile | "Specifically clean UX for mobile": dedicated libraries (§4.4) |
+
+## Implementation status
+
+Branch `claude/custom-product-catalog-ui-sqzewp`, in both repositories.
+
+| Phase | State |
+|---|---|
+| 1 · See | Done |
+| 2 · Order | Done: pin / exclude / fallback, publish, history and restore, category pages follow their rail |
+| 3 · Price | Product sheet with locks and one-product publish: done. Margin × taxonomy (store-term scope, margin sheet): not started |
+| 4 · Fill, 5 · Shape | Not started |
+
+### How to test
+
+1. **Demo, without touching the shop**: run the Hub with `VETRINA_SOURCE=fixture` and
+   open `/vetrina`. It is an in-memory copy of the homepage; it resets on restart.
+2. **Against a staging copy of the shop**:
+   - install golden-hive-blocks **5.9.0** from the branch above;
+   - the Hub's WooCommerce key needs **Read/Write**, and its user needs
+     `manage_woocommerce` (Shop manager or Administrator);
+   - open `/vetrina`, tap a section, reorder, **Pubblica**. The homepage and that
+     category's page follow; each publish is a WordPress revision.
+3. **Prices**: in a section, `⋯` → **Prezzi e taglie**. A price typed on a size locks it;
+   **Salva e pubblica** writes this one product's prices to the site.
+
+Notes:
+
+- After login the Hub now opens `/vetrina` (`ui.landing` in `src/config/hub.config.ts`).
+  Every old tab is still in the nav.
+- Each publish purges the page cache (LiteSpeed, WP Rocket, W3TC, WP Super Cache,
+  SiteGround). Behind another cache or a CDN, the change shows when that cache expires.
 
 ---
 
