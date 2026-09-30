@@ -1,804 +1,699 @@
-# Vetrina — the customer's homepage hub (design + spec, draft v0)
+# Vetrina — the customer's homepage editor (design + spec, v1)
 
-Status: **brainstorm + technical spec draft. Nothing agreed, nothing implemented.**
-Answer the numbered questions in [§9](#9-decisions-needed) (the number is enough).
-Each one has a recommended default. When every blocking question has an answer,
-this becomes "agreed direction", like [`catalog-centric-redesign.md`](catalog-centric-redesign.md).
+Status: **direction proposed, not implemented.**
+v1 builds on the page-editor idea: the WordPress homepage is the thing being edited,
+and the Hub only adds prices.
 
-Missing input: the reference image mentioned in the request did not come through (Q1).
+- [§1](#1-the-approach-page-editor-or-new-software) explains why.
+- [§12](#12-open-questions) lists what is still open.
+
+v0 (the "new software" design) is in git history. Its reasoning is summarized in
+[Appendix A](#appendix-a-v0-hub-owned-sections--why-not).
 
 Repositories involved:
 
-- **this one** (Store Hub): new customer area, mirror, pricing-engine extension.
-- **`golden-hive-blocks`**: renders the homepage rails. Needs a small extension ([§7.2](#72-golden-hive-blocks-extension)).
-- **`golden-hive-plugin`** (Hive Commerce admin): read for context only, no change planned.
+- **this one** (Store Hub): the editor UI, prices, margins.
+- **`golden-hive-blocks`**: renders the homepage. Needs three rail attributes and a small
+  REST endpoint ([§6](#6-storefront-side-golden-hive-blocks)).
+
+## Decisions so far
+
+| Q | Topic | Decision |
+|---|---|---|
+| 2 | Device | **Phone first.** Changed in v1: editing uses a list on every device. The grid is a read-only preview, which keeps one code path (§4). |
+| 3 | Separate login | **No.** The customer uses the existing Hub login. Which tabs they see comes from code config (§5). |
+| 4 | Name | Vetrina |
+| 5 | Product fields | None in v1. The editor has a "Modifica su WordPress" link. |
+| 6 | Save model | Explicit publish button, with history (WordPress revisions) |
+| 7 | Plugin change | Yes, in `golden-hive-blocks` |
+| 8 | Order after the pinned products | Chosen per rail. Default: today's store order. |
+| 9 | Category pages follow the rail | Yes. A category page uses the pins of the homepage rail that shows that category (§6.4). |
+| 13 | Homepage structure | Read-only in the UI. What is editable is decided by code config (§5). |
+| 14 | Plugin auth | `wc-gh/v1` namespace, authenticated with the existing Woo keys |
+| 15–18 | Margins | One % per section. Explicit priority between sections. Precedence: lock > SKU rule > section > brand/family rule, with the safety nets still applied. GoldenSneakers excluded in v1. |
+| 20–21 | Going live | A price edit goes live immediately. A margin change is previewed, then applied to the section right away. |
+| — | Mobile | "Specifically clean UX for mobile": dedicated libraries (§4.4) |
 
 ---
 
 ## 0. TL;DR
 
-- The customer gets a new area, **Vetrina**. It shows the homepage section by section,
-  exactly as the site shows it. They tap a section to reorder, add or remove products,
-  set prices and locks, and set the section's margin. The current developer UI stays as
-  it is, and the customer can't reach it.
-- **A section is a Woo term**: a `product_cat` category or a `product_brand` brand. The
-  homepage already works this way: every rail is `[gh_product_rail category=… | brand=…]`.
-  Which products belong to a section stays in WooCommerce.
-- **Ordering is the hard part, and it is a storefront limitation, not a UI one.** The
-  rails sort by `menu_order` then title. `menu_order` is **one number per product**,
-  shared by every rail and every category page. So a product in both "Tendenza" and
-  "Nike Air Force 1" can't be #1 in one and #12 in the other.
-  - **Recommendation:** store a list of pinned products per section as term meta. The
-    rail query and category pages honour it. That's about 150–250 lines of PHP in
-    `golden-hive-blocks`.
-- **Margin × taxonomy** means changes to the existing pricing engine:
-  - a new rule scope, `storeCategory` / `storeBrand`;
-  - a new precedence tier: SKU rules > section rules > brand/family rules;
-  - an explicit priority for products that sit in two sections;
-  - the same safety nets as today.
-
-  The Hub also needs a mirror of which products sit in which Woo terms. Today's pull
-  throws that information away.
-- Every write to the site goes through one explicit button that states what it will
-  do. Every write is logged, with a one-click revert.
-- There are 27 questions in §9. 15 of them block a phase, and 6 of those block phase 1.
+- **The homepage is the source of truth.** The Vetrina is a mobile editor for the
+  WordPress homepage:
+  - it reads the page's blocks;
+  - it lets the customer reorder and hide products in each rail;
+  - it writes back **one block's attributes** per publish;
+  - every publish is a WordPress revision, so undo comes for free.
+- **Prices stay in the Hub.** That's not a preference: the Hub's sync writes store prices,
+  so a price set anywhere else gets overwritten. Locks and margin × taxonomy live in the
+  Hub's engine and appear inside the same editor.
+- **It's one editor with two sources of truth**, each kept where it already lives:
+  WordPress for what shows and in what order, the Hub for the prices. It is not two
+  pieces of software.
+- **The editor lives in the Hub, not in WP admin.** Prices are one call away there, the
+  mobile UI isn't constrained, and the customer uses one app.
+- **Mobile stack:**
+  - **Konsta UI v5**: iOS / Material look, Tailwind 4, React 19.
+  - **Motion `Reorder`**: drag from a grip handle.
+  - **react-modal-sheet**: swipeable bottom sheets.
+  - **Sonner**: undo toasts.
+  - **An installable home-screen app**, using a manifest and no service worker.
+- **Much less to build than v0.** No new database tables, no mirror of WordPress state.
+  The plugin gets three rail attributes (`pin`, `exclude`, `fallback`) and one small
+  read/write endpoint.
 
 ---
 
-## 1. What exists today
+## 1. The approach: page editor or new software?
 
-### 1.1 The homepage (audited from its block markup)
+### 1.1 The two approaches
 
-| # | Block | What shows | Driven by | Limit |
+|  | **A. New software** (v0) | **B. Page editor** (your pick) |
+|---|---|---|
+| What the Hub edits | its own model: copies of Woo terms, products, memberships, per-category pins | the homepage page itself: the attributes of its blocks |
+| Source of truth for "what shows, in what order" | Hub state, pushed to WordPress | the page |
+| History / undo | custom publish log | WordPress revisions |
+| Staying in sync | mirror tables, scheduled pulls, staleness checks | the editor reads the live page when opened |
+| New Hub tables | 6 | 0 |
+| Grows to hero, slider, marquee | a new project each | a config line each: they are block attributes too |
+
+### 1.2 Verdict
+
+**B, hosted in the Hub, with prices handled by the Hub engine.** That's the "both"
+worth doing: one editor, where each piece of data stays with its natural owner.
+
+- The **page** owns sections, products per rail, order, and hidden products.
+- The **Hub** owns prices, locks, and margin × taxonomy.
+
+### 1.3 Why B wins
+
+1. **One truth, no drift.** What the customer edits is exactly what the page
+   renders. A copied the WordPress state into the Hub and then had to keep it fresh.
+2. **History for free.** Every publish creates a revision. "Ripristina" means publishing
+   the block's attributes from an earlier revision.
+3. **A fraction of the code.** There are no mirror tables, pull jobs or term state.
+4. **It grows by config.** Hero slides, the category slider and the brand marquee are
+   block attributes like the rails. "Editable later" means flipping a config flag, with
+   no new mechanism (§5).
+5. **It's transparent for you.** The pins show up in Gutenberg, inside the shortcode
+   (`pin="1201,877,1543"`). You can read them and fix them by hand.
+
+### 1.4 What B costs, and the answer to each
+
+| Cost | Answer |
+|---|---|
+| The editor writes homepage content, so a bug could break the page | The plugin changes only allowlisted attributes of one block. It matches that block exactly once or refuses. It validates values against the block's own `block.json`. It rejects stale writes and keeps a revision (§6.3). |
+| Order belongs to the homepage rail, not the category, so category pages don't follow by themselves (Q9) | A category page uses the pins of the homepage rail that shows it. About 50 lines in the plugin (§6.4). |
+| Margins need the Hub to know each product's Woo categories and brands | The existing store pull keeps `categories` / `brands` and the term tree. No new tables (§8.3). |
+
+### 1.5 Why prices can't live in a WordPress page editor
+
+- The Hub computes shelf prices from StockX asks and margins.
+- Its sync writes those prices to Woo, and overwrites any price that isn't locked **in
+  the Hub**.
+- So a price edited in WordPress lasts only until the next sync.
+- Margin × taxonomy is a rule inside that same engine.
+
+Anything about price has to go through the Hub. That is the hard technical reason the
+Vetrina can't be a pure WordPress editor.
+
+### 1.6 Why the editor lives in the Hub, not in WP admin
+
+- **Prices, locks and margins** are server actions away. From WP admin, they would need a
+  new Hub API and a token stored in WordPress.
+- **Full freedom for mobile UX.** WP admin on a phone is poor. A custom admin page would
+  still carry its chrome and build tooling.
+- **One app for the customer**, which matches "everything configurable from this hub
+  platform".
+- **The Hub already holds the Woo keys** that authenticate the plugin endpoint (Q14).
+  Nothing new to configure.
+
+WP admin's one advantage would be WordPress's own roles. You don't want a separate
+customer login anyway (Q3), so that advantage is moot.
+
+### 1.7 Login (Q3)
+
+v0 proposed a second password on the same login page, about 40 lines. It's dropped.
+
+- The customer logs into the Hub as today.
+- `/vetrina` becomes the landing page.
+- The tabs shown in the nav come from code config. That config is how the old UI gets
+  progressively leaner.
+- Residual risk: anyone with the password can still open `/sync` by typing the URL.
+  Destructive runs there stay dry-run-first.
+
+---
+
+## 2. What exists today (audit summary)
+
+### 2.1 The homepage
+
+| # | Block | Shows | Driven by | Limit |
 |---|---|---|---|---|
-| 1 | hero-carousel | 5 slides (AP×Swatch, Nike Mind, Jacquemus, Travis Scott, Corteiz) | static attrs | — |
+| 1 | hero-carousel | 5 slides | static attrs | — |
 | 2 | trust-badges | 5 badges | static | — |
 | 3 | Hustle embed | newsletter | Hustle | — |
-| 4 | **rail** | PRODOTTI IN TENDENZA · *Selezione Esclusiva* | `product_cat` `featured-sneakers-originali-streetwear` | 18 |
-| 5 | **rail** | SALDI · *Saldi primaverili* | `product_cat` `saldi-sneakers-outlet` | 18 |
-| 6 | **rail** | SNEAKERS · *Offerte speciale* | `product_cat` `saldi-sneakers-in-offerta` | 18 |
+| 4 | **rail** | PRODOTTI IN TENDENZA | `product_cat` `featured-sneakers-originali-streetwear` | 18 |
+| 5 | **rail** | SALDI | `product_cat` `saldi-sneakers-outlet` | 18 |
+| 6 | **rail** | SNEAKERS | `product_cat` `saldi-sneakers-in-offerta` | 18 |
 | 7 | category-slider | 7 cards | static attrs | — |
-| 8 | **rail** | NUOVI ARRIVI · *Release aggiornate* | `product_cat` `new-nuove-release` | 18 |
-| 9 | **rail** | Nike Off-White · *Design Milanese* | `product_brand` `nike-off-white` | 15 |
-| 10 | **rail** | Nike Air Force 1 · *Il classico incontra l'hype* | `product_brand` `nike-air-force-1` | 15 |
+| 8 | **rail** | NUOVI ARRIVI | `product_cat` `new-nuove-release` | 18 |
+| 9 | **rail** | Nike Off-White | `product_brand` `nike-off-white` | 15 |
+| 10 | **rail** | Nike Air Force 1 | `product_brand` `nike-air-force-1` | 15 |
 | 11 | brand-marquee | 7 logos | static | — |
 | 12 | **rail** | ADIDAS | `product_brand` `adidas` (+ sub-brands) | 15 |
 | 13 | **rail** | NEW BALANCE | `product_brand` `new-balance` | 15 |
 | 14 | **rail** | ASICS | `product_brand` `asics` | 15 |
 | 15+ | faq, social, social-proof, whatsapp | static | — | — |
 
-That's **9 product rails and 147 product slots**, in two kinds:
+That's 9 rails and 147 product slots. Every rail is a
+`golden-hive/shortcode-wrapper` block whose `shortcode` attribute holds
+`[gh_product_rail category|brand=… limit=… columns=…]`.
 
-- **Curated** (the 4 category rails): merchandising lists. Someone decides what's in
-  them by assigning the category.
-- **Factual** (the 5 brand rails): what's in them is the product's brand. The only
-  choices are order and, maybe, hiding a product.
+### 2.2 How a rail chooses and orders products
 
-### 1.2 How a rail picks and orders products
+The code path is `ghb_get_carousel_products()` in `golden-hive-blocks`.
 
-The code path is `[gh_product_rail]` → `ghb_get_carousel_products()` in
-`golden-hive-blocks/includes/product-carousel-shortcode.php`.
-
-- **Membership**: the product is in the term, matched by slug.
-  - `category` queries `product_cat`.
-  - `brand` queries whichever of `product_brand` / `pwb-brand` / `pa_brand` holds the
-    slug, with `include_children`. So the ADIDAS rail includes every adidas sub-brand.
-  - Category rails also include child categories (WordPress's default for hierarchical
-    taxonomy queries).
+- **Membership**: the product is in the term, including child terms. Brand rails check
+  `product_brand` / `pwb-brand` / `pa_brand`.
 - **Visibility**:
   - `publish` only;
-  - `product_visibility` NOT IN `exclude-from-catalog`;
-  - plus `outofstock` when WooCommerce's "Hide out of stock items" is on.
-- **Order**: every homepage rail sets a category or brand and no metric type. In that
-  case the order is **`menu_order ASC, post_title ASC`**.
-- **Count**: the first `limit` products left after the filters above.
-- `ids="…"` is supported (the order is the list itself) but unused. Using it would turn
-  the rail into a closed list.
+  - not `exclude-from-catalog`;
+  - not `outofstock` when WooCommerce's "Hide out of stock items" is on.
+- **Order**: **`menu_order ASC, post_title ASC`**, whenever a category or brand is set.
+  `menu_order` is one number per product, shared by every rail and every category page.
+  That's why a single global order can't serve several rails at once.
+- **Count**: the first `limit` products that pass the filters above.
 
-So the order the customer wants to control is **`wp_posts.menu_order`**:
+Verified in WooCommerce trunk:
 
-- It is one integer per product, shared by every rail and every category or brand page.
-  Category and brand pages use it too, under "Default sorting (custom ordering + name)".
-- Two things write it today: the Hive Commerce sorter (`golden-hive-plugin`,
-  `includes/bulk/sorter.php`, in steps of 10) and drag-and-drop in WP admin.
-- New products get `menu_order = 0`. Once the others are numbered 10, 20, 30…, every new
-  product jumps to the top of every rail it belongs to.
+- the REST API reads and writes `menu_order`, accepts `orderby=menu_order`, returns
+  `brands`, and supports `modified_after`;
+- routes under `wc-*` namespaces accept WooCommerce API keys: `is_wc_namespace()`,
+  "lets third party plugins use our authentication methods".
 
-Verified in WooCommerce trunk: the REST API reads and writes `menu_order`, accepts
-`orderby=menu_order`, returns `brands`, and supports `modified_after`.
+### 2.3 Store Hub: reused as is
 
-### 1.3 Store Hub: what we reuse
+- **The pricing engine**: scoped rules, whole-margin takeover, safety nets.
+- **Price locks**: `store_overrides`, keyed `SKU::EU size`.
+- **Drawer data**: ask, proposed price, applied rule.
+- **Sync on a SKU subset**: `startStoreSync(market, skus)` → `advanceStoreSync` →
+  `applySync({ sanitize: false })`.
+- **Direct edits** of store-only products.
+- **The site guard**.
+- **The Woo client**.
+- **The Italian dictionaries**.
 
-| Piece | Where | Role in the Vetrina |
-|---|---|---|
-| Pricing engine: scoped rules, whole-margin takeover, safety nets | `core/config.ts`, `core/core-spine.ts` | extended with a store-taxonomy scope (§6) |
-| Price locks: `store_overrides`, keyed `SKU::EU size`, lock-all / unlock-all | `src/server/overrides/*`, `ProductDrawer` | used as is |
-| Drawer data: ask, proposed price, applied rule, locks, live view of store-only products | `src/components/catalog/drawer-data.ts` | data source for the customer's product panel |
-| Sync on a SKU subset: `startStoreSync(market, skus)` → `advanceStoreSync` → `applySync({ priceScope: "all", dryRun: false, sanitize: false })` | `src/server/actions/preview.ts`, `src/server/woo/apply.ts` | "publish this product's / this section's prices now" |
-| Direct store edits for store-only variations | `src/server/actions/store-edit.ts` | used as is; add simple products |
-| Woo client: brand/category listing, product create/update, `brands: [{id}]` | `src/server/woo/client.ts`, `publish-plan.ts` | membership writes, term reads |
-| Site guard: refuses to write with another shop's snapshot | `src/server/woo/site-guard.ts` | called by every new write path |
-| i18n, Italian as source of truth | `src/i18n/*` | all new copy |
+### 2.4 Gaps that still matter in v1
 
-### 1.4 Store Hub: gaps
+1. The store pull drops `categories` / `brands` and has no term tree. The margin engine
+   needs both (§8.3).
+2. Rules can't target a Woo term (§8).
+3. A lock reaches the store only through a Sync run. v1 adds a prices-only publish per
+   SKU (§8.5).
+4. GoldenSneakers prices already include the supplier's markup, so they're excluded from
+   section margins in v1.
 
-1. **The Hub has no store taxonomy.**
-   - `toStoreProduct()` keeps id, sku, name, status, images, attributes and variations.
-     It drops `categories`, `brands`, `menu_order`, `featured`, `catalog_visibility`,
-     `date_created` and `total_sales`.
-   - The catalog's `category` / `secondaryCategory` are the *catalog's* family tree (from
-     KicksDB or the title classifier), not Woo terms.
-   - So nothing links a product to "saldi-sneakers-outlet".
-2. **The pull only covers `type=variable&status=publish`.** Simple products (a watch, a
-   bag) are invisible to the Hub, but they can sit in a rail.
-3. **The snapshot is one jsonb blob.** That suits the plan engine, but it can't answer
-   queries like "products of term X ordered by Y".
-4. **Rules can't target a Woo term.** Scope axes are source, brand, catalog family,
-   model, SKU and size.
-5. **A lock reaches the store only through a Sync run** (pull → preview → dry run → live).
-6. **There is one shared password and one role.** Whoever logs in can run the cleanup
-   (which deletes variations), force a reimport, or trash duplicates.
-7. **GoldenSneakers products are priced upstream** (`presented_price` plus a zero-markup
-   passthrough rule). A Hub margin on top would count the margin twice.
+### 2.5 Spotted along the way
 
-### 1.5 Spotted along the way (small, outside scope)
-
-- The "Esplora le tendenze" button never renders. It has `buttonText` but no
-  `buttonUrl`, and the block needs both.
+- "Esplora le tendenze" never renders: `buttonText` is set but `buttonUrl` is missing.
 - Copy: the eyebrow says "Saldi primaverili" (spring sales) in autumn, and "Offerte
   speciale" should be "Offerte speciali".
-- `social-proof` cycles hardcoded purchases with fixed times ("1 minuto fa").
-  - If these aren't real purchases, fabricated purchase notifications are a
-    misleading-practice risk under EU and Italian consumer law.
-  - The Hub already mirrors real orders (`store_orders`) and could feed real ones.
-- The brand marquee hotlinks the Jordan and Timberland logos from upload.wikimedia.org.
+- The social-proof popups are hardcoded.
+  - If they aren't real purchases, that's a misleading-practice risk under EU and
+    Italian consumer law.
+  - The Hub already mirrors real orders and could feed real ones.
+- The brand marquee hotlinks two logos from upload.wikimedia.org.
 
 ---
 
-## 2. The job, restated
+## 3. Architecture
 
-The customer is not technical. They want to keep the homepage's products right without
-calling you. They need to:
-
-1. See the homepage sections in order, each with its name and first products.
-2. Control each section: which products, in which order, at which price, with price locks.
-3. Set a margin per section (category or brand). Sneaker prices move, and a sale
-   section, a hype brand and a trending list need different margins.
-4. Do the same for any other Woo category or brand, beyond the homepage.
-5. Stay away from anything dangerous, while the developer keeps the full Hub.
+```
+            Customer's phone (installed as an app)
+                         │
+┌────────────────────────▼──────────────── Store Hub (Next.js) ───────────────────────────┐
+│ (vetrina) route group: Konsta shell, list editor, sheets                                 │
+│   server actions ──┬── page:  wc-gh/v1/homepage (read), /rail (read), /block (write)     │
+│                    ├── prices: overrides (locks) + prices-only sync of a SKU subset      │
+│                    └── margins: config.pricingRules (store-term scope) + section apply    │
+│ hub.config.ts ── what is shown, what is editable, which tabs exist                       │
+└────────────────────────┬─────────────────────────────────────────────────────────────────┘
+                         │ Woo consumer key/secret (existing)
+┌────────────────────────▼──────────────── WordPress ─────────────────────────────────────┐
+│ WooCommerce REST wc/v3 (products, categories, brands, variations/batch)                 │
+│ golden-hive-blocks                                                                      │
+│   [gh_product_rail … pin="…" exclude="…" fallback="…"]   ← the order lives in the page  │
+│   wc-gh/v1: capabilities · homepage · rail · homepage/block (PUT) · homepage/history    │
+│   category pages follow their homepage rail's pins                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Concept: "Vetrina"
+## 4. The editor
 
-### 3.1 Principles
+### 4.1 Principles
 
-1. **Mirror the site.** The Vetrina first shows what the homepage shows now: same
-   products, same order, same count. Every difference is explained: sold out, hidden,
-   or past the end of the homepage rail.
-2. **One concept: a section is a Woo category or brand.**
-   - Homepage sections are the terms the homepage uses.
-   - Every other term lives under "Tutte le categorie / Tutti i marchi".
-   - Both use the same editor.
-3. **Nothing changes on the site until a yellow button is pressed.**
-   - Every button says what it will do: "Pubblica 3 modifiche", "Applica margine a 42
-     prodotti".
-   - Every publish lands in a history with a "Ripristina" (restore) action.
-4. **Plain Italian, no jargon.** "Prezzo bloccato", not "manual override". "Margine
-   sezione Saldi 10%", not "rule scope product_cat".
-5. **Touch first.** Big targets and long-press drag. Every drag also has a non-drag path
-   (type a position number, "In cima").
-6. **The old UI stays untouched.** The Vetrina is a new route group. The developer sees
-   it as one more tab.
+1. **Mirror the site.** The first screen is the homepage as it renders now, block by
+   block, with each rail's products computed by the plugin's real query.
+2. **One editing surface.** A list with a grip on every row, on every device. On desktop
+   the list is centred, with the rail's preview beside it.
+3. **Nothing reaches the site before "Pubblica"**, and every publish can be restored.
+4. **Plain Italian, big targets, no jargon.**
+5. **Every gesture has a button twin.** Drag, or open ⋯ and use the actions.
 
-### 3.2 Screens
+### 4.2 Screens
 
-**A. Vetrina (home)** lists blocks in homepage order.
-
-- Product rails show their name, eyebrow and first products.
-- Static blocks show as thin placeholders, so the page still reads like the real one.
+**Home: "La tua homepage"**
 
 ```
-Vetrina                                     ⟳ aggiornata 2 min fa   [Vedi il sito ↗]
-────────────────────────────────────────────────────────────────────────────────
- Hero · 5 slide                                                       (dal sito)
- 1  PRODOTTI IN TENDENZA · Selezione Esclusiva      18 in vetrina · margine 30%
-    [▢][▢][▢][▢][▢][▢][▢][▢] +10                   ⚠ 2 esauriti nascosti     ›
- 2  SALDI · Saldi primaverili                       18 in vetrina · margine 10%
-    [▢][▢][▢][▢][▢][▢][▢][▢] +10                                             ›
- 3  SNEAKERS · Offerte speciale                     …                          ›
- Slider categorie · 7                                                 (dal sito)
- 4  NUOVI ARRIVI · Release aggiornate               …                          ›
- …
+┌─────────────────────────────────┐
+│  Vetrina                    ⟳   │  ← Konsta Navbar (large title)
+├─────────────────────────────────┤
+│  Hero · 5 slide           (sito)│
+│ ┌─────────────────────────────┐ │
+│ │ PRODOTTI IN TENDENZA      › │ │  ← tap: open the rail
+│ │ ▢ ▢ ▢ ▢ ▢ ▢ →   18 in vetrina│ │  ← horizontal strip, first products
+│ │ Margine 30% · 2 esauriti    │ │
+│ └─────────────────────────────┘ │
+│ ┌─────────────────────────────┐ │
+│ │ SALDI                     › │ │
+│ │ ▢ ▢ ▢ ▢ ▢ ▢ →               │ │
+│ └─────────────────────────────┘ │
+│  Slider categorie · 7     (sito)│
+│  …                              │
+├─────────────────────────────────┤
+│  Vetrina · Margini · Ordini     │  ← Tabbar, tabs from hub.config.ts
+└─────────────────────────────────┘
 ```
 
-**B. Section editor** shows the rail as a grid on desktop or a list on a phone. A line
-marks where the homepage rail stops.
+**Rail editor**
 
 ```
-‹ Vetrina   PRODOTTI IN TENDENZA        [Griglia | Lista]    [+ Aggiungi prodotti]
-Dopo i fissati: [Ordine del negozio ▾]                    Margine sezione: 30% ✎
-┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐
-│1 📌││2 📌││3 📌││4   ││5   ││6   │      trascinare = fissare la posizione
-└────┘└────┘└────┘└────┘└────┘└────┘
-…
-════════ fine vetrina: in homepage si vedono i primi 18 ════════
-┌────┐┌────┐ …                               (solo nella pagina categoria)
-Nascosti dal sito: [▢ esaurito] [▢ esaurito]
-╔════════════════════════════════════════════════════════════════════╗
-║ 3 modifiche non pubblicate           [Annulla]   [Pubblica sul sito] ║
-╚════════════════════════════════════════════════════════════════════╝
+┌─────────────────────────────────┐
+│ ‹ Vetrina   TENDENZA        ⋯   │
+│ Automatico: [Negozio|Novità|Più venduti] │ ← Segmented = `fallback`
+├─────────────────────────────────┤
+│ 1 ▢ Jordan 4 Military…  €219 📌 ⋮⋮│ ← grip ⋮⋮ = drag handle only
+│ 2 ▢ Dunk Low Panda      €129 📌 ⋮⋮│
+│ 3 ▢ Samba OG            €139 🔒 ⋮⋮│   🔒 = a price is locked
+│ 4 ▢ NB 9060 …           €179    ⋮⋮│ ← automatic (lighter)
+│ …                                │
+│ ── in homepage si vedono i primi 18 ──│
+│ 19 ▢ …                           │
+│ Nascosti: ▢ esaurito  ▢ nascosto │
+├─────────────────────────────────┤
+│  3 modifiche    [ Pubblica ▶ ]   │ ← sticky, above the home indicator
+└─────────────────────────────────┘
 ```
 
-Each card shows:
+- **Tapping a row** opens the **product sheet**: photo, "prezzo sul sito", sizes with 🔒
+  (editing a price locks it), "Salva e pubblica".
+- **The ⋯ row action** opens an **action sheet**: In cima · Sposta in posizione… · Togli
+  posizione fissa · Nascondi da questa sezione · Prezzi…
+- **Tapping "Margine 30%"** opens the **margin sheet**: one %, a preview of the impact
+  (up / down / unchanged), "Applica".
 
-- photo, name and "da €189,99";
-- 🔒 when any size is locked;
-- its position and pin state;
-- "anche in: Nike AF1, Saldi" (the other sections it's in).
+### 4.3 The ordering model, in the customer's words
 
-The card menu offers: In cima · Sposta alla posizione… · In fondo ai fissati · Togli
-posizione fissa · Rimuovi dalla sezione · Prezzi…
+- **"Fissati" (pinned) come first, in your order. Everything else follows
+  automatically**, by the rule chosen in the segmented control.
+- **Dragging a row pins it.**
+  - Dropping it inside the automatic zone pins everything above it too. Pins are always
+    a prefix of the list.
+  - "Togli posizione fissa" sends a product back to the automatic zone.
+- **A sold-out or hidden pinned product stays in the list, greyed out, with the reason**,
+  so "why isn't it on the site?" answers itself.
+- **Moves are optimistic**, with an undo toast ("Spostato in cima · Annulla"). Nothing is
+  written until "Pubblica".
 
-**C. Tutte le categorie / Tutti i marchi** shows the Woo tree.
+### 4.4 Mobile stack (checked on npm, 30 Sep 2026)
 
-- Categories follow the order set in WooCommerce. Brands are alphabetical unless the
-  store orders them.
-- Each row shows the name, product count, the first 6 thumbnails in storefront order,
-  and an "in homepage" badge.
-- Each row opens the same editor.
-
-**D. Margini per sezione**
-
-```
-Margine sul prezzo di mercato. Se un prodotto è in più sezioni vale quella più in alto.
- ≡  Saldi                     10%     64 prodotti    [Anteprima]
- ≡  Nike Off-White            40%     22 prodotti
- ≡  Prodotti in tendenza      30%     52 prodotti
-    Tutto il resto: margine standard (35% → 19% a scaglioni)           🔒 sviluppatore
- ⚠ 9 prodotti sono sia in Saldi che in Tendenza → usano Saldi (10%)
-```
-
-**E. Product panel** is a sheet over the page. It shows:
-
-- photo, name, SKU, and where it sits ("in vetrina: Tendenza #3 · Nike AF1 #7");
-- the price explained in one line: "Prezzo StockX €140 + margine Saldi 10% → €154,99",
-  or "Bloccato da te il 12/09";
-- each size with its shelf price, computed price and 🔒. Editing a price locks it;
-- "Blocca tutti / Sblocca tutti" and "Salva e pubblica";
-- a warning when a locked price is below cost.
-
-### 3.3 Sorting UX: where it has to be smart
-
-1. **The fold line.** The rail's `limit` is drawn in the grid.
-2. **Pinned vs automatic.**
-   - Positions the customer chose are pinned (📌, solid).
-   - Every other product flows after them by the section's fallback rule (lighter
-     style, labelled "automatico").
-   - Dropping a card pins it. "Togli posizione fissa" lets it flow again. That is the
-     whole model.
-3. **Every drag has a non-drag twin**: a position number, "In cima", "In fondo ai fissati".
-4. **Multi-select**, then "Metti in cima in quest'ordine".
-5. **Presets are a starting point, not a mode.**
-   - "Riordina per più venduti / novità / prezzo / disponibilità / più taglie / in saldo"
-     fills the pins down to the fold line. The customer then adjusts.
-   - The vocabulary is borrowed from the Hive Commerce sorter.
-6. **Ghosts.** A pinned product the site hides (sold out, excluded from catalog) stays
-   at its position, greyed out, with the reason. "Why isn't it on the site?" then
-   answers itself.
-7. **Before/after preview** of the first N products before publishing, with moved items
-   highlighted.
-8. **History with one-click revert**, per section.
-9. **Keyboard and touch**: long-press to drag, autoscroll, arrow keys.
-10. **Health hints**: no photo, one size left, a price locked below cost, a product in
-    no section.
-
----
-
-## 4. Ordering: options and recommendation
-
-| | A. Global `menu_order` | B. Per-section pins (term meta) | C. Hub-owned rails |
+| Need | Pick | Why | Version · last release · license |
 |---|---|---|---|
-| Plugin change | none | small: pins, rail query, archive hook, endpoints | large: new block; the homepage leaves Gutenberg |
-| Independent order per section | no | yes | yes |
-| Membership lives in | Woo terms | Woo terms (+ exclusions) | Hub lists |
-| Category pages match the rail | yes, natively | yes, via the archive hook | no |
-| Writes per reorder | up to N products (`products/batch`) | 1 term-meta write | 1 option write |
-| Failure mode | a reorder here silently reshuffles every section sharing products | a stale pin (product left the term) is ignored | the Hub becomes the CMS |
+| App look: navbar, lists, tabbar, toggles, segmented, action sheets, search | **Konsta UI** (`konsta`) | iOS 26 / Material 2025 look out of the box. Built on Tailwind v4 (our stack) and updated to React 19. | 5.5.0 · 28 Sep 2026 · MIT |
+| Drag to reorder | **Motion** `Reorder` + `useDragControls` | Spring animations and autoscroll. `dragListener={false}` + a grip with `touch-action: none` keeps page scrolling intact. | `motion` 13.4.6 · 29 Sep 2026 · MIT |
+| Swipeable bottom sheets (product, margin, picker) | **react-modal-sheet** | Swipe to close, snap points, virtual-keyboard avoidance built in. Runs on Motion, so no second animation engine. | 5.6.0 · Mar 2026 · MIT |
+| Toasts with undo | **Sonner** | Stacked, swipe to dismiss, action button | 2.0.8 · Aug 2026 · MIT |
+| "Install on phone" | Next's built-in `app/manifest.ts` + Apple web-app metadata | Full-screen home-screen app. **No service worker**: the Vetrina must always be live, and a service-worker cache is the classic source of "I published but I see the old one". | built in |
 
-**Recommendation: B.**
+Considered and rejected:
 
-A is the right choice only if no plugin change is acceptable, and its conflict is
-structural: one number per product. Under A, the editor would use "slot reuse": it
-reassigns the section's own `menu_order` values in the new order, so non-members don't
-move. It would also warn about the other sections affected.
+- **Vaul**: officially unmaintained, and its bugs propagate into shadcn's Drawer.
+- **Silk**: native-like sheets, but commercial use needs a paid license.
+- **`@dnd-kit/core` / `sortable`**: no release since Dec 2024. `@dnd-kit/react` is still
+  0.x, its touch sensor was reworked, and there are reports of lag on mobile lists.
+- **Pragmatic drag and drop and React Aria DnD**: both use native HTML drag on touch,
+  which means a ghost-image drag with no live reflow. React Aria's accessibility is
+  excellent, but the feel is less app-like.
+- **`@use-gesture/react`**: no release since Mar 2024.
+- **Serwist**: it now supports Next 16 / Turbopack, but it's only worth adding if offline
+  ever becomes a goal.
 
-**Effective order.** This is the single definition. It is implemented in PHP for the
-site and in TypeScript for the Hub preview, with shared test fixtures.
+Spike before building: mount Konsta inside our Tailwind 4 build, scoped to the
+`(vetrina)` layout, and check it doesn't collide with the Hub's `@theme inline` tokens.
+The existing gold accent becomes Konsta's primary colour.
 
-```
-visible(term) = publish ∧ in term (incl. descendants) ∧ not exclude-from-catalog
-              ∧ (hide_out_of_stock ⇒ instock) ∧ id ∉ excluded(term)
-order(term)   = [pinned(term) ∩ visible, in pin order] ++ [visible \ pinned, by fallback(term)]
-rail          = first `limit` of order(term)
+### 4.5 Mobile details that make or break it
 
-fallback ∈ { store       : menu_order ↑, title ↑   (today's behaviour, the default)
-           | newest      : date ↓
-           | bestsellers : total_sales ↓
-           | price_asc | price_desc }
-```
-
-Two details:
-
-- **Title ties** sort with the database collation, usually `utf8mb4_unicode_ci`. The
-  TypeScript side approximates it with `localeCompare("it", { sensitivity: "base" })`.
-  The plugin's `rail-preview` endpoint is the source of truth: if the Hub's order
-  differs, the Hub shows a banner instead of silently being wrong.
-- **Multi-term rails** (`category="a,b"`) ignore pins in v1.
-
----
-
-## 5. Membership
-
-- **Curated categories** (Tendenza, Saldi, Offerte, Nuovi arrivi): adding or removing a
-  product changes its Woo categories.
-  - Woo replaces the whole `categories` array on every update. So each write first
-    re-reads the product live, the same way Publish re-reads SKUs live.
-  - It then sends `existing ∪ {term}` to add, or `existing \ {term}` to remove, up to
-    100 products per `POST products/batch`.
-  - If a removal would leave a product with no category, WordPress files it under the
-    default category. The Hub warns first.
-- **Brand sections**: the brand is a fact, so "Rimuovi" becomes "Nascondi da questa
-  sezione". That is an exclusion stored in term meta, next to the pins.
-- **Picker** ("+ Aggiungi prodotti"): searches the mirror by name, SKU, brand or
-  category. New products go on top as pinned by default, or at the bottom as automatic.
+- **Drag starts only from the grip.** The rest of the row scrolls. Tapping the row opens
+  it.
+- **Keep the fixed bars clear of the phone's edges:** sticky bottom bars use
+  `env(safe-area-inset-bottom)`, and layouts use `100dvh`, not `100vh`.
+- **Price inputs:**
+  - 16 px font minimum, because iOS zooms on focus below that;
+  - `inputmode="decimal"` and `enterkeyhint="done"`;
+  - comma decimals accepted ("189,99").
+- **Thumbnails** use WordPress's `woocommerce_thumbnail` size, lazy-loaded. Never
+  full-size images on mobile data.
+- **Sheets** get `overscroll-behavior: contain`, so scrolling a sheet never scrolls the
+  page behind it.
+- **One network write per publish.** Moves are local until then.
+- **No hover-only affordances.** Everything reachable by tap.
 
 ---
 
-## 6. Margin × taxonomy: engine design
+## 5. Config as code
 
-### 6.1 Scope
+"Everything must be configurable by code configs" is read here as follows:
+
+- The **editor's behaviour** lives in one typed file.
+- **Data** (margins, locks) stays data, edited in the UI.
+- **What the customer is allowed to see and edit** is code, changed by you.
 
 ```ts
-interface RuleScope {
-  // …existing axes
-  /** Woo product_cat slug — matches products in that category or any child. */
-  storeCategory?: string;
-  /** Woo product_brand slug — matches that brand or any sub-brand. */
-  storeBrand?: string;
-}
-
-type ProductScopeAxes = Pick<SourceProduct, /* …existing */> & {
-  /** Slugs of every product_cat the store product sits in, ancestors included. */
-  storeCategories?: string[];
-  /** Same for product_brand. */
-  storeBrands?: string[];
-};
+// src/config/hub.config.ts — validated with Zod at startup
+export default defineHubConfig({
+  ui: {
+    landing: "/vetrina",
+    theme: "ios",                         // "ios" | "material"
+    // Tabs in the nav. Leaning the old UI = removing entries here.
+    nav: ["/vetrina", "/vetrina/margini", "/orders", "/catalog", "/pricing", "/sync"],
+  },
+  vetrina: {
+    page: "front",                        // or { id: 123 }
+    blocks: {
+      "golden-hive/shortcode-wrapper": {
+        rail: "gh_product_rail",
+        show: "rail",
+        edit: {
+          pins: true, exclude: true, fallback: true,
+          title: false, eyebrow: false, limit: false, button: false, // Q13: read-only for now
+        },
+        maxPins: 60,
+        fallbacks: ["menu_order", "date", "popularity"],             // offered in the segmented control
+      },
+      "golden-hive/hero-carousel":   { show: "summary", edit: false }, // later: slides editable
+      "golden-hive/category-slider": { show: "summary", edit: false },
+      "golden-hive/brand-marquee":   { show: "summary", edit: false },
+      "*":                           { show: false },
+    },
+  },
+  margins: { kind: "percent", min: 0, max: 100, skipSources: ["goldensneakers"], conflicts: "priority" },
+  prices: { publish: "immediate" },
+});
 ```
 
-Ancestors are expanded on the product side, so the rule side stays one slug. A "Nike
-25%" rule then covers Nike Off-White too, unless a more specific rule takes it.
+The plugin **independently** enforces what may be written. It does so in two ways:
 
-### 6.2 Precedence
+- Its own allowlist (a filterable PHP array).
+- The block's own `block.json` attribute types.
 
-Today, precedence is a numeric weight sum (SKU 10 … source 1), and ties go to the later
-rule. Weight sums interact badly with a new axis: a `{brand, secondaryCategory}` rule
-(6) would outrank a section rule weighted 5.
-
-The proposal is to compare rules lexicographically instead:
-
-```
-key(rule) = [ tier, weight, listIndex ]
-  tier   = 3 SKU-scoped · 2 store-term-scoped · 1 everything else
-  weight = today's SCOPE_WEIGHT sum
-  ties   → the later rule wins (as today)
-```
-
-The full precedence becomes **lock > sale rule > SKU rule > section rule >
-brand/family/source rule**.
-
-- **Between section rules**, `listIndex` is the customer's priority list (§3.2 D). When a
-  rule is created for a sub-brand, it's inserted above its parent brand's rule by default.
-- **Margin handling doesn't change.** The most specific rule still takes over the whole
-  margin, and the safety nets still merge field by field: minimum € margin, outlier
-  guard, rounding, anti-churn. A 5% section still never sells below ask + €20.
-- **Callers of `scopeSpecificity`** switch to the same comparator:
-  `winningMarkupRuleId`, the drawer's applied rule, and `resolveCategoryPath`.
-- **Effect on today's rules.** Nothing changes unless a non-SKU rule's weights add up to
-  10 or more. For example, family + sub-family + name = 11, which beats a SKU rule
-  today. SKU rules now reliably beat those, which is the documented intent.
-
-### 6.3 Where products get their store axes
-
-| Path | Source of the store axes |
-|---|---|
-| Sync planning (`previewStoreChunk` → `buildPlan`) | the snapshot product's `categories` / `brands` (kept by the pull, §7.4), turned into slugs plus ancestors via `store_terms` |
-| Drawer / product panel | `store_product_terms`, looked up by SKU |
-| Margins coverage (`listProductScopeAxes`) | SQL join producing aggregated slug arrays |
-| Publish (new products) | identity resolved at create time (`categoryIds`, `brandId`) |
-| Catalog products not on the store | none, so section rules correctly don't apply |
-
-Store products and catalog SKUs are linked through `skuKey`. When duplicate store
-products share one SKU, the Hub uses the union of their terms.
-
-### 6.4 GoldenSneakers
-
-A section rule would take over the passthrough rule's margin and apply it on top of
-`presented_price`, which already includes the upstream markup. The margin would count
-twice.
-
-- **v1 proposal:** section rules skip the `goldensneakers` source. That's a guard in the
-  resolver, plus a visible "prezzo dal fornitore" badge.
-- **Alternative:** price GoldenSneakers products from `offer_price` (cost) with the
-  Hub's margins and VAT, and set the feed URL's markup to 0. That's a pricing-model
-  change of its own (Q18).
-
-### 6.5 Getting margins onto the site
-
-1. The customer changes a section margin and presses **Anteprima**. The Hub shows the
-   proposed prices for the section's SKUs under the draft rules: how many go up, go down
-   or stay the same, the average change, and the full list.
-2. **Applica** saves the rule and runs `startStoreSync(market, sectionSkus)` until done,
-   then `applySync({ priceScope: "all", dryRun: false, sanitize: false, backfillGtins: false })`.
-
-It writes prices only, with no size cleanup triggered from the customer's side. It is
-bounded by the section's size and audited in `apply_audit`.
-
-The daily scheduler refreshes asks but doesn't push prices, and that stays the same.
-Whether it should push prices (only prices, no cleanup) is Q22.
-
-### 6.6 Sale sections
-
-For Saldi to show struck-through prices, the regular price would be the price without
-the section rule, and the sale price the price with it. Today the plan writes only
-`regular_price` and preserves manual `sale_price` (the sale rule). This is doable, but
-it means a second price column through plan and apply (Q19).
+So the Hub config narrows what the UI offers, but can never widen what WordPress
+accepts. Enabling title editing later means changing both allowlists by one line each.
 
 ---
 
-## 7. Technical spec
+## 6. Storefront side: golden-hive-blocks
 
-### 7.1 Architecture
+### 6.1 Three new rail attributes
 
 ```
-┌─────────────────── Store Hub (Next.js) ───────────────────┐         ┌────────────── WordPress ──────────────┐
-│ /vetrina (shop role)        /… existing tabs (admin)       │         │ WooCommerce REST  wc/v3               │
-│      │                                                     │  Woo    │   products, products/batch,            │
-│      ▼ server actions (role-guarded)                       │  keys   │   products/categories, products/brands │
-│ merch mirror: store_terms, store_products,                 │ ──────▶ │                                        │
-│   store_product_terms, vetrina_blocks                      │         │ golden-hive-blocks  wc-gh/v1  (new)    │
-│ pricing engine (+ store-term scope)                        │ ──────▶ │   capabilities, homepage,              │
-│ sync on SKU subsets (existing)                             │         │   rail-preview, rail-state             │
-└────────────────────────────────────────────────────────────┘         │ rail query + archives honour pins      │
-                                                                       └────────────────────────────────────────┘
+[gh_product_rail category="saldi-sneakers-outlet" limit="18" pin="1201,877,1543" exclude="990" fallback="menu_order"]
 ```
 
-### 7.2 golden-hive-blocks extension
-
-The extension lives in `includes/hub-rails.php`, about 150–250 lines.
-
-**Auth.**
-
-- The namespace is `wc-gh/v1`. WooCommerce's key authentication covers `wc/` **and**
-  `wc-` routes; the source says "`wc-` lets third party plugins use our authentication
-  methods" (`is_wc_namespace()`, verified in trunk).
-- So the Hub's existing consumer key and secret authenticate these routes, with no
-  Application Password needed.
-- The permission callback checks `current_user_can('manage_woocommerce')`. Woo enforces
-  the key's read/write level per HTTP method.
-- Fallback: the Application Password pattern that `gh/v1/roundtrip/*` already uses.
-
-**Endpoints.**
-
-| Method | Route | Returns / does |
+| Attribute | Meaning | Default |
 |---|---|---|
-| GET | `/capabilities` | plugin version and features. Without them, the Hub drops to read-only |
-| GET | `/homepage` | reads the front page (`page_on_front`) with `parse_blocks`, recursively. Returns an ordered list: rails (block path, eyebrow, title, taxonomy, slugs, term ids, limit, type, columns, background, button), non-rail blocks as placeholders, and the page's `modified` time |
-| GET | `/rail-preview?taxonomy&term&limit` | the ids the rail renders **now**. This is the source of truth for the Hub's preview |
-| GET | `/rail-state?taxonomy&term` | `{ pinned, excluded, fallback, revision }` for one term, or for every term that has state |
-| PUT | `/rail-state` | same body plus `expected_revision`, which returns 409 on a mismatch. Bumps the revision and purges the page cache |
+| `pin` | product ids shown first, in this order (only those that are members and visible) | none, which is today's behaviour |
+| `exclude` | product ids never shown in this rail. They stay in the category, and margins still apply. | none |
+| `fallback` | order for everything after the pins. WooCommerce's own catalog orderings, the same options as the shop's "Ordina per" menu: `menu_order` · `date` · `popularity` · `price` · `price-desc` | `menu_order`, which is today's behaviour |
 
-**Storage.** Term meta on the `product_cat` / `product_brand` term:
+Effective order, one definition:
 
-- `_gh_rail_pinned` (int[], at most 100)
-- `_gh_rail_excluded` (int[])
-- `_gh_rail_fallback`
-- `_gh_rail_revision`
+```
+visible = publish ∧ in term (incl. children) ∧ not exclude-from-catalog
+        ∧ (hide_out_of_stock ⇒ instock) ∧ id ∉ exclude
+rail    = first `limit` of ( [pin ∩ visible, in pin order] ++ [visible \ pin, by fallback] )
+```
 
-**Rail query.** In `ghb_get_carousel_products()`, when exactly one term resolves and it
-has state:
+Implementation, inside `ghb_get_carousel_products()`, only when `pin` / `exclude` /
+`fallback` are present:
 
-1. Get the term's visible ids, ordered by the fallback rule (`fields => ids`,
-   `no_found_rows`), minus the excluded ones.
+1. Get the visible ids (`fields => ids`), ordered through
+   `WC()->query->get_catalog_ordering_args()` for the fallback.
 2. Move the pinned ids to the front, keeping everything else in order.
 3. Cut the list to `limit`.
 4. Render with `post__in` + `orderby => post__in`.
 
-That's two queries, and any WordPress `orderby` works as a fallback, meta sorts
-included. The id list is cached in a transient keyed by term, revision and stock
-option. The cache is invalidated on `save_post_product`, on a stock status change, and
-on a state PUT.
+The id list is cached in a transient keyed by the attributes and the stock option, and
+invalidated on product save and stock change. Without the new attributes, the current
+code path runs untouched.
 
-**Category and brand pages.** On the main query of that term's archive, when the
-visitor hasn't chosen another sort (`orderby` = `menu_order`):
+### 6.2 Endpoints: namespace `wc-gh/v1`
 
-- prepend `FIELD(ID, pins…) = 0, FIELD(ID, pins…)` via `posts_clauses` (pagination
-  keeps working);
-- exclude the `excluded` ids;
-- provide a filter to opt out.
+All endpoints use Woo-key auth and require `manage_woocommerce`.
 
-**Cache purge** after a state PUT: fire `do_action('gh_rail_state_published', …)`, plus
-the known purges when present (LiteSpeed, WP Rocket, W3TC…). Cloudflare depends on
-the setup (Q25).
-
-**Later (phase 5):** `PUT /homepage/rail`, to edit a rail's attrs (title, eyebrow,
-limit, term) and to reorder or add rails.
-
-- It runs `parse_blocks` → change the block → `serialize_blocks` → `wp_update_post`.
-  That creates a WP revision, which doubles as undo.
-- It is guarded by `expected_modified`.
-
-### 7.3 Hub data model (Drizzle)
-
-```ts
-// Woo terms, both taxonomies. Refreshed by the merch pull.
-store_terms {
-  taxonomy: "product_cat" | "product_brand"; termId: int; parentId: int /* 0 = root */;
-  slug; name; count: int; menuOrder: int | null; image: text; syncedAt;
-  PK (taxonomy, termId) · idx (taxonomy, slug)
-}
-
-// One row per published store product (simple AND variable): the merchandising mirror.
-store_products {
-  id: int PK /* Woo id */; sku; name; type; status; menuOrder: int; featured: bool;
-  catalogVisibility; stockStatus; price: numeric | null; regularPrice; salePrice; onSale: bool;
-  image; permalink; totalSales: int; dateCreated; dateModified; syncedAt;
-  idx (sku)
-}
-
-store_product_terms { productId; taxonomy; termId;  PK (all) · idx (taxonomy, termId) }
-
-// Homepage structure, as read from /homepage.
-vetrina_blocks {
-  position: int PK; path: text; kind: "rail" | "static"; blockName;
-  title; eyebrow; taxonomy: text | null; termSlugs: text[]; termIds: int[]; limit: int | null;
-  attrs: jsonb; pageModified: timestamp; syncedAt;
-}
-
-// Per-term rail state: the published copy (mirror of the term meta) + the customer's draft.
-vetrina_section_state {
-  taxonomy; termId;  PK (taxonomy, termId);
-  published: jsonb /* { pinned, excluded, fallback, revision } */;
-  draft: jsonb | null /* { pinned, excluded, fallback, addIds, removeIds } */;
-  draftUpdatedAt;
-}
-
-// Every publish (order, membership, prices, margins), with what it replaced.
-vetrina_publish_log {
-  id: uuid; kind: "order" | "membership" | "prices" | "margin"; taxonomy; termId: int | null;
-  before: jsonb; after: jsonb; result: jsonb; role; at;
-}
-```
-
-Rules stay in `config.pricingRules`, so one engine prices everything. Section rules
-carry `origin: "vetrina"`. The developer's Margins tab shows them flagged, and the
-customer only ever sees and edits those.
-
-### 7.4 The merch pull
-
-- **Full pull** (nightly, plus a button):
-  - `GET products?status=publish&per_page=100&_fields=id,sku,name,type,status,menu_order,featured,catalog_visibility,stock_status,price,regular_price,sale_price,on_sale,images,categories,brands,total_sales,date_created,date_modified,permalink`
-  - It fetches no variations, so it's one request per 100 products: a 3,000-product
-    shop takes about 30 requests.
-  - Plus `products/categories` and `products/brands` (`per_page=100`, paged).
-- **Incremental pull** (every ~10 minutes, from the scheduler): the same query with
-  `status=any&modified_after=<last>`, so it also catches unpublished products.
-- **Write-through**: every Hub write patches the mirror, the same way apply patches the
-  snapshot.
-- **The existing variable-only snapshot pull** keeps its job (plan and apply). It also
-  keeps `categories` / `brands` / `menu_order` per product, so the plan engine sees
-  store axes without a second lookup.
-- It reuses `pageVerdict` (the guard against installs that ignore `?page`) and the HTTP
-  retry policy.
-
-### 7.5 Server actions (new)
-
-| Action | Roles | Notes |
+| Method | Route | Does |
 |---|---|---|
-| `getVetrina()` | shop, admin | blocks in homepage order, plus the first N products per rail from the mirror and state |
-| `getSection(taxonomy, termId)` | shop, admin | the full ordered list, with flags: pinned, visible or hidden (and why), locked, margin, other sections |
-| `saveSectionDraft(…)` / `discardSectionDraft(…)` | shop, admin | local only |
-| `publishSection(taxonomy, termId)` | shop, admin | membership writes (live re-read, batched) → `PUT rail-state` with the expected revision → mirror patch → log |
-| `revertPublish(logId)` | shop, admin | publishes `before` |
-| `searchStoreProducts(q, filters)` | shop, admin | the picker |
-| `previewSectionMargin(draft)` / `applySectionMargin(…)` | shop, admin | see §6.5 |
-| `saveProductPrices(sku, prices)` | shop, admin | locks plus a prices-only sync of one SKU. Simple products use `PUT products/{id}` |
-| `refreshMerchMirror({ full })` | admin (+ scheduler) | see §7.4 |
-| `verifyRails()` | admin | compares the Hub's order with `rail-preview`, rail by rail |
+| GET | `/capabilities` | plugin version and supported attributes. The Hub goes read-only if they're missing. |
+| GET | `/homepage` | parses the front page's blocks. Returns rails (block path, attributes, parsed shortcode, the ids rendered now, card data) and other blocks as summaries. Also returns `page_id` and `modified`. |
+| GET | `/rail?path=…&offset&count` | every member of a rail in effective order, plus hidden pinned ones with a reason (`outofstock`, `hidden`, `excluded`). Cards include id, sku, name, `woocommerce_thumbnail`, min price, stock status. |
+| PUT | `/homepage/block` | writes allowlisted attributes of one block (§6.3). `dry_run: true` returns the diff only. |
+| GET | `/homepage/history?path=…` | the block's attributes in recent revisions, for "Ripristina" |
 
-Every existing action that writes to Woo or to config gets `requireRole("admin")` (§7.7).
+### 6.3 Safe page writes
 
-### 7.6 UI
+1. **Reject stale writes.** If `expected_modified` doesn't match the page's
+   `post_modified_gmt`, return 409 and the editor reloads.
+2. **Locate the block and check it.** Find it by `path`, assert `blockName`, and compare
+   a hash of its current attributes with `expected_attrs_hash`. On mismatch, return 409.
+3. **Build the new attributes.** Only allowlisted keys change. Values are validated:
+   - ids are integers, at most 100 of them;
+   - `fallback` must be one of the known values;
+   - the types must match `block.json`.
+4. **Edit the shortcode string without disturbing it.** Parse it with
+   `shortcode_parse_atts()`, change or add only `pin` / `exclude` / `fallback`, and keep
+   every other attribute and its order.
+5. **Make a targeted replacement, never a whole-page rewrite.**
+   - Serialize the old attributes with `serialize_block_attributes()` (WordPress's
+     canonical escaping, the `"` seen in the markup).
+   - Find `<!-- wp:golden-hive/shortcode-wrapper {old} /-->`, which **must occur exactly
+     once**.
+   - Swap in the new attributes. If the block isn't found exactly once, return 422 and
+     write nothing.
+6. **Save.** `wp_update_post` creates a revision. Purge the page cache (LiteSpeed, WP
+   Rocket, W3TC hooks when present; Cloudflare depends on your setup, Q25). Return the
+   new `modified` and the rendered ids.
 
-- **Route groups** (URLs don't change):
-  - the root layout keeps `<html>`, the theme and i18n;
-  - today's header and `MainNav` move to `src/app/(admin)/layout.tsx`, together with
-    every existing route;
-  - the new `src/app/(vetrina)/vetrina/…` gets a slim header: logo, "Vetrina", "Vedi il
-    sito", logout;
-  - the admin nav gains a "Vetrina" tab.
-- **Routes**:
-  - `/vetrina`, `/vetrina/[taxonomy]/[slug]`, `/vetrina/categorie`, `/vetrina/margini`;
-  - the product panel opens with `?prodotto=<id>`. It's deep-linkable and the back
-    button closes it, the same pattern as the drawer.
-- **Drag and drop**: **`@dnd-kit/core` + `@dnd-kit/sortable`**. They're MIT-licensed,
-  handle pointer, touch and keyboard, sort grids, and announce moves to screen readers.
-  They aren't TanStack packages, so the CI guard is unaffected.
-- **Rendering**: server components for reads, client components for the editor. SWR is
-  already a dependency, for polling a running apply.
-- **Copy**: written in `it.ts` first, then mirrored in `en.ts` (the existing convention).
+### 6.4 Category pages follow their homepage rail (Q9)
 
-### 7.7 Roles
+On a category or brand archive's main query, when the visitor hasn't picked another
+sort:
 
-- `APP_PASSWORD` stays the admin password (everything, as today). A new `SHOP_PASSWORD`
-  gives the shop role.
-- **Session tokens**:
-  - Admin: the token stays exactly as today, so nobody gets logged out.
-  - Shop: `HMAC(SHOP_PASSWORD, "store-hub-session-v1:shop")`.
-  - The proxy matches the cookie against both tokens to get the role.
-- **The shop role** can reach `/vetrina/**` and `/login`, plus `/orders` if Q3 says so.
-  Anything else redirects to `/vetrina`.
-- **Server actions are POST endpoints reachable from any page**, so the proxy alone
-  can't protect them. Next's own guidance is to treat every action as a public
-  endpoint.
-  - So `requireRole()` runs inside each action, reading the cookie through `cookies()`.
-  - Actions the shop role may call are listed explicitly, and everything else is denied
-    by default.
+- find the first homepage rail whose single term is this term (the front page's parsed
+  rails are cached, and the cache is invalidated when the page is saved);
+- apply its pins as `FIELD(ID, …)` ordering via `posts_clauses`, so pagination keeps
+  working;
+- apply its exclusions.
 
-### 7.8 Publishing safety
-
-- **One explicit button per write**, with a count and a summary. Order changes also get
-  a before/after preview.
-- **Optimistic concurrency**:
-  - `expected_revision` on rail state;
-  - a live re-read before membership writes;
-  - `assertSnapshotIsThisStore()` before any price write.
-- **Logging**: everything goes to `vetrina_publish_log`, and prices also to
-  `apply_audit`. Reverting means publishing `before`.
-- **Customer-triggered syncs are prices-only**: `sanitize: false`, no GTIN backfill, no
-  product creation.
-- **If the plugin is missing or too old**, `/capabilities` says so, and the Vetrina
-  becomes read-only with a banner.
-
-### 7.9 Tests
-
-- **`core/__tests__`**:
-  - `storeCategory` / `storeBrand` matching, with ancestors;
-  - tier precedence: SKU > section > family/brand;
-  - priority by list order;
-  - the GoldenSneakers guard;
-  - safety nets still merging under a section margin.
-- **Ordering**: `src/lib/vetrina/order.ts` (`effectiveRailOrder`) is pure and
-  table-tested. The same JSON cases drive a PHP test of the plugin's ordering helper.
-- **Other units**:
-  - homepage payload parsing;
-  - the role guard, in both the proxy and the actions;
-  - membership read-modify-write, which must never drop a product's existing categories.
-- **Live check**: `verifyRails()` is the contract check after every deploy.
+Terms without a homepage rail keep today's order.
 
 ---
 
-## 8. Phasing
+## 7. Membership (curated rails)
+
+- **Curated rails** (Tendenza, Saldi, Offerte, Nuovi arrivi) stay category-driven.
+  - This keeps one concept, "the product is in Saldi", behind the rail, the category page
+    and the Saldi margin.
+  - A hand-picked `ids` list would split those apart: "I added it to Saldi but the price
+    didn't drop".
+- **"+ Aggiungi"** opens a search sheet (live Woo REST `products?search=`). The editor
+  assigns the category (live re-read, then `existing ∪ {term}`) and pins the product
+  where it was dropped.
+- **"Rimuovi da Saldi"** removes the category. The Hub warns if the product would be left
+  with no category.
+- **Brand rails** can't remove a brand. "Nascondi" uses `exclude`.
+
+---
+
+## 8. Prices and margin × taxonomy (engine)
+
+### 8.1 Scope
+
+`RuleScope` gains `storeCategory?` / `storeBrand?` (Woo slugs). Products carry their
+term slugs, **ancestors included**, as `storeCategories` / `storeBrands`. So a "Nike" rule
+covers Nike Off-White, unless a more specific rule takes it.
+
+### 8.2 Precedence
+
+Rules compare lexicographically:
+
+```
+key(rule) = [ tier, weight, listIndex ]
+  tier   = 3 SKU · 2 store term · 1 everything else
+  weight = today's SCOPE_WEIGHT sum
+  ties   → the later rule wins (as today)
+```
+
+- **Full order**: lock > sale rule > SKU rule > section rule > brand/family/source
+  rule.
+- **Between section rules**, list order is the customer's priority list. A sub-brand's
+  rule is inserted above its parent's by default.
+- **Unchanged**: the whole-margin takeover, and field-by-field merging of the nets (€20
+  minimum margin, outlier guard, rounding, anti-churn).
+- **Effect on today's rules**: only rules whose weights add up to 10 or more (for
+  example family + sub-family + name = 11) now lose to SKU rules, which is the
+  documented intent.
+- **GoldenSneakers**: section rules skip `source: goldensneakers`. The UI shows "prezzo
+  dal fornitore".
+
+### 8.3 Where products get their store axes (no new tables)
+
+- `toStoreProduct()` keeps `categories` / `brands` (`[{ id, slug }]`), which Woo already
+  sends in the pulled payload.
+- At the end of a pull, the snapshot also stores both term trees (`model.terms`), for
+  ancestor expansion.
+- **Sync planning** enriches each product's axes before `buildPlan`.
+- **The drawer and product sheet** use the same data.
+- **Margins coverage** reads it too.
+
+### 8.4 Margin sheet: preview, then apply
+
+1. **Preview.** The Hub computes proposed prices for the rail term's SKUs under the draft
+   rule: how many go up / down / stay the same, the average change, and the list.
+2. **Apply.** It saves the rule and runs `startStoreSync(market, termSkus)` until done,
+   then `applySync({ priceScope: "all", dryRun: false, sanitize: false, backfillGtins: false })`.
+
+That's prices only, bounded by the term's size, and audited in `apply_audit`.
+
+### 8.5 Product sheet: prices and locks
+
+- **Editing a size's price** locks it (the existing `store_overrides`). "Salva e
+  pubblica" runs the same prices-only sync for that one SKU.
+- **Store-only and simple products** write directly (`updateStoreVariation`, plus a
+  `PUT products/{id}` for simple products).
+- **A price locked below cost** (under the ask or the feed's `offer_price`) shows a
+  warning before it's saved.
+
+---
+
+## 9. Hub changes (files, not tables)
+
+| Area | Change |
+|---|---|
+| Config | `src/config/hub.config.ts` + Zod schema (§5) |
+| Woo client | `getHomepage()`, `getRail()`, `putHomepageBlock()`, `getBlockHistory()` on `wc-gh/v1`; `searchProducts()`; category assign/remove (live re-read) |
+| Store pull | keep `categories` / `brands`; fetch both term trees into the snapshot |
+| Engine | `storeCategory` / `storeBrand` scope, tiered comparator, GoldenSneakers guard |
+| Server actions | `getVetrina`, `getRail`, `publishRail`, `restoreRail`, `searchProducts`, `addToRail` / `removeFromRail`, `saveProductPrices`, `previewTermMargin` / `applyTermMargin`, `listTermMargins` / `saveTermMarginPriority` |
+| UI | `src/app/(vetrina)/…`: its own layout with a Konsta `App`; the root layout keeps html/theme/i18n; existing routes move under `(admin)` (URLs unchanged); nav from config |
+| App install | `app/manifest.ts`, icons, `appleWebApp` metadata |
+| Deps | `konsta`, `motion`, `react-modal-sheet`, `sonner` |
+
+History is WordPress's revisions. Price runs stay in `apply_audit`. No migration is
+needed.
+
+---
+
+## 10. Tests
+
+- **Engine**:
+  - store-term matching with ancestors;
+  - tier precedence;
+  - list-order priority;
+  - the GoldenSneakers guard;
+  - the safety nets still applying under a section margin.
+- **Ordering**: a pure `effectiveRailOrder()` in TypeScript, for optimistic UI and
+  previews. Its JSON cases are shared with a PHP test of the plugin helper.
+- **Plugin writes** (PHP unit tests against real homepage markup):
+  - shortcode attribute editing preserves every other attribute;
+  - the targeted replacement matches exactly once;
+  - a dry run returns the right diff;
+  - 409 / 422 paths.
+- **Membership**: assign/remove never drops a product's other categories.
+- **Contract**: after every deploy, `capabilities` + a dry-run write on the live
+  homepage.
+
+---
+
+## 11. Phasing
 
 | Phase | Scope | Done when |
 |---|---|---|
-| 0 | This doc → answers → "agreed" | every blocking question is answered |
-| 1 · See | Roles; route groups; merch mirror + scheduler; plugin read endpoints (`capabilities`, `homepage`, `rail-preview`); read-only Vetrina, section view, category and brand browser | for every homepage rail, the Hub shows the same products as the site, in the same order (`verifyRails()` green) |
-| 2 · Price | Store-term scope, precedence and tests; Margini per sezione (priority, conflicts, preview, apply); product panel with locks and "Salva e pubblica" | changing Saldi to 10% first shows the price changes, then updates exactly Saldi's products; a lock goes live in one action and survives the next full Sync |
-| 3 · Order | Plugin: pins, exclusions and fallback in rails and archives, `rail-state`, cache purge. Editor: grid and list, drag, non-drag twins, presets, ghosts, before/after, history | reorder → publish → the homepage and category page match; revert restores the previous order |
-| 4 · Fill | Add and remove for curated categories, the picker, hiding in brand sections | adding or removing never loses a product's other categories |
-| 5 · Shape (optional) | Edit rail titles, limits and terms; reorder or add rails; maybe hero, slider and marquee | a rail edited in the Hub shows on the site, with a WP revision behind it |
+| 1 · See | Konsta spike; plugin `capabilities`, `homepage`, `rail`; Hub home + read-only rail view; manifest; nav from config | the Vetrina on a phone shows every rail exactly as the site renders it |
+| 2 · Order | Plugin `pin` / `exclude` / `fallback`, `homepage/block`, `history`, archive-follows-rail; editor: grip drag, action sheet, publish bar, undo toast, restore | reorder on a phone → one tap → the homepage and category page match; restore works; Gutenberg shows the attributes |
+| 3 · Price | Pull keeps terms; store-term scope + precedence + tests; product sheet with locks + immediate publish; margin sheet + margins list (priority, conflicts) | Saldi at 10% previews, then updates exactly Saldi's products; a lock goes live in one tap and survives the next full Sync |
+| 4 · Fill | Search sheet; add/remove for curated rails | adding or removing never loses a product's other categories |
+| 5 · Shape (config flip) | Titles, eyebrows, limits; hero slides, slider, marquee through the same endpoint | turning on a flag in `hub.config.ts` + the plugin allowlist makes it editable |
 
-Phases 2 and 3 can swap if order matters more than margins. Phase 2 needs no plugin
+Phases 2 and 3 are independent and can run in either order. Phase 3 needs no plugin
 deploy.
 
 ---
 
-## 9. Decisions needed
+## 12. Open questions
 
-Answer by number. **B*n*** means the question blocks phase *n*.
+1. **Reference image** (Q1): a screenshot never came through. If "attached" meant the
+   page markup, this is closed.
+2. **iPhone or Android?** It sets the Konsta theme default (`ios` / `material`).
+3. **Q10: NUOVI ARRIVI.** It could become automatic: `fallback="date"` on a broad
+   category shows the newest products with no manual tagging. You'd pin what must stay on
+   top. Keep manual, or go automatic?
+4. **Q19: Saldi.** Struck-through price (regular + sale), or just a lower price?
+5. **Q22: the full Sync.** Who runs it, and how often, now that margins change from the
+   phone? Should the scheduler push prices daily (prices only)?
+6. **Store facts** (Q23–27):
+   - number of products and terms;
+   - rough share of StockX, GoldenSneakers and store-only products;
+   - the page cache or CDN in front of the site;
+   - whether "Nascondi prodotti esauriti" is on;
+   - whether anyone reorders or recategorizes in WP admin.
 
-### People and product
+Proposed and assumed unless you object:
 
-1. **B1** — The reference image didn't come through. Can you re-attach it or describe it?
-2. **B1** — What will the customer use: phone, tablet or desktop?
-   *Recommended: list-first on phone, grid on desktop.*
-3. **B1** — Should the customer get a separate login that only sees the Vetrina (and
-   Ordini?), while you keep everything?
-   *Recommended: yes, with `SHOP_PASSWORD`.*
-4. Is "Vetrina" the right name?
-5. You listed "products themselves". Beyond membership, order and price, which fields
-   must the customer edit: name, photos, description, per-size stock,
-   publish/unpublish?
-   *Recommended for v1: none, plus a "Modifica su WordPress" link.*
-6. **B1** — How are changes saved: an explicit yellow button with history and undo, or
-   autosave?
-   *Recommended: the explicit button.*
-
-### Ordering
-
-7. **B3** — Is it OK to extend `golden-hive-blocks` for per-section order (pins in term
-   meta)? The alternative is global `menu_order` only, accepting cross-section conflicts.
-   *Recommended: extend the plugin.*
-8. What order should products follow after the pinned ones: today's (`menu_order` then
-   name), newest, bestsellers or price? And should it be chosen per section?
-   *Recommended: per section, defaulting to today's order so nothing moves on day one.*
-9. Should category and brand pages (where the "Esplora" buttons land) show the same
-   order as the rail?
-   *Recommended: yes.*
-10. How is NUOVI ARRIVI filled today — does someone tag `new-nuove-release` by hand?
-    Should it stay manual, or become automatic (created in the last N days)?
-
-### Membership
-
-11. **B4** — Should the customer add and remove products in the curated sections? That
-    means assigning Woo categories.
-12. Should brand sections allow "Nascondi da questa sezione"?
-
-### Homepage structure
-
-13. v1 mirrors the homepage read-only. Should the Hub later edit sections — titles,
-    limits, section order, new sections, hero, slider, marquee? Which of these, if any?
-14. **B1** — Is it OK to authenticate the new plugin endpoints with the existing Woo keys
-    (a `wc-`-prefixed namespace), or do you prefer an Application Password?
-
-### Prices and margins
-
-15. **B2** — What does a section margin look like: one % per section, or also fixed € and
-    price bands?
-    *Recommended: one %.*
-16. **B2** — A product in two sections with different margins: explicit priority, lowest
-    wins, or highest wins?
-    *Recommended: explicit priority.*
-17. **B2** — Do you agree that section margins beat your brand/family rules, lose to
-    per-SKU rules and locks, and that your safety nets (min €20 margin, outlier guard,
-    rounding) keep applying?
-18. **B2** — GoldenSneakers products: exclude them from section margins in v1, or re-base
-    them on `offer_price` plus the Hub's margin?
-    *Recommended: exclude in v1.*
-19. Saldi: struck-through price (regular + sale), or just a lower price?
-20. **B2** — When the customer edits or locks a price in the Vetrina, does it go live
-    immediately for that product, or wait for your Sync?
-    *Recommended: immediately.*
-21. **B2** — When the customer changes a section margin: preview, then apply to that
-    section right away, or wait for Sync?
-    *Recommended: preview, then apply right away.*
-22. Who runs the full Sync, and how often, now that the customer changes margins? Should
-    the scheduler push prices daily (prices only, no cleanup)?
-
-### Store facts
-
-23. **B1** — How many published products are there (and how many are simple vs
-    variable), how many categories and brands? Roughly how many products sit in two or
-    more homepage sections?
-24. What share of products comes from each price source: StockX, GoldenSneakers,
-    store-only?
-25. **B3** — Is there a page cache or CDN in front of the homepage (LiteSpeed, WP Rocket,
-    Cloudflare…)?
-26. Is "Nascondi prodotti esauriti" on in WooCommerce?
-27. Does anyone reorder or recategorize products in WP admin (for example with the Hive
-    Commerce sorter)? This decides the refresh cadence and how conflicts are handled.
+- **Q11**: curated rails stay category-driven (§7).
+- **Q12**: brand rails can hide products (`exclude`).
 
 ---
 
-## 10. Risks
+## 13. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Hub features depend on the plugin's version | `/capabilities`; read-only fallback; required plugin version noted per phase |
-| The page cache serves the old homepage after a publish | purge hooks (§7.2); "Vedi il sito" with a cache-busting parameter; `verifyRails()` |
-| Double margin on GoldenSneakers products | resolver guard + badge (§6.4) |
-| A margin change moves many prices | preview first; bounded to the section; audited; revertable (re-save the previous margin and apply) |
-| Mirror goes stale after edits in WP admin | incremental pull; live re-read before membership writes; revision on rail state |
-| The customer reaches destructive tools | role split, per-action guards, deny by default |
-| Scope creeps into a page builder | phase 5 is optional and separate |
+| A write damages the homepage | allowlist + `block.json` validation + exact-once targeted replacement + stale-write rejection + revision; dry run in the contract check |
+| The page cache serves the old homepage after a publish | purge hooks; "Vedi il sito" with a cache-busting parameter |
+| Gutenberg and the Vetrina edit at the same time | `expected_modified` → 409 → the editor reloads with the latest page |
+| Double margin on GoldenSneakers products | resolver guard + badge |
+| A margin change moves many prices | preview first; bounded to the term; audited; restore by re-applying the previous % |
+| The customer opens destructive tabs by URL | those tabs are off the nav by config; destructive runs stay dry-run-first |
+| Konsta clashes with the Hub's Tailwind tokens | phase 1 spike, scoped to the `(vetrina)` layout |
+
+---
+
+## Appendix A: v0 (Hub-owned sections) — why not
+
+v0 made each Woo term a "section" and put the order in term meta. The Hub kept six new
+tables:
+
+- a store mirror (terms, products, memberships);
+- the homepage structure;
+- per-term draft and published state;
+- a publish log.
+
+The rail query and the archives read the term meta.
+
+It works, but it duplicates state WordPress already owns, and it needs scheduled pulls
+to stay honest. It also gives no path to editing hero slides or the slider without new
+machinery. B keeps the one piece v0 got right — prices and margins belong to the Hub —
+and drops the rest.
