@@ -22,6 +22,7 @@ export default async function RailPage({ params }: { params: Promise<{ key: stri
         fallbacks: hubConfig.vetrina.fallbacks,
         edit,
         maxPins: hubConfig.vetrina.maxPins,
+        maxLimit: hubConfig.vetrina.maxLimit,
         pageSize: hubConfig.vetrina.pageSize,
       }}
     />

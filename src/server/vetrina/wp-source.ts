@@ -3,7 +3,7 @@ import { env } from "@/lib/env";
 import { hubConfig } from "@/config";
 import { z } from "zod";
 import { requestJson, type HttpError, type RetryPolicy } from "@/server/adapters/http";
-import type { RailFallback, RailWrite } from "@/lib/vetrina/types";
+import type { BlockWrite, RailFallback, RailWrite } from "@/lib/vetrina/types";
 import {
   parseCapabilities,
   parseCards,
@@ -59,7 +59,7 @@ function wpError(e: unknown): VetrinaError {
   if (code === "rest_no_route" || (status === 404 && code === "")) {
     return new VetrinaError(
       "plugin_missing",
-      "Il sito non risponde alla Vetrina: aggiorna il plugin Golden Hive Blocks alla versione 5.9.0 o successiva.",
+      "Il sito non risponde alla Vetrina: aggiorna il plugin Golden Hive Blocks alla versione 5.10.0 o successiva.",
       status,
     );
   }
@@ -139,7 +139,28 @@ export function wordpressSource(): VetrinaSource {
           block_name: input.blockName,
           expected_modified_gmt: input.expectedModifiedGmt,
           expected_attrs_hash: input.expectedAttrsHash,
-          rail: { pin: input.pin, exclude: input.exclude, fallback: input.fallback },
+          rail: {
+            pin: input.pin,
+            exclude: input.exclude,
+            fallback: input.fallback,
+            ...(input.limit != null ? { limit: input.limit } : {}),
+          },
+          ...(input.fields && Object.keys(input.fields).length > 0 ? { attrs: input.fields } : {}),
+          dry_run: input.dryRun ?? false,
+        }),
+      );
+    },
+    async writeBlock(input: BlockWrite) {
+      return parsed(
+        "homepage/block",
+        parseWriteResult,
+        await call("POST", "homepage/block", {}, {
+          page_id: input.pageId,
+          path: input.path,
+          block_name: input.blockName,
+          expected_modified_gmt: input.expectedModifiedGmt,
+          expected_attrs_hash: input.expectedAttrsHash,
+          attrs: input.fields,
           dry_run: input.dryRun ?? false,
         }),
       );

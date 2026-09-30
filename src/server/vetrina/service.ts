@@ -3,7 +3,9 @@ import { blockConfig, hubConfig } from "@/config";
 import { getOverrides } from "@/server/overrides/repo";
 import { lockedPriceCounts } from "@/server/overrides/model";
 import { skuKey } from "@/lib/skus";
+import { editableFields, fieldChanges, fieldProblem } from "@/lib/vetrina/fields";
 import type {
+  FieldValues,
   Homepage,
   ProductCard,
   RailDetail,
@@ -88,6 +90,28 @@ export interface PublishInput extends RailState {
   /** What the editor read — a publish on top of anything newer is refused. */
   expectedModifiedGmt: string;
   expectedAttrsHash: string;
+  /** The section's fields as the customer left them (only changes are written). */
+  fields?: FieldValues;
+  limit?: number;
+}
+
+const RAIL_BLOCK = "golden-hive/shortcode-wrapper";
+
+/**
+ * The field edits a publish may carry: the fields the config lets the
+ * customer edit and the site's plugin supports, checked, and only those that
+ * change. Anything else in `wanted` is ignored, never written.
+ */
+function allowedFieldChanges(blockName: string, configured: readonly string[], current: FieldValues, wanted: FieldValues): FieldValues {
+  const editable = new Set(editableFields(blockName, configured, current));
+  const requested: FieldValues = {};
+  for (const [field, value] of Object.entries(wanted)) {
+    if (!editable.has(field)) continue;
+    const problem = fieldProblem(blockName, field, value);
+    if (problem) throw new VetrinaError("invalid", `Valore non valido per ${field} (${problem}).`, 400);
+    requested[field] = value;
+  }
+  return fieldChanges(current, { ...current, ...requested });
 }
 
 /**
@@ -102,20 +126,71 @@ export async function publishRail(input: PublishInput): Promise<RailWriteResult>
   if (current.modifiedGmt !== input.expectedModifiedGmt || current.attrsHash !== input.expectedAttrsHash) {
     throw new VetrinaError("stale", "La homepage è stata modificata nel frattempo: ricarica la sezione.", 409);
   }
-  const allowed = blockConfig("golden-hive/shortcode-wrapper").edit;
+  const allowed = blockConfig(RAIL_BLOCK).edit;
   const max = hubConfig.vetrina.maxPins;
   const pin = allowed.pins ? input.pin : current.pin;
   if (pin.length > max) {
     throw new VetrinaError("invalid", `Al massimo ${max} prodotti in posizione fissa.`, 400);
   }
+  const fields = allowedFieldChanges(RAIL_BLOCK, allowed.fields, current.fields, input.fields ?? {});
+  // A size is only written by a plugin that reports fields (≥ 5.10.0): an
+  // older one would silently ignore it.
+  const sizeable = allowed.limit && Object.keys(current.fields).length > 0;
+  let limit: number | undefined;
+  if (sizeable && input.limit != null && input.limit !== current.limit) {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > hubConfig.vetrina.maxLimit) {
+      throw new VetrinaError("invalid", `Da 1 a ${hubConfig.vetrina.maxLimit} prodotti per sezione.`, 400);
+    }
+    limit = input.limit;
+  }
   return source.writeRail({
     pageId: current.pageId,
     path: current.path,
-    blockName: "golden-hive/shortcode-wrapper",
+    blockName: RAIL_BLOCK,
     expectedModifiedGmt: current.modifiedGmt,
     expectedAttrsHash: current.attrsHash,
     pin,
     exclude: allowed.exclude ? input.exclude : current.exclude,
     fallback: allowed.fallback && hubConfig.vetrina.fallbacks.includes(input.fallback) ? input.fallback : current.fallback,
+    ...(Object.keys(fields).length > 0 ? { fields } : {}),
+    ...(limit != null ? { limit } : {}),
+  });
+}
+
+export interface PublishBlockInput {
+  /** The block as the home screen read it. */
+  path: string;
+  blockName: string;
+  expectedModifiedGmt: string;
+  expectedAttrsHash: string;
+  fields: FieldValues;
+}
+
+/**
+ * Publish a block's fields (a slider's title, the FAQ's subtitle). The page is
+ * read again: the write is refused when it changed since the home screen
+ * loaded, and only fields the config allows — and that change — are sent.
+ */
+export async function publishBlock(input: PublishBlockInput): Promise<RailWriteResult> {
+  const source = await getVetrinaSource();
+  const home = await source.homepage();
+  const block = home.blocks.find((b) => b.path === input.path && b.name === input.blockName);
+  if (!block || block.kind !== "static" || !block.fields || !block.attrsHash) {
+    throw new VetrinaError("stale", "La homepage è stata modificata nel frattempo: ricarica.", 409);
+  }
+  if (home.modifiedGmt !== input.expectedModifiedGmt || block.attrsHash !== input.expectedAttrsHash) {
+    throw new VetrinaError("stale", "La homepage è stata modificata nel frattempo: ricarica.", 409);
+  }
+  const fields = allowedFieldChanges(block.name, blockConfig(block.name).edit.fields, block.fields, input.fields);
+  if (Object.keys(fields).length === 0) {
+    throw new VetrinaError("invalid", "Nessun campo da cambiare.", 400);
+  }
+  return source.writeBlock({
+    pageId: home.pageId,
+    path: block.path,
+    blockName: block.name,
+    expectedModifiedGmt: home.modifiedGmt,
+    expectedAttrsHash: block.attrsHash,
+    fields,
   });
 }

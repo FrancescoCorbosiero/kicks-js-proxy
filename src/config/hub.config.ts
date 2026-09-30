@@ -18,18 +18,28 @@ export default defineHubConfig({
     theme: "ios",
     page: "front",
     blocks: {
-      // Product rails: order and hide products. Titles, eyebrows and limits
-      // stay read-only for now (the plugin writes only these three).
-      "golden-hive/shortcode-wrapper": { show: "rail", edit: { pins: true, exclude: true, fallback: true } },
+      // Product rails: order, hide, size, and the section's texts and colour.
+      "golden-hive/shortcode-wrapper": {
+        show: "rail",
+        edit: {
+          pins: true,
+          exclude: true,
+          fallback: true,
+          limit: true,
+          fields: ["eyebrow", "title", "backgroundColor", "buttonText", "buttonUrl"],
+        },
+      },
+      // Other blocks: their titles. Slides, cards and logos stay in WordPress.
       "golden-hive/hero-carousel": { show: "summary" },
-      "golden-hive/category-slider": { show: "summary" },
-      "golden-hive/brand-marquee": { show: "summary" },
+      "golden-hive/category-slider": { show: "summary", edit: { fields: ["title"] } },
+      "golden-hive/brand-marquee": { show: "summary", edit: { fields: ["title"] } },
       "golden-hive/trust-badges": { show: "summary" },
-      "golden-hive/faq-schema": { show: "summary" },
+      "golden-hive/faq-schema": { show: "summary", edit: { fields: ["title", "subtitle"] } },
       "*": { show: "hidden" },
     },
     fallbacks: ["menu_order", "date", "popularity"],
     maxPins: 60,
+    maxLimit: 48,
     pageSize: 60,
   },
 });

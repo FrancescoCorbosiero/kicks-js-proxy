@@ -1,6 +1,6 @@
 {
   "plugin": "golden-hive-blocks",
-  "version": "5.9.0",
+  "version": "5.10.0",
   "api": 1,
   "features": [
     "homepage",
@@ -12,8 +12,76 @@
     "rail-pin",
     "rail-exclude",
     "rail-fallback",
+    "rail-limit",
+    "block-fields",
     "archive-follow"
   ],
+  "fields": {
+    "golden-hive/shortcode-wrapper": {
+      "eyebrow": {
+        "type": "text",
+        "max": 80
+      },
+      "title": {
+        "type": "text",
+        "max": 120
+      },
+      "backgroundColor": {
+        "type": "enum",
+        "options": [
+          "white",
+          "gray",
+          "black"
+        ]
+      },
+      "buttonText": {
+        "type": "text",
+        "max": 60
+      },
+      "buttonUrl": {
+        "type": "url",
+        "max": 500
+      }
+    },
+    "golden-hive/category-slider": {
+      "title": {
+        "type": "text",
+        "max": 120
+      }
+    },
+    "golden-hive/brand-marquee": {
+      "title": {
+        "type": "text",
+        "max": 120
+      }
+    },
+    "golden-hive/faq-schema": {
+      "title": {
+        "type": "text",
+        "max": 120
+      },
+      "subtitle": {
+        "type": "text",
+        "max": 300
+      }
+    },
+    "golden-hive/social-proof": {
+      "title": {
+        "type": "text",
+        "max": 120
+      }
+    },
+    "golden-hive/whatsapp-button": {
+      "buttonText": {
+        "type": "text",
+        "max": 60
+      },
+      "message": {
+        "type": "text",
+        "max": 300
+      }
+    }
+  },
   "fallbacks": [
     "menu_order",
     "date",
@@ -24,6 +92,6 @@
   ],
   "max_ids": 100,
   "hide_out_of_stock": true,
-  "front_page_id": 76,
+  "front_page_id": 77,
   "site_url": "http://127.0.0.1:8089/"
 }

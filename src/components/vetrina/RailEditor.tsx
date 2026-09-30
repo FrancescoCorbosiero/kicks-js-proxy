@@ -33,21 +33,28 @@ import {
   unpin,
   type EditorRow,
 } from "@/lib/vetrina/order";
-import type { HiddenReason, ProductCard, RailDetail, RailFallback, RailState } from "@/lib/vetrina/types";
+import type { BlockConfig } from "@/config";
+import { changedFields, editableFields } from "@/lib/vetrina/fields";
+import type { HiddenReason, ProductCard, RailDetail, RailFallback, SectionDraft } from "@/lib/vetrina/types";
 import type { VetrinaRail, VetrinaResult } from "@/server/vetrina/service";
 import { loadVetrinaCards, loadVetrinaRail, publishVetrinaRail } from "@/server/actions/vetrina";
 import { ErrorState } from "./ErrorState";
+import { FieldsSheet } from "./FieldsSheet";
 import { HistorySheet } from "./HistorySheet";
 import { ProductSheet } from "./ProductSheet";
 import { formatFromPrice } from "./format";
-import { ChevronLeft, EyeOff, Grip, Lock, More, Pin } from "./icons";
+import { ChevronLeft, ChevronRight, EyeOff, Grip, Lock, More, Pin } from "./icons";
+import { SEGMENTED_COLORS } from "./segmented";
 
 export interface EditorOptions {
   fallbacks: RailFallback[];
-  edit: { pins: boolean; exclude: boolean; fallback: boolean };
+  edit: BlockConfig["edit"];
   maxPins: number;
+  maxLimit: number;
   pageSize: number;
 }
+
+const RAIL_BLOCK = "golden-hive/shortcode-wrapper";
 
 /**
  * The rail editor: the rail as a list, in the order the site will show it.
@@ -96,7 +103,16 @@ function BackLink({ dirty }: { dirty: boolean }) {
   );
 }
 
-const stateOf = (rail: RailDetail): RailState => ({ pin: rail.pin, exclude: rail.exclude, fallback: rail.fallback });
+const stateOf = (rail: RailDetail): SectionDraft => ({
+  pin: rail.pin,
+  exclude: rail.exclude,
+  fallback: rail.fallback,
+  fields: rail.fields,
+  limit: rail.limit,
+});
+
+const trimmed = (fields: Record<string, string>) =>
+  Object.fromEntries(Object.entries(fields).map(([field, value]) => [field, value.trim()]));
 
 function Editor({ railKey, initial, options }: { railKey: string; initial: VetrinaRail; options: EditorOptions }) {
   const { t } = useI18n();
@@ -105,10 +121,14 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
 
   // The rail as the server last described it, and the customer's draft over it.
   const [base, setBase] = React.useState<RailDetail>(initial.rail);
-  const [draft, setDraft] = React.useState<RailState>(() => stateOf(initial.rail));
+  const [draft, setDraft] = React.useState<SectionDraft>(() => stateOf(initial.rail));
   const saved = React.useMemo(() => stateOf(base), [base]);
-  const dirty = !sameState(saved, draft);
-  const changes = countChanges(saved, draft);
+  // The order, plus the section's texts and size: one draft, one publish.
+  const fieldsChanged = changedFields(saved.fields, draft.fields);
+  const resized = saved.limit !== draft.limit;
+  const dirty = !sameState(saved, draft) || fieldsChanged.length > 0 || resized;
+  const orderChanges = countChanges(saved, draft);
+  const changes = { ...orderChanges, total: orderChanges.total + fieldsChanged.length + (resized ? 1 : 0) };
 
   // Automatic order per fallback: the server computes it once, the phone reuses it.
   const [visibleByFallback, setVisibleByFallback] = React.useState<Record<string, number[]>>({
@@ -199,7 +219,7 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  function commit(next: RailState, message: string) {
+  function commit(next: SectionDraft, message: string) {
     if (next.pin.length > options.maxPins) {
       toast.error(v.limitReached(options.maxPins));
       return;
@@ -239,7 +259,7 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
     if (rowById.get(id)?.kind === "ghost") continue;
     visibleCount += 1;
     positions.set(id, visibleCount);
-    if (visibleCount === base.limit) foldAfter = id;
+    if (visibleCount === draft.limit) foldAfter = id;
   }
 
   // Menus and sheets.
@@ -248,6 +268,7 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
   const [positionFor, setPositionFor] = React.useState<number | null>(null);
   const [positionValue, setPositionValue] = React.useState("");
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [looksOpen, setLooksOpen] = React.useState(false);
   const [productFor, setProductFor] = React.useState<number | null>(null);
   const [publishing, setPublishing] = React.useState(false);
   const [stale, setStale] = React.useState(false);
@@ -306,6 +327,14 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
     }
   }
 
+  // Texts and size: what the config allows and the site's plugin supports.
+  const s = t.vetrina.section;
+  const fieldKeys = editableFields(RAIL_BLOCK, options.edit.fields, base.fields);
+  const canResize = options.edit.limit && base.editable && Object.keys(base.fields).length > 0;
+  const canEditLooks = fieldKeys.length > 0 || canResize;
+  const shownTitle = "title" in draft.fields ? draft.fields.title : base.title;
+  const shownEyebrow = "eyebrow" in draft.fields ? draft.fields.eyebrow : base.eyebrow;
+
   const hiddenIds = draft.exclude;
   const termName = base.terms.map((term) => term.name).join(", ");
   const termLabel = base.taxonomy === "product_cat" ? v.termCategory : v.termBrand;
@@ -314,8 +343,8 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
   return (
     <Page>
       <Navbar
-        title={base.title || base.key}
-        subtitle={base.eyebrow || undefined}
+        title={shownTitle || base.key}
+        subtitle={shownEyebrow || undefined}
         left={<BackLink dirty={dirty} />}
         right={
           <KLink onClick={() => setSectionMenu(true)} aria-label={v.menu.title}>
@@ -336,13 +365,32 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
         {!base.editable && <p className="mt-2 text-[15px]">{v.readOnly}</p>}
       </div>
 
+      {canEditLooks && (
+        <div className="px-4 pb-3">
+          <button
+            type="button"
+            onClick={() => setLooksOpen(true)}
+            className="flex w-full items-center gap-3 rounded-2xl bg-white px-4 py-3 text-left shadow-sm transition-opacity active:opacity-60 dark:bg-[#1c1c1e]"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12px] font-semibold uppercase tracking-wide opacity-50">{s.open}</span>
+              <span className="block truncate text-[15px] font-medium">
+                {[shownEyebrow, shownTitle].filter(Boolean).join(" · ") || base.key}
+              </span>
+            </span>
+            {(fieldsChanged.length > 0 || resized) && <span className="h-2 w-2 shrink-0 rounded-full bg-[#d4a017]" aria-hidden />}
+            <ChevronRight className="h-5 w-5 shrink-0 opacity-30" />
+          </button>
+        </div>
+      )}
+
       {options.edit.fallback && base.editable && (
         <div className="px-4 pb-3">
           <div className="mb-1.5 flex items-center gap-2 text-[13px] opacity-60">
             {v.autoLabel}
             {loadingFallback && <Preloader className="!h-4 !w-4" />}
           </div>
-          <Segmented strong rounded>
+          <Segmented strong rounded colors={SEGMENTED_COLORS}>
             {fallbackChoices.map((f) => (
               <SegmentedButton
                 key={f}
@@ -534,7 +582,17 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
       {/* Section menu. */}
       <Actions opened={sectionMenu} onBackdropClick={() => setSectionMenu(false)}>
         <ActionsGroup>
-          <ActionsLabel>{base.title}</ActionsLabel>
+          <ActionsLabel>{shownTitle || base.key}</ActionsLabel>
+          {canEditLooks && (
+            <ActionsButton
+              onClick={() => {
+                setSectionMenu(false);
+                setLooksOpen(true);
+              }}
+            >
+              {s.open}
+            </ActionsButton>
+          )}
           <ActionsButton
             onClick={() => {
               setSectionMenu(false);
@@ -646,8 +704,28 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
         onClose={() => setHistoryOpen(false)}
         onRestore={(state) => {
           setHistoryOpen(false);
-          commit(state, v.moved.restored);
+          commit({ ...draft, ...state }, v.moved.restored);
         }}
+      />
+
+      <FieldsSheet
+        open={looksOpen}
+        title={s.sheetTitle}
+        blockName={RAIL_BLOCK}
+        fieldKeys={fieldKeys}
+        values={draft.fields}
+        limit={canResize ? { value: draft.limit, max: Math.max(options.maxLimit, draft.limit) } : undefined}
+        preview
+        submitLabel={s.apply}
+        onSubmit={(fields, limit) => {
+          const next = { ...draft, fields: { ...draft.fields, ...trimmed(fields) }, limit: limit ?? draft.limit };
+          const texts = changedFields(draft.fields, next.fields).length > 0;
+          if (texts || next.limit !== draft.limit) {
+            commit(next, texts ? s.applied : s.resized(next.limit));
+          }
+          return true;
+        }}
+        onClose={() => setLooksOpen(false)}
       />
 
       <ProductSheet
@@ -673,7 +751,7 @@ function Thumb({ card, dim }: { card?: ProductCard; dim?: boolean }) {
       alt=""
       loading="lazy"
       draggable={false}
-      className={`h-14 w-14 shrink-0 rounded-xl bg-black/[0.04] object-contain dark:bg-white/10 ${dim ? "opacity-50" : ""}`}
+      className={`h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-black/[0.04] object-contain text-[0px] dark:bg-white/10 ${dim ? "opacity-50" : ""}`}
     />
   );
 }
@@ -720,7 +798,7 @@ function RailRow({
       className="relative select-none border-b border-black/5 bg-white last:border-0 dark:border-white/10 dark:bg-[#1c1c1e]"
     >
       <div className="flex items-center gap-3 py-2 pl-3 pr-1">
-        <span className="w-6 shrink-0 text-right text-[13px] font-medium tabular-nums opacity-40">
+        <span className="w-6 shrink-0 text-right text-[13px] font-medium tabular-nums opacity-50">
           {position ?? "–"}
         </span>
         <button

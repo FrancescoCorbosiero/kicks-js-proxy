@@ -44,20 +44,26 @@ Branch `claude/custom-product-catalog-ui-sqzewp`, in both repositories.
 | 1 · See | Done |
 | 2 · Order | Done: pin / exclude / fallback, publish, history and restore, category pages follow their rail |
 | 3 · Price | Product sheet with locks and one-product publish: done. Margin × taxonomy (store-term scope, margin sheet): not started |
-| 4 · Fill, 5 · Shape | Not started |
+| 4 · Fill | Not started |
+| 5 · Shape | In part: a section's eyebrow, title, button, background and size; the titles of the category slider, brand marquee and FAQ (plus its subtitle). Slides, cards and logos stay in WordPress |
 
 ### How to test
 
 1. **Demo, without touching the shop**: run the Hub with `VETRINA_SOURCE=fixture` and
    open `/vetrina`. It is an in-memory copy of the homepage; it resets on restart.
 2. **Against a staging copy of the shop**:
-   - install golden-hive-blocks **5.9.0** from the branch above;
+   - install golden-hive-blocks **5.10.0** from the branch above (5.9.0 is enough
+     for ordering; texts and sizes need 5.10.0);
    - the Hub's WooCommerce key needs **Read/Write**, and its user needs
      `manage_woocommerce` (Shop manager or Administrator);
    - open `/vetrina`, tap a section, reorder, **Pubblica**. The homepage and that
      category's page follow; each publish is a WordPress revision.
 3. **Prices**: in a section, `⋯` → **Prezzi e taglie**. A price typed on a size locks it;
    **Salva e pubblica** writes this one product's prices to the site.
+4. **Texts and look**: in a section, **Titolo, testi e aspetto** edits the eyebrow,
+   title, button, background and how many products show; the change joins the draft
+   and goes live with **Pubblica**. On the home screen, the FAQ, category slider and
+   brand marquee rows open their titles, saved straight to the site.
 
 Notes:
 
@@ -65,6 +71,11 @@ Notes:
   Every old tab is still in the nav.
 - Each publish purges the page cache (LiteSpeed, WP Rocket, W3TC, WP Super Cache,
   SiteGround). Behind another cache or a CDN, the change shows when that cache expires.
+- Which fields are editable is config: `edit.fields` and `edit.limit` per block in
+  `hub.config.ts`, within the plugin's allowlist (`ghb_hub_field_specs`, mirrored in
+  `src/lib/vetrina/fields.ts`). The plugin sanitizes every value: text loses its tags,
+  links must be http(s) or start with `/`.
+- On a desktop the Vetrina is a phone-width column in the middle of the screen.
 
 ---
 

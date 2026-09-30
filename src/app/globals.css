@@ -264,9 +264,35 @@ body::after {
 .dark .k-app .bg-primary.text-white {
   color: rgb(17 17 17);
 }
+/* The selected segment sits on a grey pill in dark mode (RailEditor). */
+.dark .k-app .k-segmented-strong-button-active {
+  color: rgb(255 255 255);
+}
 .k-app {
   /* the app shell owns the screen: no body backdrop, no overscroll bounce */
   overscroll-behavior: none;
+}
+/* Desktop: the Vetrina is a phone-width column in the middle of the screen.
+   Layout containment makes the column the containing block of everything
+   fixed inside it — sheets, dialogs, action sheets, toasts open in the
+   column, not across the monitor. */
+@media (min-width: 768px) {
+  .vetrina-backdrop {
+    background: #e5e5ea;
+  }
+  .dark .vetrina-backdrop {
+    background: #0b0b0c;
+  }
+  .vetrina-frame {
+    max-width: 600px;
+    contain: layout paint;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.06),
+      0 24px 64px rgb(0 0 0 / 0.14);
+  }
+  .dark .vetrina-frame {
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1);
+  }
 }
 .k-app input,
 .k-app select,

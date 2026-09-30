@@ -8,6 +8,7 @@ import { sameState } from "@/lib/vetrina/order";
 import type { RailHistoryState, RailState } from "@/lib/vetrina/types";
 import { loadVetrinaHistory } from "@/server/actions/vetrina";
 import { formatWhen } from "./format";
+import { useSheetMount } from "./sheet-mount";
 
 /**
  * Earlier versions of a rail, from the page's WordPress revisions. Restoring
@@ -27,6 +28,7 @@ export function HistorySheet({
   onRestore: (state: RailState) => void;
 }) {
   const { t, locale } = useI18n();
+  const mountPoint = useSheetMount();
   const h = t.vetrina.editor.history;
   const [states, setStates] = React.useState<RailHistoryState[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -47,7 +49,7 @@ export function HistorySheet({
   }, [open, railKey, t]);
 
   return (
-    <Sheet isOpen={open} onClose={onClose} detent="content">
+    <Sheet isOpen={open} onClose={onClose} detent="content" mountPoint={mountPoint}>
       <Sheet.Container className="!bg-[#f2f2f7] dark:!bg-[#1c1c1e]">
         <Sheet.Header />
         <Sheet.Content>

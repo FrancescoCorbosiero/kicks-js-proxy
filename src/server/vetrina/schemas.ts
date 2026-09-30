@@ -3,6 +3,8 @@ import { z } from "zod";
 import { RAIL_FALLBACKS } from "@/config/schema";
 import type {
   Capabilities,
+  FieldSpec,
+  FieldValues,
   HiddenItem,
   Homepage,
   ProductCard,
@@ -23,6 +25,18 @@ const Fallback = z.enum(RAIL_FALLBACKS).catch("menu_order");
 const Ids = z.array(z.coerce.number().int()).catch([]);
 // PHP encodes an empty associative array as [] — accept both shapes.
 const Atts = z.union([z.record(z.string(), z.unknown()), z.array(z.unknown())]).catch({});
+// A block's editable fields: strings by name. Absent (a plugin older than
+// 5.10.0) or unreadable reads as "nothing editable", never as an error.
+const Fields = z
+  .record(z.string(), z.unknown())
+  .transform((raw): FieldValues => {
+    const out: FieldValues = {};
+    for (const [field, value] of Object.entries(raw)) {
+      if (typeof value === "string" || typeof value === "number") out[field] = String(value);
+    }
+    return out;
+  })
+  .catch({});
 
 const CardSchema = z.looseObject({
   id: z.number().int(),
@@ -87,6 +101,7 @@ const RailBaseSchema = z.looseObject({
   fallback: Fallback,
   fallback_default: Fallback,
   editable: z.boolean().catch(true),
+  fields: Fields,
   products: z.array(CardSchema).optional(),
 });
 
@@ -107,6 +122,7 @@ function railBase(raw: z.infer<typeof RailBaseSchema>): Omit<RailSummary, "produ
     fallback: raw.fallback,
     fallbackDefault: raw.fallback_default,
     editable: raw.editable,
+    fields: raw.fields,
   };
 }
 
@@ -130,6 +146,8 @@ const HomepageSchema = z.looseObject({
             labels: z.array(z.string()).catch([]),
           })
           .catch({ title: null, items: null, labels: [] }),
+        fields: Fields.optional(),
+        attrs_hash: z.string().optional(),
       }),
     ]),
   ),
@@ -156,6 +174,7 @@ export function parseHomepage(data: unknown): Homepage {
             name: b.name,
             kind: "static" as const,
             summary: { title: b.summary.title ?? null, items: b.summary.items ?? null, labels: b.summary.labels },
+            ...(b.fields && b.attrs_hash ? { fields: b.fields, attrsHash: b.attrs_hash } : {}),
           },
     ),
   };
@@ -209,6 +228,7 @@ export function parseWriteResult(data: unknown): RailWriteResult {
       modified_gmt: z.string(),
       attrs_hash: z.string(),
       rendered: Ids.optional(),
+      fields: Fields.optional(),
     })
     .parse(data);
   return {
@@ -219,6 +239,7 @@ export function parseWriteResult(data: unknown): RailWriteResult {
     modifiedGmt: raw.modified_gmt,
     attrsHash: raw.attrs_hash,
     rendered: raw.rendered ?? [],
+    fields: raw.fields ?? {},
   };
 }
 
@@ -258,6 +279,19 @@ export function parseCapabilities(data: unknown): Capabilities {
       hide_out_of_stock: z.boolean().catch(false),
       front_page_id: z.number().int().catch(0),
       site_url: z.string().catch(""),
+      fields: z
+        .record(
+          z.string(),
+          z.record(
+            z.string(),
+            z.looseObject({
+              type: z.enum(["text", "url", "enum"]),
+              max: z.number().int().optional(),
+              options: z.array(z.string()).optional(),
+            }),
+          ),
+        )
+        .catch({}),
     })
     .parse(data);
   return {
@@ -269,5 +303,6 @@ export function parseCapabilities(data: unknown): Capabilities {
     hideOutOfStock: raw.hide_out_of_stock,
     frontPageId: raw.front_page_id,
     siteUrl: raw.site_url,
+    fields: raw.fields as Record<string, Record<string, FieldSpec>>,
   };
 }

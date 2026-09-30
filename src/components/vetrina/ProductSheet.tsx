@@ -12,6 +12,7 @@ import { setProductManualPrices } from "@/server/actions/overrides";
 import { updateStoreVariation } from "@/server/actions/store-edit";
 import { formatCardPrice, formatEuro, parsePrice } from "./format";
 import { External, Lock } from "./icons";
+import { useSheetMount } from "./sheet-mount";
 
 const toInput = (n: number | null | undefined) => (n == null ? "" : n.toFixed(2).replace(".", ","));
 
@@ -37,6 +38,7 @@ export function ProductSheet({
   demo: boolean;
 }) {
   const { t } = useI18n();
+  const mountPoint = useSheetMount();
   const p = t.vetrina.product;
   const [data, setData] = React.useState<DrawerData | null | undefined>(undefined);
   const [error, setError] = React.useState<string | null>(null);
@@ -160,7 +162,7 @@ export function ProductSheet({
   };
 
   return (
-    <Sheet isOpen={card != null} onClose={onClose} detent="content" avoidKeyboard>
+    <Sheet isOpen={card != null} onClose={onClose} detent="content" avoidKeyboard mountPoint={mountPoint}>
       <Sheet.Container className="!bg-[#f2f2f7] dark:!bg-[#1c1c1e]">
         <Sheet.Header />
         <Sheet.Content>
@@ -318,7 +320,7 @@ function PriceInput({
 }) {
   return (
     <span className="relative w-28 shrink-0">
-      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[15px] opacity-40">€</span>
+      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[15px] opacity-50">€</span>
       <input
         type="text"
         inputMode="decimal"

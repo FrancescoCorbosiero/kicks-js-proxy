@@ -7,7 +7,10 @@ import { HubConfigSchema, type BlockConfig, type HubConfig } from "./schema";
  */
 export const hubConfig: HubConfig = HubConfigSchema.parse(rawConfig);
 
-const HIDDEN: BlockConfig = { show: "hidden", edit: { pins: false, exclude: false, fallback: false } };
+const HIDDEN: BlockConfig = {
+  show: "hidden",
+  edit: { pins: false, exclude: false, fallback: false, limit: false, fields: [] },
+};
 
 /** How the Vetrina treats a block type: its own entry, else "*", else hidden. */
 export function blockConfig(blockName: string, config: HubConfig = hubConfig): BlockConfig {
