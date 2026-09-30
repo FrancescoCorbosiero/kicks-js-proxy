@@ -19,7 +19,7 @@ export function ErrorState({ code, error }: { code: VetrinaErrorCode; error: str
       </Button>
       <details className="text-left text-[13px] opacity-60">
         <summary className="cursor-pointer">{t.vetrina.errors.details}</summary>
-        <p className="mt-2 break-words font-mono">{error}</p>
+        <p className="mt-2 whitespace-pre-wrap break-words font-mono">{error}</p>
       </details>
     </Block>
   );

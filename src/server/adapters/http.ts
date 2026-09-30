@@ -92,7 +92,7 @@ export async function requestJsonWithHeaders<T = unknown>(
       const e =
         (err as HttpError).status != null
           ? (err as HttpError)
-          : makeError(`Request to ${url} failed: ${(err as Error).message}`);
+          : makeError(`Request to ${url} failed: ${transportReason(err, policy.timeoutMs)}`);
       lastErr = e;
       if (policy.fatal?.(e.status, e.body ?? "")) throw e;
       if (!isRetryable(e.status) || attempt === policy.attempts - 1) throw e;
@@ -102,6 +102,20 @@ export async function requestJsonWithHeaders<T = unknown>(
     }
   }
   throw lastErr ?? makeError(`Request to ${url} failed`);
+}
+
+/**
+ * Why a request never got an answer. Node's fetch says only "fetch failed" and
+ * keeps the reason (DNS, TLS, refused, reset) in `cause`; an abort here is
+ * always our own timeout.
+ */
+function transportReason(err: unknown, timeoutMs: number): string {
+  const e = err as (Error & { cause?: { code?: string; message?: string } }) | undefined;
+  if (e?.name === "AbortError") return `no answer within ${timeoutMs / 1000}s`;
+  const message = e?.message ?? String(err);
+  const cause = e?.cause;
+  const detail = cause ? [cause.code, cause.message].filter(Boolean).join(": ") : "";
+  return detail && !message.includes(detail) ? `${message} (${detail})` : message;
 }
 
 function backoff(base: number, attempt: number): number {

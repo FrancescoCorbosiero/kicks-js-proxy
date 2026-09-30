@@ -1,6 +1,7 @@
 import "server-only";
 import { env } from "@/lib/env";
 import { hubConfig } from "@/config";
+import { z } from "zod";
 import { requestJson, type HttpError, type RetryPolicy } from "@/server/adapters/http";
 import type { RailFallback, RailWrite } from "@/lib/vetrina/types";
 import {
@@ -45,14 +46,16 @@ function wpError(e: unknown): VetrinaError {
   const err = e as HttpError;
   let code = "";
   let message = err.message ?? String(e);
+  const status = err.status;
   try {
     const body = JSON.parse(err.body ?? "") as { code?: string; message?: string };
     code = body.code ?? "";
-    if (body.message) message = body.message;
+    // Shown under "Dettagli tecnici": WordPress's words plus what identifies
+    // the failure (a PHP fatal is "internal_server_error, HTTP 500").
+    if (body.message) message = `${body.message} (${[code, status && `HTTP ${status}`].filter(Boolean).join(", ")})`;
   } catch {
     // not JSON: a proxy page, a timeout — keep the transport message
   }
-  const status = err.status;
   if (code === "rest_no_route" || (status === 404 && code === "")) {
     return new VetrinaError(
       "plugin_missing",
@@ -92,28 +95,44 @@ async function call(
   }
 }
 
+/**
+ * Validate an answer. A shape the Hub does not understand (a plugin older or
+ * newer than this Hub expects) says which route and which field, instead of a
+ * wall of Zod issues.
+ */
+function parsed<T>(route: string, parse: (data: unknown) => T, data: unknown): T {
+  try {
+    return parse(data);
+  } catch (e) {
+    const detail = e instanceof z.ZodError ? z.prettifyError(e) : e instanceof Error ? e.message : String(e);
+    throw new VetrinaError("failed", `Risposta inattesa da wc-gh/v1/${route}:\n${detail}`);
+  }
+}
+
 export function wordpressSource(): VetrinaSource {
   return {
     kind: "wordpress",
     async capabilities() {
-      return parseCapabilities(await call("GET", "capabilities"));
+      return parsed("capabilities", parseCapabilities, await call("GET", "capabilities"));
     },
     async homepage() {
-      return parseHomepage(await call("GET", "homepage", pageParam()));
+      return parsed("homepage", parseHomepage, await call("GET", "homepage", pageParam()));
     },
     async rail(key, opts = {}) {
       const query: Record<string, string> = { ...pageParam(), key };
       if (opts.offset != null) query.offset = String(opts.offset);
       if (opts.count != null) query.count = String(opts.count);
       if (opts.fallback) query.fallback = opts.fallback satisfies RailFallback;
-      return parseRailDetail(await call("GET", "rail", query));
+      return parsed("rail", parseRailDetail, await call("GET", "rail", query));
     },
     async products(ids) {
       if (ids.length === 0) return [];
-      return parseCards(await call("GET", "products", { ids: ids.slice(0, 100).join(",") }));
+      return parsed("products", parseCards, await call("GET", "products", { ids: ids.slice(0, 100).join(",") }));
     },
     async writeRail(input: RailWrite) {
-      return parseWriteResult(
+      return parsed(
+        "homepage/block",
+        parseWriteResult,
         await call("POST", "homepage/block", {}, {
           page_id: input.pageId,
           path: input.path,
@@ -126,7 +145,7 @@ export function wordpressSource(): VetrinaSource {
       );
     },
     async history(key) {
-      return parseHistory(await call("GET", "homepage/history", { ...pageParam(), key }));
+      return parsed("homepage/history", parseHistory, await call("GET", "homepage/history", { ...pageParam(), key }));
     },
   };
 }

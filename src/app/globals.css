@@ -256,6 +256,13 @@ body::after {
 .dark .k-app {
   --k-color-primary: rgb(255 255 255);
   --color-primary: rgb(255 255 255);
+  --k-color-ios-primary-shade: rgb(214 214 214);
+  --color-ios-primary-shade: rgb(214 214 214);
+}
+/* Filled buttons are text-white on bg-primary: once the primary turns white,
+   their label has to turn dark or it vanishes. */
+.dark .k-app .bg-primary.text-white {
+  color: rgb(17 17 17);
 }
 .k-app {
   /* the app shell owns the screen: no body backdrop, no overscroll bounce */
