@@ -194,18 +194,59 @@ below). To get an email when a daily sync fails or never runs:
 
 ## Day to day
 
-From `store-hub/deploy`:
+Everything runs from `store-hub/deploy`.
+
+**Update to new code:**
 
 ```bash
-git pull && docker compose up -d --build     # update to the latest code
+git pull && docker compose up -d --build     # build, then swap the app (a few seconds offline)
 docker image prune -f                        # clear old builds
-docker compose logs -f app                   # logs
-docker compose ps                            # health
-docker compose exec -T postgres pg_dump -U kicks -Fc kicks > ~/hub-$(date +%F).dump   # backup
 ```
 
-Run a single app container: the syncs run inside it, so a second copy would
-run every sync twice.
+No `npm`, no migrate command. The new image applies its migrations when it
+starts. A schema change is made in development: change
+`src/server/db/schema.ts`, run `npm run db:generate`, and commit the new
+`drizzle/` files with the code.
+
+**Change a setting** in `deploy/.env`, then `docker compose up -d`. No
+rebuild: settings are read at start.
+
+**Watch it:** `docker compose ps` for health, `docker compose logs -f app` for
+the logs.
+
+**Back up the database.** Nothing else does. Add a nightly crontab line on
+the VPS (`crontab -e`). It keeps two weeks of dumps; copy them off the server
+now and then:
+
+```
+15 3 * * * cd ~/store-hub/deploy && docker compose exec -T postgres pg_dump -U kicks -Fc kicks > ~/backups/hub-$(date +\%F).dump && find ~/backups -name 'hub-*.dump' -mtime +14 -delete
+```
+
+(Create `~/backups` first. In crontab, `%` must be written `\%`.) A dump goes
+back with `pg_restore`, as in step 5.
+
+Run a single app container per shop: the syncs run inside it, so a second
+copy would run every sync twice.
+
+## A second shop on the same server
+
+The same stack can run again for another WooCommerce site with
+golden-hive-blocks, next to the first one and behind the same Caddy:
+
+1. Clone the repo into another folder, e.g. `git clone … store-hub-2`.
+2. In `store-hub-2/deploy`, `cp .env.example .env` and fill it in for that
+   shop: its own `HUB_HOST`, `VETRINA_HOST`, `WOO_*` keys, `APP_PASSWORD` and a
+   new `POSTGRES_PASSWORD`.
+3. Set **`COMPOSE_PROJECT_NAME=store-hub-2`** in that `.env`. Without it both
+   stacks share one name, and the second `up` replaces the first one's
+   containers and uses its database.
+4. Add DNS records for the two new names, then `docker compose up -d --build`.
+
+Each stack has its own containers, database and scheduler, and Caddy routes
+by hostname. Any other container with `caddy` labels on the `caddy` network
+gets its own HTTPS site the same way. The code-level settings
+(`src/config/hub.config.ts`: tabs, Vetrina blocks) are built into the image,
+so a shop that needs different ones needs its own branch.
 
 ## Troubleshooting
 
