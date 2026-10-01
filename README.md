@@ -26,6 +26,9 @@ npm run serve                   # http://localhost:3000 (operator dashboard)
 
 All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are persisted.
 
+**Production** runs in Docker behind Caddy: the app with Postgres and Redis,
+the Hub and the Vetrina on their own addresses. See [docs/deploy.md](docs/deploy.md).
+
 ### Use `npm run serve`, not `npm run dev`
 
 `npm run dev` is for editing the code. It keeps every module graph it has
