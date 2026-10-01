@@ -12,3 +12,13 @@ export const SheetMountContext = React.createContext<Element | null>(null);
 export function useSheetMount(): Element | undefined {
   return React.useContext(SheetMountContext) ?? undefined;
 }
+
+/**
+ * True on the Vetrina's own address (VETRINA_HOST): links into the operator
+ * Hub are hidden there, since that host does not serve it.
+ */
+export const StandaloneContext = React.createContext(false);
+
+export function useStandalone(): boolean {
+  return React.useContext(StandaloneContext);
+}

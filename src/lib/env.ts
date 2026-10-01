@@ -54,6 +54,13 @@ const EnvSchema = z.object({
   // wc-gh/v1 API, authenticated with the WOO_* keys) or an in-memory demo
   // shop. Overrides hub.config.ts, so local dev can use the demo untouched.
   VETRINA_SOURCE: z.enum(["wordpress", "fixture"]).optional(),
+  // The Vetrina's own address (e.g. vetrina.resellpiacenza.shop): the same
+  // app answers there with the Vetrina only — "/" is its home, the operator
+  // tabs stay on the Hub's address. Unset = no split.
+  VETRINA_HOST: z
+    .string()
+    .regex(/^[a-z0-9.-]+$/i, "VETRINA_HOST is a bare hostname, e.g. vetrina.example.com")
+    .optional(),
 
   // App login: with a password set, every page requires sign-in (shared
   // password, long-lived session cookie). Unset = open app (local dev).
