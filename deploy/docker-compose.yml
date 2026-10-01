@@ -6,6 +6,10 @@
 #
 # Walkthrough: docs/deploy.md. (The docker-compose.yml at the repo root is
 # local development only.)
+#
+# The stack's name prefixes its containers, image and database volume. A
+# second shop on the same server sets its own COMPOSE_PROJECT_NAME in its
+# deploy/.env, which takes precedence over this default.
 name: store-hub
 
 x-logging: &logging
@@ -18,7 +22,6 @@ services:
   app:
     build:
       context: ..
-    image: store-hub:latest
     restart: unless-stopped
     init: true
     env_file: .env
