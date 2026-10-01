@@ -54,6 +54,18 @@ docker inspect <caddy-container> --format '{{range $name, $_ := .NetworkSettings
 If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
 in step 4.
 
+**No Caddy container in `docker ps`?** Start caddy-docker-proxy once, then
+continue. It serves every container on the `caddy` network that has `caddy`
+labels:
+
+```bash
+docker network create caddy
+docker run -d --name caddy --restart unless-stopped --network caddy \
+  -p 80:80 -p 443:443 -e CADDY_INGRESS_NETWORKS=caddy \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro -v caddy_data:/data \
+  lucaslorentz/caddy-docker-proxy:2.9-alpine
+```
+
 ### 3. Get the code
 
 ```bash
@@ -99,6 +111,9 @@ docker compose exec postgres pg_restore -U kicks -d kicks --no-owner /tmp/hub.du
 ```
 
 ### 6. Start
+
+From `store-hub/deploy`, not the repo root: the root's `docker-compose.yml`
+starts only the databases for local development.
 
 ```bash
 docker compose up -d --build        # the first build takes a few minutes
