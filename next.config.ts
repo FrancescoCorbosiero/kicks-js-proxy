@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The Docker image (Dockerfile) builds with NEXT_OUTPUT=standalone: a
+  // self-contained server.js with only the files it needs. Local builds keep
+  // the regular output, so `npm run serve` (next start) is unchanged.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Keep native/IO deps external to the server bundle.
   serverExternalPackages: ["ioredis", "pg"],
   experimental: {

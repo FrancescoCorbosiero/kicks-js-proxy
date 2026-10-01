@@ -1,0 +1,87 @@
+# Store Hub in production, behind caddy-docker-proxy: Caddy reads the labels
+# below and serves both addresses over HTTPS, certificates included.
+#
+#   cd deploy && cp .env.example .env   # then fill it in
+#   docker compose up -d --build
+#
+# Walkthrough: docs/deploy.md. (The docker-compose.yml at the repo root is
+# local development only.)
+name: store-hub
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    build:
+      context: ..
+    image: store-hub:latest
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://kicks:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/kicks
+      REDIS_URL: redis://redis:6379
+      # On the public internet the login is not optional.
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in deploy/.env}
+      VETRINA_HOST: ${VETRINA_HOST:?set VETRINA_HOST in deploy/.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - caddy
+      - internal
+    labels:
+      # One site, both addresses. Caddy passes the Host header through and the
+      # app tells the Hub from the Vetrina by it.
+      caddy: ${HUB_HOST:?set HUB_HOST in deploy/.env}, ${VETRINA_HOST}
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kicks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: kicks
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kicks -d kicks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    logging: *logging
+
+  redis:
+    # A cache of KicksDB answers: nothing to keep on disk, capped in memory.
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    logging: *logging
+
+networks:
+  # The network your caddy-docker-proxy container watches.
+  caddy:
+    external: true
+    name: ${CADDY_NETWORK:-caddy}
+  # Postgres and Redis: reachable by the app only, never published.
+  internal: {}
+
+volumes:
+  pgdata:

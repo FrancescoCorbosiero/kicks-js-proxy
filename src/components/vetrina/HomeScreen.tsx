@@ -15,6 +15,7 @@ import type { VetrinaHome, VetrinaResult } from "@/server/vetrina/service";
 import { publishVetrinaBlock } from "@/server/actions/vetrina";
 import { ErrorState } from "./ErrorState";
 import { FieldsSheet } from "./FieldsSheet";
+import { useStandalone } from "./sheet-mount";
 import { ChevronLeft, ChevronRight, External, Lock, Pin, Refresh } from "./icons";
 
 type StaticBlock = Extract<HomeBlock, { kind: "static" }>;
@@ -34,6 +35,8 @@ export function HomeScreen({ result }: { result: VetrinaResult<VetrinaHome> }) {
   const { t } = useI18n();
   const router = useRouter();
   const v = t.vetrina;
+  // On the Vetrina's own address the operator Hub is not served: no way back to it.
+  const standalone = useStandalone();
 
   // A block's texts, edited in a sheet and saved straight to the site.
   const [editingPath, setEditingPath] = React.useState<string | null>(null);
@@ -71,10 +74,12 @@ export function HomeScreen({ result }: { result: VetrinaResult<VetrinaHome> }) {
         title={v.title}
         subtitle={result.ok && result.data.source === "fixture" ? v.demo : undefined}
         left={
-          <KLink href="/" component="a" className="gap-0.5">
-            <ChevronLeft className="h-5 w-5" />
-            {v.backToHub}
-          </KLink>
+          standalone ? undefined : (
+            <KLink href="/" component="a" className="gap-0.5">
+              <ChevronLeft className="h-5 w-5" />
+              {v.backToHub}
+            </KLink>
+          )
         }
         right={
           <KLink onClick={() => router.refresh()} aria-label={v.refresh}>

@@ -12,7 +12,7 @@ import { setProductManualPrices } from "@/server/actions/overrides";
 import { updateStoreVariation } from "@/server/actions/store-edit";
 import { formatCardPrice, formatEuro, parsePrice } from "./format";
 import { External, Lock } from "./icons";
-import { useSheetMount } from "./sheet-mount";
+import { useSheetMount, useStandalone } from "./sheet-mount";
 
 const toInput = (n: number | null | undefined) => (n == null ? "" : n.toFixed(2).replace(".", ","));
 
@@ -39,6 +39,7 @@ export function ProductSheet({
 }) {
   const { t } = useI18n();
   const mountPoint = useSheetMount();
+  const standalone = useStandalone();
   const p = t.vetrina.product;
   const [data, setData] = React.useState<DrawerData | null | undefined>(undefined);
   const [error, setError] = React.useState<string | null>(null);
@@ -294,7 +295,7 @@ export function ProductSheet({
                     <External className="h-4 w-4" />
                   </a>
                 )}
-                {card.sku && !demo && (
+                {card.sku && !demo && !standalone && (
                   <a href={`/catalog?product=${encodeURIComponent(card.sku)}`} className="text-primary">
                     {p.openHub}
                   </a>

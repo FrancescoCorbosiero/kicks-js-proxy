@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { hubConfig } from "@/config";
+import { env } from "@/lib/env";
+import { isVetrinaHost, requestHost } from "@/lib/vetrina-host";
 import { getServerDictionary } from "@/i18n/server";
 import { VetrinaApp } from "@/components/vetrina/VetrinaApp";
 
@@ -10,6 +13,11 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /** The Vetrina: the customer's mobile app shell, apart from the operator tabs. */
-export default function VetrinaLayout({ children }: { children: ReactNode }) {
-  return <VetrinaApp theme={hubConfig.vetrina.theme}>{children}</VetrinaApp>;
+export default async function VetrinaLayout({ children }: { children: ReactNode }) {
+  const standalone = isVetrinaHost(requestHost(await headers()), env.VETRINA_HOST);
+  return (
+    <VetrinaApp theme={hubConfig.vetrina.theme} standalone={standalone}>
+      {children}
+    </VetrinaApp>
+  );
 }

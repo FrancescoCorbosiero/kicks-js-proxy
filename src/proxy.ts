@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { AUTH_COOKIE, sessionToken } from "@/lib/auth";
+import { isVetrinaHost, requestHost, servedOnVetrinaHost } from "@/lib/vetrina-host";
 
 /**
  * The login gate (Next's "proxy" file convention, formerly middleware).
@@ -9,6 +10,11 @@ import { AUTH_COOKIE, sessionToken } from "@/lib/auth";
  *
  * Exempt: /login itself, and /api/cron/* — the cron endpoints are called by
  * headless schedulers that authenticate with CRON_SECRET, never with a cookie.
+ *
+ * The Vetrina's own address (VETRINA_HOST): there "/" is the Vetrina, and the
+ * operator tabs, the API and the cron endpoints are not served at all — they
+ * stay on the Hub's address. The session cookie is per host, so the Vetrina
+ * signs in on its own (same password).
  *
  * NOTE: reads process.env directly — the one sanctioned exception to "env is
  * read only through src/lib/env.ts", because this bundle runs on the edge
@@ -31,28 +37,61 @@ async function expectedToken(password: string): Promise<string> {
   return cachedToken.token;
 }
 
-export async function proxy(req: NextRequest) {
-  const password = process.env.APP_PASSWORD;
-  if (!password) return NextResponse.next();
+/**
+ * The origin the browser asked for. Behind a reverse proxy req.nextUrl
+ * carries the server's own listening address (0.0.0.0:3000 in the
+ * container), so redirects are built from what the proxy forwards
+ * (X-Forwarded-Proto / X-Forwarded-Host — Caddy sends both), else Host.
+ */
+function publicOrigin(req: NextRequest): string {
+  const first = (value: string | null) => (value ?? "").split(",")[0].trim();
+  const host = first(req.headers.get("x-forwarded-host")) || first(req.headers.get("host")) || req.nextUrl.host;
+  const proto = first(req.headers.get("x-forwarded-proto")) || req.nextUrl.protocol.replace(/:$/, "");
+  return `${proto}://${host}`;
+}
 
+function redirectTo(req: NextRequest, path: string): NextResponse {
+  return NextResponse.redirect(new URL(path, publicOrigin(req)), 307);
+}
+
+/** Let the request through — on the Vetrina's address, "/" shows the Vetrina. */
+function pass(req: NextRequest, onVetrina: boolean): NextResponse {
+  if (onVetrina && req.nextUrl.pathname === "/") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/vetrina";
+    return NextResponse.rewrite(url);
+  }
+  return NextResponse.next();
+}
+
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const onVetrina = isVetrinaHost(requestHost(req.headers), process.env.VETRINA_HOST);
+
+  if (onVetrina && !servedOnVetrinaHost(pathname, PUBLIC_APP_FILES)) {
+    // An operator page asked on the Vetrina's address: back to the Vetrina.
+    // Anything else (the API, a form post) simply does not exist here.
+    if (req.method === "GET" || req.method === "HEAD") {
+      return redirectTo(req, "/");
+    }
+    return new NextResponse(null, { status: 404 });
+  }
+
+  const password = process.env.APP_PASSWORD;
+  if (!password) return pass(req, onVetrina);
+
   if (pathname === "/login" || pathname.startsWith("/api/cron/") || PUBLIC_APP_FILES.has(pathname)) {
     return NextResponse.next();
   }
 
   const cookie = req.cookies.get(AUTH_COOKIE)?.value;
   if (cookie === (await expectedToken(password))) {
-    return NextResponse.next();
+    return pass(req, onVetrina);
   }
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = "";
   // Return the operator to the page they wanted (same-origin paths only).
-  if (pathname !== "/" && pathname.startsWith("/") && !pathname.startsWith("//")) {
-    url.searchParams.set("from", pathname);
-  }
-  return NextResponse.redirect(url);
+  const from = pathname !== "/" && pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : null;
+  return redirectTo(req, from ? `/login?from=${encodeURIComponent(from)}` : "/login");
 }
 
 export const config = {
