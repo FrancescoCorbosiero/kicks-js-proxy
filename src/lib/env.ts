@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { isTimeZone, parseTimes } from "@/lib/schedule";
 
 /**
  * The ONLY place process.env is read. Everything else imports the typed `env`
@@ -15,6 +16,19 @@ const optionalSecret = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
   z.string().min(1).optional(),
 );
+
+/** An optional setting where a blank value (X= in a compose file) means unset. */
+const blankIsUnset = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema);
+
+const parsesAsTimes = (value: string) => {
+  try {
+    parseTimes(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const EnvSchema = z.object({
   // KicksDB
@@ -43,6 +57,23 @@ const EnvSchema = z.object({
   // In-app scheduler (src/server/scheduler.ts). Default: on in production,
   // off in dev; set explicitly to override either way.
   SCHEDULER: z.enum(["on", "off"]).optional(),
+  // When the daily sync runs: HH:MM times, comma-separated, in
+  // SCHEDULER_TIMEZONE. Default 04:30, Europe/Rome.
+  SCHEDULER_TIMES: blankIsUnset(
+    z
+      .string()
+      .refine((v) => parsesAsTimes(v), "SCHEDULER_TIMES is a list of HH:MM times, e.g. 04:30 or 04:30,13:30")
+      .optional(),
+  ),
+  SCHEDULER_TIMEZONE: blankIsUnset(
+    z.string().refine((v) => isTimeZone(v), "SCHEDULER_TIMEZONE is an IANA time zone, e.g. Europe/Rome").optional(),
+  ),
+  // Minutes between two pulls of the recent orders. Default 15; 0 = off.
+  SCHEDULER_ORDERS_MINUTES: blankIsUnset(z.coerce.number().int().min(0).max(1440).optional()),
+  // Called (GET) after every fully successful daily sync: point a dead man's
+  // switch at it (healthchecks.io, Uptime Kuma push, ...) to hear about a sync
+  // that failed or never ran.
+  SCHEDULER_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
 
   // GoldenSneakers feed — the flat-assortment endpoint (include VAT/markup
   // query params there: presented_price arrives FINAL) and its bearer token.

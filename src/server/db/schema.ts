@@ -376,6 +376,33 @@ export const orderWorkflow = pgTable("order_workflow", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * The in-app scheduler's runs (src/server/scheduler.ts): one row per run of
+ * the daily sync. `slot_at` is the scheduled time the run is for — a
+ * catch-up after downtime and a retry of failed steps carry the slot they
+ * make up for — so the last successful slot tells a restarting server
+ * whether it missed one.
+ */
+export const schedulerRuns = pgTable(
+  "scheduler_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slotAt: timestamp("slot_at", { withTimezone: true }).notNull(),
+    trigger: text("trigger", { enum: ["schedule", "catch-up", "retry"] }).notNull(),
+    status: text("status", { enum: ["running", "ok", "failed", "interrupted"] })
+      .notNull()
+      .default("running"),
+    // Per step: { ok, count?, note? } — what the run did, or why a step failed.
+    summary: jsonb("summary").$type<Record<string, { ok: boolean; count?: number; note?: string }>>(),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("scheduler_runs_started_idx").on(t.startedAt)],
+);
+
+export type SchedulerRunRow = typeof schedulerRuns.$inferSelect;
+
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;

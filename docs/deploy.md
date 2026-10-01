@@ -16,8 +16,8 @@ address keeps its own session, so you sign in once on each.
 
 Everything lives in `deploy/`: `docker-compose.yml` and the settings template
 `.env.example`. The image (`Dockerfile`, repo root) applies the pending
-database migrations every time it starts, and the daily sync runs inside the
-app, so there is no cron to set up.
+database migrations every time it starts. The scheduled syncs (store pull,
+feeds, orders) run inside the app, so there is no cron to set up.
 
 ## What you need
 
@@ -38,8 +38,9 @@ dig +short hub.resellpiacenza.shop
 dig +short vetrina.resellpiacenza.shop      # both print the VPS's IP
 ```
 
-If the domain is on Cloudflare, set both records to **DNS only** (grey cloud),
-so Caddy can obtain the certificates itself.
+If the domain is on Cloudflare, set both records to **DNS only** (grey cloud)
+for now, so Caddy can obtain its certificates. Step 8 turns the proxy back on
+and hides the server's IP again.
 
 ### 2. Find Caddy's network
 
@@ -104,9 +105,14 @@ docker compose up -d --build        # the first build takes a few minutes
 docker compose logs -f app          # Ctrl+C to stop watching
 ```
 
-Wait for `migrate: database is up to date`, then `Ready`. Caddy requests the
-two certificates as soon as the app container appears; with DNS already
-pointing here that takes a few seconds.
+Wait for `migrate: database is up to date`, then `Ready`, then the scheduler's
+line: `[scheduler] on — daily sync at 04:30 (Europe/Rome) …; orders every 15 min`.
+On a fresh database it also says the last sync `never completed — running it in
+a minute`. That first sync pulls the whole store, so expect
+`[scheduler] store pull done: N products` within a few minutes.
+
+Caddy requests the two certificates as soon as the app container appears.
+With DNS already pointing here, that takes a few seconds.
 
 ### 7. Check
 
@@ -115,8 +121,61 @@ pointing here that takes a few seconds.
   back to the Hub.
 - `https://vetrina.resellpiacenza.shop/catalog` → sends you back to the Vetrina.
 - In the Vetrina, open a section: its products load from the live site.
+- Hub → Feeds: the *Sincronizzazione automatica* card shows the next run, the
+  last one (products pulled from the store, SKUs, re-priced) and the orders
+  cadence. Hub → Orders: the latest orders, refreshed every 15 minutes.
 
 On a phone, open the Vetrina's address and choose *Add to Home Screen*.
+
+### 8. Hide the server's IP again (Cloudflare)
+
+Once both addresses open over HTTPS (step 7), Caddy has its certificates:
+
+1. In Cloudflare → **SSL/TLS → Overview**, set the encryption mode to
+   **Full (strict)**. Caddy's certificates are real ones, so Cloudflare can
+   verify them.
+2. In **DNS**, turn both records back to **Proxied** (orange cloud).
+
+DNS now answers with Cloudflare's addresses, not the VPS's. Caddy keeps
+renewing its certificates on its own: Let's Encrypt's check comes in through
+Cloudflare like any visit, and Caddy answers it. A renewal that fails shows
+up in Caddy's log weeks before the certificate expires. Switching the
+records to DNS only for a few minutes then lets Caddy renew directly.
+Two consequences of the proxy:
+
+- **A click that takes over 100 seconds** gets an error page from Cloudflare
+  (524), while the server finishes the job anyway. The scheduled syncs don't
+  go through Cloudflare, so they aren't affected.
+- **The IP may already be on record** from the hours it was public. To make it
+  useless, allow ports 80 and 443 only from Cloudflare's IP ranges in your
+  hosting provider's firewall. Use the provider's firewall rather than `ufw`,
+  because Docker's published ports bypass `ufw`.
+
+### 9. Be told if a sync doesn't happen
+
+The daily sync and the orders pull run inside the app (see *Scheduled syncs*
+below). To get an email when a daily sync fails or never runs:
+
+1. Create a free check at [healthchecks.io](https://healthchecks.io): period
+   **1 day**, grace **3 hours**.
+2. Put its ping URL in `deploy/.env` as `SCHEDULER_HEARTBEAT_URL=…`, then run
+   `docker compose up -d` (no rebuild needed: settings are read at start).
+
+## Scheduled syncs
+
+| What | When | Setting |
+| --- | --- | --- |
+| Store pull, GS sync, KicksDB re-pricing, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
+| Recent orders | every 15 minutes | `SCHEDULER_ORDERS_MINUTES` |
+
+- **A failed step** doesn't stop the others. It is retried an hour later,
+  twice at most.
+- **A restart or a deploy** never loses a sync. If the server was down at
+  04:30, or that run failed, the sync runs a minute after the next start. A
+  deploy after a good run starts nothing.
+- **Every run is kept** in the database (`scheduler_runs`), and the Feeds tab
+  shows the last one.
+- **Logs:** `docker compose logs app | grep scheduler`.
 
 ## Day to day
 
@@ -130,8 +189,8 @@ docker compose ps                            # health
 docker compose exec -T postgres pg_dump -U kicks -Fc kicks > ~/hub-$(date +%F).dump   # backup
 ```
 
-Run a single app container: the daily sync runs inside it, so a second copy
-would run every sync twice.
+Run a single app container: the syncs run inside it, so a second copy would
+run every sync twice.
 
 ## Troubleshooting
 
@@ -144,6 +203,9 @@ would run every sync twice.
   Caddy's own log says why: `docker logs <caddy-container>`.
 - **502 from Caddy:** the app is still starting, or it stopped.
   `docker compose ps` and `docker compose logs app` show which.
+- **The Feeds tab shows a sync error:** the message names the step (store
+  pull, GS sync, ...). The step is retried an hour later. If it keeps
+  failing, `docker compose logs app | grep scheduler` has the details.
 - **The Vetrina says the site isn't ready:** install golden-hive-blocks 5.11.0
   on WordPress. If WordPress sits behind a firewall (Wordfence, Cloudflare
   WAF), allow the VPS's IP.

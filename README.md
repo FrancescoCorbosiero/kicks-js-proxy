@@ -174,15 +174,36 @@ filters/sorts/paginates in SQL.
 
 ## Scheduled runs
 
-**The app schedules itself.** In production (`next start`) an in-app
+**The app schedules itself.** In production (`next start`, Docker) an in-app
 scheduler (`src/server/scheduler.ts`, started from `src/instrumentation.ts`)
-runs **one sync per day** — first tick a minute after boot: the
-GoldenSneakers complete sync, then a KicksDB re-pricing pass so whatever
-the sync registered gets priced immediately. Deploying the app is the whole
-setup; there is nothing else to configure. `SCHEDULER=on|off` overrides the
-default (on in production, off in dev). It needs a long-running server —
-`next start`, Docker, a VPS — not a serverless platform that freezes the
-process between requests.
+runs two cadences:
+
+- **The daily sync**, every day at `SCHEDULER_TIMES` (default `04:30`) in
+  `SCHEDULER_TIMEZONE` (default `Europe/Rome`). In order: the **store pull**
+  (the Hub's copy of every product on WooCommerce), the GoldenSneakers
+  complete sync, a KicksDB re-pricing pass, then self-repair (with
+  `AUTO_REPAIR=on`), metadata backfill and recategorization. A failed step
+  doesn't stop the others and is retried an hour later, twice at most.
+  `SCHEDULER_TIMES=04:30,13:30` runs it twice a day.
+- **The orders pull**, every `SCHEDULER_ORDERS_MINUTES` (default 15; `0` =
+  by hand only): the latest orders reach the Orders tab without a click.
+
+Every daily run is recorded in the `scheduler_runs` table, so a restart
+knows where it stands. A slot that was missed while the server was down, or
+whose run failed, runs a minute after the next boot. A deploy after a good
+run starts nothing. The Feeds tab shows the times, the last run and any
+error.
+
+**Be told when it doesn't run.** Set `SCHEDULER_HEARTBEAT_URL` to a
+dead-man's-switch check (for example a free healthchecks.io check with a
+1-day period and a few hours' grace). Each fully successful daily run calls
+that URL. If the calls stop, because a run failed or the server is down, the
+service alerts you.
+
+`SCHEDULER=on|off` overrides the default (on in production, off in dev). The
+scheduler needs a long-running server — `next start`, Docker, a VPS — not a
+serverless platform that freezes the process between requests. Run a
+single instance, or every sync runs once per instance.
 
 If you'd rather drive syncs from an external scheduler (crontab, systemd
 timer, an uptime service), set `SCHEDULER=off` and `CRON_SECRET`, then hit

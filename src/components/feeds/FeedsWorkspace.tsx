@@ -22,6 +22,7 @@ const MAX_ROUNDS = 50;
 export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
   const { t } = useI18n();
   const [state, setState] = React.useState(initialState);
+  const when = useShopTime(state.scheduler.timeZone);
   const [running, setRunning] = React.useState(false);
   const [progress, setProgress] = React.useState<{ refreshed: number; remaining: number } | null>(
     null,
@@ -120,9 +121,7 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
           <ul className="mt-3 divide-y divide-line/60 border-t border-line pt-2 text-sm">
             {state.lastRuns.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-2 py-1.5">
-                <span className="text-xs text-faint tnum">
-                  {new Date(r.startedAt).toLocaleString()}
-                </span>
+                <span className="text-xs text-faint tnum">{when.dateTime(r.startedAt)}</span>
                 <span className="ml-auto text-xs text-muted tnum">
                   {t.feeds.runLine(r.known, r.rejected)}
                 </span>
@@ -142,9 +141,28 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
   );
 }
 
+/**
+ * A date on this page, in the shop's time zone and the UI's language. Fixed
+ * both ways so the server and the browser print the same text, which the
+ * page's hydration requires.
+ */
+function useShopTime(timeZone: string) {
+  const { locale } = useI18n();
+  return React.useMemo(() => {
+    const tag = locale === "it" ? "it-IT" : "en-GB";
+    const dateTime = new Intl.DateTimeFormat(tag, { timeZone, dateStyle: "short", timeStyle: "short" });
+    const time = new Intl.DateTimeFormat(tag, { timeZone, timeStyle: "short" });
+    return {
+      dateTime: (at: number | string | Date) => dateTime.format(new Date(at)),
+      time: (at: number | string | Date) => time.format(new Date(at)),
+    };
+  }, [locale, timeZone]);
+}
+
 function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
   const { t } = useI18n();
   const s = t.feeds.scheduler;
+  const when = useShopTime(status.timeZone);
   return (
     <section className="rounded-xl border border-line bg-surface p-4 shadow-xs">
       <div className="flex flex-wrap items-center gap-3">
@@ -162,7 +180,7 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
           <div className="flex items-center gap-2 text-sm font-semibold">
             {s.name}
             <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
-              {s.tag}
+              {s.tag(Math.max(status.times.length, 1))}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
@@ -172,7 +190,7 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
               {status.enabled ? s.on : s.off}
             </span>
           </div>
-          <div className="text-xs text-muted">{s.desc}</div>
+          <div className="text-xs text-muted">{s.desc(status.times.join(", "), status.timeZone)}</div>
         </div>
         <div className="ml-auto text-right text-xs text-muted tnum">
           {status.enabled ? (
@@ -181,17 +199,22 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                 {status.running
                   ? s.runningNow
                   : status.nextRunAt
-                    ? s.nextRun(new Date(status.nextRunAt).toLocaleString())
+                    ? s.nextRun(when.dateTime(status.nextRunAt))
                     : null}
               </div>
               {status.lastRunAt && (
                 <div className="text-faint">
-                  {s.lastRun(new Date(status.lastRunAt).toLocaleString())}
+                  {s.lastRun(when.dateTime(status.lastRunAt))}
+                  {status.lastPulled != null && ` · ${s.lastPulled(status.lastPulled)}`}
                   {status.lastGsSkus != null && ` · ${s.lastGs(status.lastGsSkus)}`}
                   {status.lastRefreshed != null && ` · ${s.lastRepriced(status.lastRefreshed)}`}
                   {status.lastRepaired != null && ` · ${s.lastRepaired(status.lastRepaired)}`}
                 </div>
               )}
+              <div className="text-faint">
+                {status.ordersEveryMinutes > 0 ? s.orders(status.ordersEveryMinutes) : s.ordersOff}
+                {status.ordersLastAt && ` · ${s.ordersLast(when.time(status.ordersLastAt))}`}
+              </div>
             </>
           ) : (
             <div className="max-w-64 text-faint">{s.offHint}</div>
@@ -199,12 +222,14 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
         </div>
       </div>
       {status.lastError && <p className="mt-2 text-sm text-skip">{status.lastError}</p>}
+      {status.ordersError && <p className="mt-2 text-sm text-skip">{status.ordersError}</p>}
     </section>
   );
 }
 
 function GsFeedCard({ state, onSynced }: { state: FeedsState; onSynced: () => Promise<void> }) {
   const { t } = useI18n();
+  const when = useShopTime(state.scheduler.timeZone);
   const [running, setRunning] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [report, setReport] = React.useState<GsSyncActionResult["report"] | null>(null);
@@ -326,7 +351,7 @@ function GsFeedCard({ state, onSynced }: { state: FeedsState; onSynced: () => Pr
         <ul className="mt-3 divide-y divide-line/60 border-t border-line pt-2 text-sm">
           {state.gs.lastRuns.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center gap-2 py-1.5">
-              <span className="text-xs text-faint tnum">{new Date(r.startedAt).toLocaleString()}</span>
+              <span className="text-xs text-faint tnum">{when.dateTime(r.startedAt)}</span>
               <span className="ml-auto text-xs text-muted tnum">
                 {t.feeds.gs.runLine(r.added, r.known, r.rejected)}
               </span>
