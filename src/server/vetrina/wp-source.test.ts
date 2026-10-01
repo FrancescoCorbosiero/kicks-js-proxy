@@ -56,6 +56,25 @@ describe("wc-gh/v1 failures, as the Vetrina reports them", () => {
     expect((error as Error).message).toContain("page_id");
   });
 
+  it("a publish sends the section's changed fields and size, and nothing when none change", async () => {
+    const bodies: unknown[] = [];
+    const ok = { dry_run: false, changed: true, before: "", after: "", modified_gmt: "2026-09-30 10:00:00", attrs_hash: "h", fields: {} };
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return json(200, ok);
+    }));
+    const base = {
+      pageId: 7, path: "8.1", blockName: "golden-hive/shortcode-wrapper",
+      expectedModifiedGmt: "2026-09-30 09:00:00", expectedAttrsHash: "a",
+      pin: [3], exclude: [], fallback: "menu_order" as const,
+    };
+    await wordpressSource().writeRail({ ...base, fields: { title: "SALDI AUTUNNO" }, limit: 6 });
+    await wordpressSource().writeRail(base);
+    expect(bodies[0]).toMatchObject({ rail: { pin: [3], limit: 6 }, attrs: { title: "SALDI AUTUNNO" } });
+    expect(bodies[1]).not.toHaveProperty("attrs");
+    expect((bodies[1] as { rail: object }).rail).not.toHaveProperty("limit");
+  });
+
   it("a site without the plugin is told apart from a site that is down", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       json(404, { code: "rest_no_route", message: "No route was found.", data: { status: 404 } }),

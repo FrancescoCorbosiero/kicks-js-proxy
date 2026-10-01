@@ -2,6 +2,7 @@ import "server-only";
 import { env } from "@/lib/env";
 import { hubConfig } from "@/config";
 import type {
+  BlockWrite,
   Capabilities,
   Homepage,
   ProductCard,
@@ -25,7 +26,10 @@ export interface VetrinaSource {
   /** A rail by its stable key ("category:saldi-sneakers-outlet#0"), every member included. */
   rail(key: string, opts?: { offset?: number; count?: number; fallback?: RailFallback }): Promise<RailDetail>;
   products(ids: number[]): Promise<ProductCard[]>;
+  /** A rail's order, plus its fields and size when given. */
   writeRail(input: RailWrite): Promise<RailWriteResult>;
+  /** A block that is not a rail: its fields. */
+  writeBlock(input: BlockWrite): Promise<RailWriteResult>;
   history(key: string): Promise<RailHistoryState[]>;
 }
 

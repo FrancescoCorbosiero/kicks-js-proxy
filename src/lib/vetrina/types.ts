@@ -30,6 +30,20 @@ export interface ProductCard {
   missing?: boolean;
 }
 
+/**
+ * A block's editable fields as the site renders them ("title" → "SALDI").
+ * Which fields exist is the plugin's call; which the customer sees is the
+ * config's (hub.config.ts, edit.fields).
+ */
+export type FieldValues = Record<string, string>;
+
+/** How the plugin checks a field (golden-hive-blocks' ghb_hub_field_specs). */
+export interface FieldSpec {
+  type: "text" | "url" | "enum";
+  max?: number;
+  options?: string[];
+}
+
 export interface RailTerm {
   id: number;
   slug: string;
@@ -59,6 +73,8 @@ export interface RailSummary {
   fallbackDefault: RailFallback;
   /** False for a rail showing a fixed ids="…" list. */
   editable: boolean;
+  /** The section's editable fields; empty with a plugin older than 5.10.0. */
+  fields: FieldValues;
   /** What the site renders right now, in order. */
   products: ProductCard[];
 }
@@ -71,7 +87,16 @@ export interface StaticSummary {
 
 export type HomeBlock =
   | { path: string; name: string; kind: "rail"; rail: RailSummary }
-  | { path: string; name: string; kind: "static"; summary: StaticSummary };
+  | {
+      path: string;
+      name: string;
+      kind: "static";
+      summary: StaticSummary;
+      /** Present when the block has fields the Vetrina may edit. */
+      fields?: FieldValues;
+      /** Fingerprint of the block as read; a write must present it back. */
+      attrsHash?: string;
+    };
 
 export interface Homepage {
   pageId: number;
@@ -127,12 +152,32 @@ export interface RailState {
   fallback: RailFallback;
 }
 
+/** Everything the rail editor publishes: the order, plus the section's texts and size. */
+export interface SectionDraft extends RailState {
+  fields: FieldValues;
+  limit: number;
+}
+
 export interface RailWrite extends RailState {
   pageId: number;
   path: string;
   blockName: string;
   expectedModifiedGmt: string;
   expectedAttrsHash: string;
+  /** Only the fields that change. */
+  fields?: FieldValues;
+  limit?: number;
+  dryRun?: boolean;
+}
+
+/** A write to a block that is not a rail: its fields only. */
+export interface BlockWrite {
+  pageId: number;
+  path: string;
+  blockName: string;
+  expectedModifiedGmt: string;
+  expectedAttrsHash: string;
+  fields: FieldValues;
   dryRun?: boolean;
 }
 
@@ -143,8 +188,10 @@ export interface RailWriteResult {
   after: string;
   modifiedGmt: string;
   attrsHash: string;
-  /** Ids the rail renders after the write. */
+  /** Ids the rail renders after the write (empty for a block that is not a rail). */
   rendered: number[];
+  /** The block's editable fields after the write. */
+  fields: FieldValues;
 }
 
 export interface RailHistoryState extends RailState {
@@ -162,6 +209,8 @@ export interface Capabilities {
   hideOutOfStock: boolean;
   frontPageId: number;
   siteUrl: string;
+  /** Editable fields per block name, as the plugin checks them. */
+  fields: Record<string, Record<string, FieldSpec>>;
 }
 
 /** Why the Vetrina cannot do what was asked — each one has its own message. */

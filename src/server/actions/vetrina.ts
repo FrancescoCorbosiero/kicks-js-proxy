@@ -4,6 +4,7 @@ import { z } from "zod";
 import { RAIL_FALLBACKS } from "@/config/schema";
 import {
   attempt,
+  publishBlock,
   publishRail,
   readCards,
   readHistory,
@@ -43,6 +44,10 @@ export async function loadVetrinaHistory(input: { key: string }): Promise<Vetrin
   return attempt(() => readHistory(parsed.data.key));
 }
 
+// Field values are checked field by field in the service (lib/vetrina/fields.ts);
+// here only their shape and a hard size cap.
+const Fields = z.record(z.string().min(1).max(40), z.string().max(1000)).refine((f) => Object.keys(f).length <= 20);
+
 const PublishSchema = z.object({
   key: Key,
   expectedModifiedGmt: z.string().min(1).max(40),
@@ -50,10 +55,27 @@ const PublishSchema = z.object({
   pin: Ids,
   exclude: Ids,
   fallback: Fallback,
+  fields: Fields.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
 });
 
-export async function publishVetrinaRail(input: z.infer<typeof PublishSchema>): Promise<VetrinaResult<RailWriteResult>> {
+export async function publishVetrinaRail(input: z.input<typeof PublishSchema>): Promise<VetrinaResult<RailWriteResult>> {
   const parsed = PublishSchema.safeParse(input);
   if (!parsed.success) return { ok: false, code: "invalid", error: parsed.error.issues[0]?.message ?? "Dati non validi." };
   return attempt(() => publishRail(parsed.data));
+}
+
+const PublishBlockSchema = z.object({
+  path: z.string().min(1).max(40),
+  blockName: z.string().min(3).max(100),
+  expectedModifiedGmt: z.string().min(1).max(40),
+  expectedAttrsHash: z.string().min(1).max(64),
+  fields: Fields,
+});
+
+/** A block's fields (a slider's title, the FAQ's subtitle), straight to the site. */
+export async function publishVetrinaBlock(input: z.input<typeof PublishBlockSchema>): Promise<VetrinaResult<RailWriteResult>> {
+  const parsed = PublishBlockSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, code: "invalid", error: parsed.error.issues[0]?.message ?? "Dati non validi." };
+  return attempt(() => publishBlock(parsed.data));
 }

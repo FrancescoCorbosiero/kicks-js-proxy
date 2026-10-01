@@ -9,7 +9,7 @@ import { orderIds } from "@/lib/vetrina/order";
 vi.mock("@/lib/env", () => ({ env: {} }));
 
 /**
- * Contract: the JSON below was produced by golden-hive-blocks 5.9.0's
+ * Contract: the JSON below was produced by golden-hive-blocks 5.10.0's
  * wc-gh/v1 routes running in real WordPress (the integration harness), so
  * these tests fail the day the plugin and the Hub stop speaking the same shape.
  */
@@ -38,6 +38,21 @@ describe("wc-gh/v1 responses parse into the Hub's types", () => {
     expect(hero?.kind === "static" && hero.summary.items).toBe(5);
   });
 
+  it("homepage: editable fields, for rails and for the blocks that have them", () => {
+    const home = parseHomepage(homepageJson);
+    const saldi = home.blocks.find((b) => b.kind === "rail" && b.rail.key === "category:saldi-sneakers-outlet#0");
+    expect(saldi?.kind === "rail" && saldi.rail.fields).toMatchObject({
+      eyebrow: "Saldi primaverili",
+      title: "SALDI",
+      backgroundColor: expect.any(String),
+    });
+    const faq = home.blocks.find((b) => b.name === "golden-hive/faq-schema");
+    expect(faq?.kind === "static" && Object.keys(faq.fields ?? {})).toEqual(["title", "subtitle"]);
+    expect(faq?.kind === "static" && faq.attrsHash).toMatch(/^[0-9a-f]{32}$/);
+    const hero = home.blocks.find((b) => b.name === "golden-hive/hero-carousel");
+    expect(hero?.kind === "static" && hero.fields).toBeUndefined();
+  });
+
   it("rail: the automatic order recomputes the list with the site's rule", () => {
     const rail = parseRailDetail(railJson);
     expect(rail.key).toBe("category:saldi-sneakers-outlet#0");
@@ -46,12 +61,14 @@ describe("wc-gh/v1 responses parse into the Hub's types", () => {
       rail.items.map((i) => i.id),
     );
     expect(rail.items[0].position).toBe(1);
+    expect(rail.fields.title).toBe("SALDI");
   });
 
   it("capabilities", () => {
     const caps = parseCapabilities(capabilitiesJson);
-    expect(caps.version).toBe("5.9.0");
-    expect(caps.features).toContain("block-write");
+    expect(caps.version).toBe("5.10.0");
+    expect(caps.features).toEqual(expect.arrayContaining(["block-write", "block-fields", "rail-limit"]));
+    expect(caps.fields["golden-hive/shortcode-wrapper"]?.title).toEqual({ type: "text", max: 120 });
   });
 });
 

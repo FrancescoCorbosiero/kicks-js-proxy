@@ -24,16 +24,24 @@ const BlockConfigSchema = z.object({
   /** Label override. Default: the dictionary's name for the block. */
   label: z.string().min(1).optional(),
   /**
-   * Rail settings the customer may change. Each flag needs the plugin to
-   * accept that attribute too (golden-hive-blocks ≥ 5.9.0 accepts these three).
+   * What the customer may change. Each needs the plugin to accept it too:
+   * golden-hive-blocks ≥ 5.9.0 for pins / exclude / fallback, ≥ 5.10.0 for
+   * limit and fields.
    */
   edit: z
     .object({
       pins: z.boolean().default(false),
       exclude: z.boolean().default(false),
       fallback: z.boolean().default(false),
+      /** Rails: how many products the section shows. */
+      limit: z.boolean().default(false),
+      /**
+       * Block fields (title, eyebrow, button, background…), by attribute
+       * name. The plugin's own list is the ceiling (lib/vetrina/fields.ts).
+       */
+      fields: z.array(z.string().min(1)).default([]),
     })
-    .default({ pins: false, exclude: false, fallback: false }),
+    .default({ pins: false, exclude: false, fallback: false, limit: false, fields: [] }),
 });
 export type BlockConfig = z.infer<typeof BlockConfigSchema>;
 
@@ -65,6 +73,8 @@ export const HubConfigSchema = z.object({
     fallbacks: z.array(z.enum(RAIL_FALLBACKS)).min(1),
     /** Most products a rail may pin. The plugin's own ceiling is 100. */
     maxPins: z.number().int().min(1).max(100),
+    /** Most products a rail may show (edit.limit). The plugin's own ceiling is 100. */
+    maxLimit: z.number().int().min(1).max(100).default(48),
     /** Products loaded per rail in the editor (the rest on demand). */
     pageSize: z.number().int().min(10).max(200),
   }),

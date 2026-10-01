@@ -1,16 +1,29 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Navbar, Page, Link as KLink } from "konsta/react";
+import { toast } from "sonner";
 import { useI18n } from "@/i18n/provider";
 import { blockConfig } from "@/config";
+import { editableFields } from "@/lib/vetrina/fields";
 import { railKeyToParam } from "@/lib/vetrina/order";
 import { skuKey } from "@/lib/skus";
-import type { HomeBlock, RailSummary } from "@/lib/vetrina/types";
+import type { FieldValues, HomeBlock, RailSummary } from "@/lib/vetrina/types";
 import type { VetrinaHome, VetrinaResult } from "@/server/vetrina/service";
+import { publishVetrinaBlock } from "@/server/actions/vetrina";
 import { ErrorState } from "./ErrorState";
+import { FieldsSheet } from "./FieldsSheet";
 import { ChevronLeft, ChevronRight, External, Lock, Pin, Refresh } from "./icons";
+
+type StaticBlock = Extract<HomeBlock, { kind: "static" }>;
+
+/** The fields of a block the customer may edit here; empty when none. */
+function staticFields(block: HomeBlock): string[] {
+  if (block.kind !== "static" || !block.fields || !block.attrsHash) return [];
+  return editableFields(block.name, blockConfig(block.name).edit.fields, block.fields);
+}
 
 /**
  * "La tua homepage": every block of the page in order. Product rails are
@@ -21,6 +34,33 @@ export function HomeScreen({ result }: { result: VetrinaResult<VetrinaHome> }) {
   const { t } = useI18n();
   const router = useRouter();
   const v = t.vetrina;
+
+  // A block's texts, edited in a sheet and saved straight to the site.
+  const [editingPath, setEditingPath] = React.useState<string | null>(null);
+  const editing = result.ok
+    ? (result.data.home.blocks.find((b): b is StaticBlock => b.kind === "static" && b.path === editingPath) ?? null)
+    : null;
+  const blockLabel = (block: HomeBlock) =>
+    blockConfig(block.name).label ?? v.blocks[block.name] ?? v.blocks.other;
+
+  async function saveBlock(block: StaticBlock, fields: FieldValues): Promise<boolean> {
+    if (!result.ok || !block.attrsHash) return false;
+    const res = await publishVetrinaBlock({
+      path: block.path,
+      blockName: block.name,
+      expectedModifiedGmt: result.data.home.modifiedGmt,
+      expectedAttrsHash: block.attrsHash,
+      fields: Object.fromEntries(Object.entries(fields).map(([field, value]) => [field, value.trim()])),
+    });
+    if (!res.ok) {
+      toast.error(v.errors[res.code] ?? res.error);
+      if (res.code === "stale") router.refresh();
+      return res.code === "stale";
+    }
+    toast.success(result.data.source === "fixture" ? v.section.savedDemo : v.section.saved);
+    router.refresh();
+    return true;
+  }
 
   return (
     <Page>
@@ -58,15 +98,43 @@ export function HomeScreen({ result }: { result: VetrinaResult<VetrinaHome> }) {
             <External className="h-4 w-4" />
           </a>
           {result.data.home.blocks.map((block) => (
-            <HomeRow key={block.path} block={block} locks={result.data.locks} />
+            <HomeRow
+              key={block.path}
+              block={block}
+              label={blockLabel(block)}
+              locks={result.data.locks}
+              onEdit={() => setEditingPath(block.path)}
+            />
           ))}
         </div>
       )}
+
+      <FieldsSheet
+        open={editing != null}
+        title={editing ? v.section.blockSheetTitle(blockLabel(editing)) : ""}
+        blockName={editing?.name ?? ""}
+        fieldKeys={editing ? staticFields(editing) : []}
+        values={editing?.fields ?? {}}
+        submitLabel={v.section.save}
+        busyLabel={v.section.saving}
+        onSubmit={(fields) => (editing ? saveBlock(editing, fields) : true)}
+        onClose={() => setEditingPath(null)}
+      />
     </Page>
   );
 }
 
-function HomeRow({ block, locks }: { block: HomeBlock; locks: Record<string, number> }) {
+function HomeRow({
+  block,
+  label,
+  locks,
+  onEdit,
+}: {
+  block: HomeBlock;
+  label: string;
+  locks: Record<string, number>;
+  onEdit: () => void;
+}) {
   const { t } = useI18n();
   const config = blockConfig(block.name);
   if (config.show === "hidden") return null;
@@ -75,18 +143,36 @@ function HomeRow({ block, locks }: { block: HomeBlock; locks: Record<string, num
     return <RailCard rail={block.rail} locks={locks} />;
   }
 
-  const label = config.label ?? t.vetrina.blocks[block.name] ?? t.vetrina.blocks.other;
   const summary = block.kind === "static" ? block.summary : null;
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-black/5 px-4 py-3 text-[15px] dark:border-white/10">
-      <span className="min-w-0 flex-1 truncate opacity-70">
-        {label}
-        {summary?.items != null && <span className="opacity-60"> · {t.vetrina.home.items(summary.items)}</span>}
+  const editable = staticFields(block).length > 0;
+  const title = block.kind === "static" ? (block.fields?.title ?? summary?.title ?? null) : null;
+  const inner = (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate opacity-70">
+          {label}
+          {summary?.items != null && <span className="opacity-80"> · {t.vetrina.home.items(summary.items)}</span>}
+        </span>
+        {editable && title && <span className="block truncate text-[13px] font-medium">{title}</span>}
       </span>
-      <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[12px] opacity-60 dark:bg-white/10">
-        {t.vetrina.home.fromSite}
-      </span>
-    </div>
+      {editable ? (
+        <span className="shrink-0 rounded-full bg-black/5 px-2.5 py-0.5 text-[12px] font-medium dark:bg-white/10">
+          {t.vetrina.section.edit}
+        </span>
+      ) : (
+        <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[12px] opacity-60 dark:bg-white/10">
+          {t.vetrina.home.fromSite}
+        </span>
+      )}
+    </>
+  );
+  const frame = "flex w-full items-center gap-3 rounded-2xl border border-black/5 px-4 py-3 text-left text-[15px] dark:border-white/10";
+  return editable ? (
+    <button type="button" onClick={onEdit} className={`${frame} transition-opacity active:opacity-60`}>
+      {inner}
+    </button>
+  ) : (
+    <div className={frame}>{inner}</div>
   );
 }
 
@@ -119,7 +205,7 @@ function RailCard({ rail, locks }: { rail: RailSummary; locks: Record<string, nu
                 src={p.image}
                 alt={p.name}
                 loading="lazy"
-                className="h-[72px] w-[72px] rounded-xl bg-black/[0.04] object-contain dark:bg-white/10"
+                className="h-[72px] w-[72px] overflow-hidden rounded-xl bg-black/[0.04] object-contain text-[0px] dark:bg-white/10"
               />
               <span className="absolute left-1 top-1 rounded-md bg-white/90 px-1 text-[11px] font-semibold tabular-nums text-black shadow-sm">
                 {i + 1}

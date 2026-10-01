@@ -102,7 +102,7 @@ export function unpin(pin: number[], id: number): number[] {
 }
 
 /** "Nascondi da questa sezione": never shown here, and no longer pinned. */
-export function hide(state: RailState, id: number): RailState {
+export function hide<S extends RailState>(state: S, id: number): S {
   return {
     ...state,
     pin: unpin(state.pin, id),
@@ -111,7 +111,7 @@ export function hide(state: RailState, id: number): RailState {
 }
 
 /** "Mostra di nuovo". */
-export function show(state: RailState, id: number): RailState {
+export function show<S extends RailState>(state: S, id: number): S {
   return { ...state, exclude: state.exclude.filter((e) => e !== id) };
 }
 

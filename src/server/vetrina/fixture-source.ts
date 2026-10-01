@@ -1,7 +1,10 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { orderIds } from "@/lib/vetrina/order";
+import { FIELD_SPECS, fieldProblem } from "@/lib/vetrina/fields";
 import type {
+  BlockWrite,
+  FieldValues,
   HiddenItem,
   Homepage,
   ProductCard,
@@ -29,6 +32,10 @@ interface DemoState {
   products: DemoProduct[];
   byId: Map<number, DemoProduct>;
   rails: Map<string, RailState>;
+  /** Field edits by block path, over the block's own values. */
+  fields: Map<string, FieldValues>;
+  /** Rail sizes by rail key, over the shortcode's limit. */
+  limits: Map<string, number>;
   modified: number;
   history: Map<string, (RailState & { at: number })[]>;
 }
@@ -43,6 +50,8 @@ function state(): DemoState {
       products,
       byId: new Map(products.map((p) => [p.id, p])),
       rails: new Map(),
+      fields: new Map(),
+      limits: new Map(),
       modified: Date.parse("2026-09-30T08:00:00Z"),
       history: new Map(),
     };
@@ -68,8 +77,41 @@ function railState(key: string): RailState {
   return state().rails.get(key) ?? { pin: [], exclude: [], fallback: defaultFallback() };
 }
 
-function hashOf(key: string, s: RailState): string {
-  return createHash("md5").update(JSON.stringify([key, s.pin, s.exclude, s.fallback])).digest("hex");
+/** A block's editable fields: its own values under the edits made so far. */
+function fieldsOf(block: DemoBlock): FieldValues {
+  const spec = FIELD_SPECS[block.name];
+  if (!spec) return {};
+  const own: FieldValues =
+    block.kind === "rail"
+      ? {
+          eyebrow: block.eyebrow,
+          title: block.title,
+          backgroundColor: block.background,
+          buttonText: block.button.text,
+          buttonUrl: block.button.url,
+        }
+      : { title: block.title ?? "" };
+  const edits = state().fields.get(block.path) ?? {};
+  return Object.fromEntries(Object.keys(spec).map((field) => [field, edits[field] ?? own[field] ?? ""]));
+}
+
+function limitOf(block: RailBlock, key: string): number {
+  return state().limits.get(key) ?? Number(block.atts.limit ?? 12);
+}
+
+function hashOf(key: string, s: RailState, fields: FieldValues, limit: number): string {
+  return createHash("md5").update(JSON.stringify([key, s.pin, s.exclude, s.fallback, fields, limit])).digest("hex");
+}
+
+/** The plugin's checks, applied the same way (fields.ts mirrors them). */
+function checkFields(blockName: string, fields: FieldValues): FieldValues {
+  const clean: FieldValues = {};
+  for (const [field, value] of Object.entries(fields)) {
+    const problem = fieldProblem(blockName, field, value);
+    if (problem) throw new VetrinaError("invalid", `Valore non valido per ${field} (${problem}).`, 400);
+    clean[field] = value.trim();
+  }
+  return clean;
 }
 
 function inBrand(product: DemoProduct, brand: string): boolean {
@@ -152,16 +194,17 @@ function findRail(match: { path?: string; key?: string }): { block: RailBlock; k
 function summary(block: RailBlock, key: string, withProducts: boolean): RailSummary {
   const s = railState(key);
   const slug = block.atts.category ?? block.atts.brand ?? "";
-  const limit = Number(block.atts.limit ?? 12);
+  const limit = limitOf(block, key);
+  const fields = fieldsOf(block);
   const rendered = orderIds(visibleIds(block, s.fallback), s.pin, s.exclude).slice(0, limit);
   return {
     key,
     path: block.path,
-    attrsHash: hashOf(key, s),
-    title: block.title,
-    eyebrow: block.eyebrow,
-    background: block.background,
-    button: block.button,
+    attrsHash: hashOf(key, s, fields, limit),
+    title: fields.title ?? block.title,
+    eyebrow: fields.eyebrow ?? block.eyebrow,
+    background: fields.backgroundColor ?? block.background,
+    button: { text: fields.buttonText ?? block.button.text, url: fields.buttonUrl ?? block.button.url },
     limit,
     taxonomy: block.atts.category ? "product_cat" : "product_brand",
     terms: [{ id: 1, slug, name: DEMO_TERM_NAMES[slug] ?? slug, count: members(block).length, link: null }],
@@ -170,8 +213,13 @@ function summary(block: RailBlock, key: string, withProducts: boolean): RailSumm
     fallback: s.fallback,
     fallbackDefault: defaultFallback(),
     editable: true,
+    fields,
     products: withProducts ? cards(rendered) : [],
   };
+}
+
+function staticHash(block: DemoBlock): string {
+  return createHash("md5").update(JSON.stringify([block.path, fieldsOf(block)])).digest("hex");
 }
 
 function hiddenReason(block: RailBlock, id: number, s: RailState): HiddenItem["reason"] {
@@ -191,12 +239,13 @@ export function fixtureSource(): VetrinaSource {
       return {
         version: "demo",
         api: 1,
-        features: ["homepage", "rail", "rail-visible", "products", "block-write", "history"],
+        features: ["homepage", "rail", "rail-visible", "products", "block-write", "history", "rail-limit", "block-fields"],
         fallbacks: ["menu_order", "date", "popularity", "price", "price-desc", "rating"],
         maxIds: 100,
         hideOutOfStock: true,
         frontPageId: 1,
         siteUrl: "https://demo.shop/",
+        fields: FIELD_SPECS,
       };
     },
 
@@ -211,7 +260,13 @@ export function fixtureSource(): VetrinaSource {
         blocks: DEMO_BLOCKS.map((b) =>
           b.kind === "rail"
             ? { path: b.path, name: b.name, kind: "rail" as const, rail: summary(b, keys.get(b.path)!, true) }
-            : { path: b.path, name: b.name, kind: "static" as const, summary: { title: b.title, items: b.items, labels: b.labels } },
+            : {
+                path: b.path,
+                name: b.name,
+                kind: "static" as const,
+                summary: { title: fieldsOf(b).title || b.title, items: b.items, labels: b.labels },
+                ...(FIELD_SPECS[b.name] ? { fields: fieldsOf(b), attrsHash: staticHash(b) } : {}),
+              },
         ),
       };
     },
@@ -258,12 +313,19 @@ export function fixtureSource(): VetrinaSource {
       const st = state();
       const { block, key } = findRail({ path: input.path });
       const current = railState(key);
+      const currentFields = fieldsOf(block);
+      const currentLimit = limitOf(block, key);
       if (input.expectedModifiedGmt !== gmt(st.modified)) {
         throw new VetrinaError("stale", "La homepage è stata modificata nel frattempo: ricarica.", 409);
       }
-      if (input.expectedAttrsHash !== hashOf(key, current)) {
+      if (input.expectedAttrsHash !== hashOf(key, current, currentFields, currentLimit)) {
         throw new VetrinaError("stale", "La sezione è stata modificata nel frattempo: ricarica.", 409);
       }
+      if (input.limit != null && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)) {
+        throw new VetrinaError("invalid", "Numero di prodotti non valido (da 1 a 100).", 400);
+      }
+      const nextFields = { ...currentFields, ...checkFields(block.name, input.fields ?? {}) };
+      const nextLimit = input.limit ?? currentLimit;
       const next: RailState = {
         pin: [...new Set(input.pin.filter((id) => id > 0))].slice(0, 100),
         exclude: [...new Set(input.exclude.filter((id) => id > 0))].slice(0, 100),
@@ -276,23 +338,61 @@ export function fixtureSource(): VetrinaSource {
         if (s.fallback !== defaultFallback()) atts.fallback = s.fallback;
         return `[gh_product_rail ${Object.entries(atts).map(([k, v]) => `${k}="${v}"`).join(" ")}]`;
       };
-      const changed = shortcode(next) !== shortcode(current);
+      const orderChanged = shortcode(next) !== shortcode(current);
+      const changed =
+        orderChanged || nextLimit !== currentLimit || JSON.stringify(nextFields) !== JSON.stringify(currentFields);
       if (!input.dryRun && changed) {
-        const log = st.history.get(key) ?? [{ ...current, at: st.modified }];
+        if (orderChanged) {
+          // Like the plugin's history: one entry per change of order.
+          const log = st.history.get(key) ?? [{ ...current, at: st.modified }];
+          log.unshift({ ...next, at: st.modified + 60_000 });
+          st.history.set(key, log.slice(0, 30));
+        }
         st.rails.set(key, next);
+        st.fields.set(block.path, nextFields);
+        st.limits.set(key, nextLimit);
         st.modified += 60_000;
-        log.unshift({ ...next, at: st.modified });
-        st.history.set(key, log.slice(0, 30));
       }
       const now = railState(key);
+      const nowFields = fieldsOf(block);
+      const nowLimit = limitOf(block, key);
       return {
         dryRun: input.dryRun ?? false,
         changed,
         before: shortcode(current),
         after: shortcode(next),
         modifiedGmt: gmt(st.modified),
-        attrsHash: hashOf(key, now),
-        rendered: orderIds(visibleIds(block, now.fallback), now.pin, now.exclude).slice(0, Number(block.atts.limit ?? 12)),
+        attrsHash: hashOf(key, now, nowFields, nowLimit),
+        rendered: orderIds(visibleIds(block, now.fallback), now.pin, now.exclude).slice(0, nowLimit),
+        fields: nowFields,
+      };
+    },
+
+    async writeBlock(input: BlockWrite): Promise<RailWriteResult> {
+      const st = state();
+      const block = DEMO_BLOCKS.find((b) => b.path === input.path && b.name === input.blockName);
+      if (!block || block.kind === "rail" || !FIELD_SPECS[block.name]) {
+        throw new VetrinaError("not_found", "Questo blocco non ha campi modificabili dalla Vetrina.", 422);
+      }
+      if (input.expectedModifiedGmt !== gmt(st.modified) || input.expectedAttrsHash !== staticHash(block)) {
+        throw new VetrinaError("stale", "La homepage è stata modificata nel frattempo: ricarica.", 409);
+      }
+      const current = fieldsOf(block);
+      const next = { ...current, ...checkFields(block.name, input.fields) };
+      const changed = JSON.stringify(next) !== JSON.stringify(current);
+      if (!input.dryRun && changed) {
+        st.fields.set(block.path, next);
+        st.modified += 60_000;
+      }
+      return {
+        dryRun: input.dryRun ?? false,
+        changed,
+        before: "",
+        after: "",
+        modifiedGmt: gmt(st.modified),
+        attrsHash: staticHash(block),
+        rendered: [],
+        fields: fieldsOf(block),
       };
     },
 
