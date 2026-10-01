@@ -604,8 +604,9 @@ export const it = {
       `${refreshed} rinfrescati · ${missed} non restituiti`,
     scheduler: {
       name: "Sincronizzazione automatica",
-      tag: "1×/giorno",
-      desc: "Il server esegue da solo una sincronizzazione al giorno: tutti i listini configurati, poi la ri-prezzatura delle fonti che la prevedono.",
+      tag: (perDay: number) => `${perDay}×/giorno`,
+      desc: (times: string, zone: string) =>
+        `Ogni giorno alle ${times} (${zone}) il server aggiorna da solo la copia del negozio, sincronizza i listini configurati e ri-prezza le fonti che lo prevedono. Un passaggio fallito viene ritentato dopo un'ora.`,
       on: "Attiva",
       off: "Spenta",
       offHint:
@@ -613,9 +614,13 @@ export const it = {
       runningNow: "In esecuzione…",
       nextRun: (when: string) => `Prossima esecuzione: ${when}`,
       lastRun: (when: string) => `Ultima: ${when}`,
+      lastPulled: (n: number) => `${n} prodotti dal negozio`,
       lastGs: (n: number) => `${n} SKU dal feed GS`,
       lastRepriced: (n: number) => `${n} ri-prezzati`,
       lastRepaired: (n: number) => `${n} riparati`,
+      orders: (minutes: number) => `Ordini: aggiornati ogni ${minutes} min`,
+      ordersOff: "Ordini: aggiornati solo a mano",
+      ordersLast: (when: string) => `ultimo ${when}`,
     },
     kicksdb: {
       name: "Aggiornamento KicksDB",
