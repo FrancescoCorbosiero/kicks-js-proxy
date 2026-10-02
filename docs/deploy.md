@@ -63,9 +63,10 @@ docker inspect <caddy-container> --format '{{range $name, $_ := .NetworkSettings
 If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
 in step 5 (and in `deploy/authelia/.env`, step 4).
 
-Check its version too: `docker exec <caddy-container> caddy version` must print
-v2.11.2 or newer (caddy-docker-proxy 2.12 or newer). If it doesn't, recreate it
-with the image below, keeping its volumes and ports.
+Check its version too: `docker exec caddy caddy version` (the container's name,
+then the program inside it) must print v2.11.2 or newer (caddy-docker-proxy 2.12
+or newer). If it doesn't, recreate it with the image below, keeping its volumes
+and ports.
 
 **No Caddy container in `docker ps`?** Start caddy-docker-proxy once, then
 continue. It serves every container on the `caddy` network that has `caddy`

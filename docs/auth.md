@@ -130,8 +130,12 @@ Caddy removes a `Remote-*` header that a visitor sends themselves only since
 **v2.11.2**, which caddy-docker-proxy ships from **2.12**:
 
 ```bash
-docker exec <caddy-container> caddy version        # v2.11.2 or newer
+docker ps --format '{{.Names}}  {{.Image}}' | grep caddy   # the container's name and image
+docker exec caddy caddy version                            # v2.11.2 or newer
 ```
+
+`caddy` comes twice in the second command: first the container's name (as the
+first command printed it), then the program inside it.
 
 If it is older, run the image `lucaslorentz/caddy-docker-proxy:2.13-alpine`
 instead, with the same volumes and ports. On an older Caddy, a visitor could
