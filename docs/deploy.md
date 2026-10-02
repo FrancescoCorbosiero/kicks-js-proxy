@@ -288,10 +288,26 @@ so a shop that needs different ones needs its own branch.
   VPS, that port 80 is reachable, and that Cloudflare is set to DNS only.
   Caddy's own log says why: `docker logs <caddy-container>`.
 - **Caddy's log says `Timeout during connect (likely firewall problem)`:** Let's
-  Encrypt can't reach port 80 on the server's IP, usually because a firewall
-  lets only Cloudflare in. Set both records to Proxied, run
-  `docker restart <caddy-container>`, and wait for
-  `certificate obtained successfully` (step 1).
+  Encrypt can't reach the server's IP, usually because a firewall lets only
+  Cloudflare in. Let it come through Cloudflare instead:
+  1. Set both records to Proxied and wait 5 minutes, so the old DNS answer
+     expires everywhere.
+  2. Check the path Let's Encrypt will take:
+
+     ```bash
+     curl -s -o /dev/null -w '%{http_code} via %{remote_ip}\n' http://<hub-host>/.well-known/acme-challenge/check
+     ```
+
+     - `308 via` a Cloudflare address: Caddy answers. Go on to step 3.
+     - `301`: Cloudflare redirects to HTTPS before Caddy can answer. Turn off
+       SSL/TLS → Edge Certificates → **Always Use HTTPS**. Nothing changes for
+       visitors, because Caddy sends every visitor to HTTPS itself.
+     - `521` or `522`: Cloudflare can't reach port 80. Allow port 80 for
+       Cloudflare's IP ranges wherever you allowed 443.
+     - `via` the server's own IP: the record isn't proxied yet, or the old DNS
+       answer is still cached. Wait and run it again.
+  3. Run `docker restart <caddy-container>` (your other sites pause for a few
+     seconds) and wait for `certificate obtained successfully` in its log.
 - **Cloudflare error 525 or 526:** Caddy has no certificate for that address,
   usually because the records were proxied before Caddy could get one. Set
   both records to DNS only, run `docker restart <caddy-container>` (your other
