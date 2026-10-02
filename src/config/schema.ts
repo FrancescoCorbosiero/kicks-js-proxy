@@ -47,7 +47,10 @@ export type BlockConfig = z.infer<typeof BlockConfigSchema>;
 
 export const HubConfigSchema = z.object({
   ui: z.object({
-    /** Where a sign-in lands when no page was asked for, and where the installed app opens. */
+    /**
+     * Where the installed home-screen app opens. (Signing in is Authelia's,
+     * docs/auth.md: it returns people to the page they asked for.)
+     */
     landing: z.string().startsWith("/"),
     /**
      * Tabs in the top navigation, in order. The old UI gets leaner by

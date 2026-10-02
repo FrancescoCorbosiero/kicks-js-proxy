@@ -29,6 +29,13 @@ All secrets live in env (typed + Zod-validated in `src/lib/env.ts`); none are pe
 **Production** runs in Docker behind Caddy: the app with Postgres and Redis,
 the Hub and the Vetrina on their own addresses. See [docs/deploy.md](docs/deploy.md).
 
+**Sign-in** is not the app's job: [Authelia](https://www.authelia.com) sits in
+front of it, with an account per person, a second factor (passkey or
+authenticator app), and per-address access (the shop's account opens the
+Vetrina, not the Hub). Caddy asks Authelia about every request and the app
+trusts only what Caddy vouches for. Locally there is no sign-in. See
+[docs/auth.md](docs/auth.md).
+
 ### Use `npm run serve`, not `npm run dev`
 
 `npm run dev` is for editing the code. It keeps every module graph it has

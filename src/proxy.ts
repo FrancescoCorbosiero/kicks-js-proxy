@@ -1,41 +1,48 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_COOKIE, sessionToken } from "@/lib/auth";
+import { AUTH_PROXY_HEADER, IDENTITY_HEADERS, secretMatches } from "@/lib/auth";
 import { isVetrinaHost, requestHost, servedOnVetrinaHost } from "@/lib/vetrina-host";
 
 /**
- * The login gate (Next's "proxy" file convention, formerly middleware).
- * With APP_PASSWORD set, every page and server action requires
- * the signed session cookie; without it the app stays open (local dev, and
- * deployments that existed before auth — set the variable to turn the lock on).
+ * The sign-in gate (Next's "proxy" file convention, formerly middleware).
+ * The app has no login of its own: in production Authelia signs people in, in
+ * front of it (docs/auth.md). Caddy checks every request with Authelia and
+ * forwards what it allows with who is signed in (Remote-User) and
+ * AUTH_PROXY_SECRET in the X-Auth-Proxy-Secret header. With the secret set:
  *
- * Exempt: /login itself, and /api/cron/* — the cron endpoints are called by
- * headless schedulers that authenticate with CRON_SECRET, never with a cookie.
+ * - a request without it did not come through Caddy (another container on its
+ *   network, say) and is refused, whatever it claims in Remote-User;
+ * - a page that arrives without Remote-User was not checked by Authelia (a
+ *   proxy config that lost its forward_auth) and is refused, not served open.
+ *
+ * Without a session: the home-screen app's install files (Authelia lets them
+ * through, see PUBLIC_APP_FILES) and /api/cron/* (headless schedulers send
+ * CRON_SECRET instead). Without the secret either: /api/health, the
+ * container's health check, which calls the app directly. Unset secret =
+ * open app (local development).
+ *
+ * The Remote-* headers reach the app only on requests Authelia vouched for;
+ * anywhere else they are removed, so the pages can read them as "who is signed
+ * in" (signedInUser in src/lib/auth.ts).
  *
  * The Vetrina's own address (VETRINA_HOST): there "/" is the Vetrina, and the
  * operator tabs, the API and the cron endpoints are not served at all — they
- * stay on the Hub's address. The session cookie is per host, so the Vetrina
- * signs in on its own (same password).
+ * stay on the Hub's address.
  *
  * NOTE: reads process.env directly — the one sanctioned exception to "env is
- * read only through src/lib/env.ts", because this bundle runs on the edge
- * runtime where the zod env module (with its server-only import) can't go.
+ * read only through src/lib/env.ts", because the zod env module (with its
+ * server-only import) does not belong in this bundle.
  */
 
 /**
  * The install files of the home-screen app. Browsers fetch the manifest
- * without cookies, so behind the gate it would be a redirect to /login and the
- * app would not install. They hold no data: a name, a start page, an icon.
+ * without cookies, so behind the sign-in it would be a redirect and the app
+ * would not install. They hold no data: a name, a start page, an icon.
+ * Authelia's bypass rule in deploy/authelia lists the same files.
  */
 const PUBLIC_APP_FILES = new Set(["/manifest.webmanifest", "/icon", "/apple-icon"]);
 
-let cachedToken: { password: string; token: string } | null = null;
-
-async function expectedToken(password: string): Promise<string> {
-  if (cachedToken?.password !== password) {
-    cachedToken = { password, token: await sessionToken(password) };
-  }
-  return cachedToken.token;
-}
+/** The container's health check (Dockerfile HEALTHCHECK). */
+const HEALTH_PATH = "/api/health";
 
 /**
  * The origin the browser asked for. Behind a reverse proxy req.nextUrl
@@ -54,20 +61,44 @@ function redirectTo(req: NextRequest, path: string): NextResponse {
   return NextResponse.redirect(new URL(path, publicOrigin(req)), 307);
 }
 
-/** Let the request through — on the Vetrina's address, "/" shows the Vetrina. */
-function pass(req: NextRequest, onVetrina: boolean): NextResponse {
+function refuse(): NextResponse {
+  return new NextResponse("Forbidden", { status: 403 });
+}
+
+/** The request's headers minus every Remote-* one — null when it carries none. */
+function withoutIdentity(headers: Headers): Headers | null {
+  if (!IDENTITY_HEADERS.some((name) => headers.has(name))) return null;
+  const kept = new Headers(headers);
+  for (const name of IDENTITY_HEADERS) kept.delete(name);
+  return kept;
+}
+
+/**
+ * Let the request through — on the Vetrina's address, "/" shows the Vetrina.
+ * Its Remote-* headers go along only when Authelia vouched for it.
+ */
+function pass(req: NextRequest, onVetrina: boolean, vouched: boolean): NextResponse {
+  const headers = vouched ? null : withoutIdentity(req.headers);
+  const init = headers ? { request: { headers } } : undefined;
   if (onVetrina && req.nextUrl.pathname === "/") {
     const url = req.nextUrl.clone();
     url.pathname = "/vetrina";
-    return NextResponse.rewrite(url);
+    return NextResponse.rewrite(url, init);
   }
-  return NextResponse.next();
+  return NextResponse.next(init);
 }
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const onVetrina = isVetrinaHost(requestHost(req.headers), process.env.VETRINA_HOST);
+  const secret = process.env.AUTH_PROXY_SECRET;
+  const health = pathname === HEALTH_PATH;
 
+  // Not through Caddy: nothing to say to it, not even where the Vetrina is.
+  if (secret && !health && !secretMatches(req.headers.get(AUTH_PROXY_HEADER), secret)) {
+    return refuse();
+  }
+
+  const onVetrina = isVetrinaHost(requestHost(req.headers), process.env.VETRINA_HOST);
   if (onVetrina && !servedOnVetrinaHost(pathname, PUBLIC_APP_FILES)) {
     // An operator page asked on the Vetrina's address: back to the Vetrina.
     // Anything else (the API, a form post) simply does not exist here.
@@ -77,25 +108,18 @@ export async function proxy(req: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  const password = process.env.APP_PASSWORD;
-  if (!password) return pass(req, onVetrina);
+  const anonymous = health || PUBLIC_APP_FILES.has(pathname) || pathname.startsWith("/api/cron/");
+  if (!secret || anonymous) return pass(req, onVetrina, false);
 
-  if (pathname === "/login" || pathname.startsWith("/api/cron/") || PUBLIC_APP_FILES.has(pathname)) {
-    return NextResponse.next();
+  if (!req.headers.get("remote-user")) {
+    console.warn(`[auth] ${req.method} ${pathname} came through Caddy without a user: is forward_auth in its labels?`);
+    return refuse();
   }
-
-  const cookie = req.cookies.get(AUTH_COOKIE)?.value;
-  if (cookie === (await expectedToken(password))) {
-    return pass(req, onVetrina);
-  }
-
-  // Return the operator to the page they wanted (same-origin paths only).
-  const from = pathname !== "/" && pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : null;
-  return redirectTo(req, from ? `/login?from=${encodeURIComponent(from)}` : "/login");
+  return pass(req, onVetrina, true);
 }
 
 export const config = {
-  // Everything except Next's static assets and the favicon; API/cron and
-  // /login are exempted at runtime above so the matcher stays simple.
+  // Everything except Next's static assets and the favicon; the exceptions
+  // above are decided at runtime so the matcher stays simple.
   matcher: ["/((?!_next/static|_next/image|favicon\\.ico).*)"],
 };

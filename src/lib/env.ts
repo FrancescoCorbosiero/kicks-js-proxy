@@ -93,9 +93,17 @@ const EnvSchema = z.object({
     .regex(/^[a-z0-9.-]+$/i, "VETRINA_HOST is a bare hostname, e.g. vetrina.example.com")
     .optional(),
 
-  // App login: with a password set, every page requires sign-in (shared
-  // password, long-lived session cookie). Unset = open app (local dev).
-  APP_PASSWORD: z.string().min(8, "APP_PASSWORD must be at least 8 characters").optional(),
+  // Sign-in is Authelia's, in front of the app (docs/auth.md): Caddy adds
+  // this secret to every request it lets through, and src/proxy.ts refuses
+  // the rest. It is read there from process.env; this only checks its shape
+  // at boot. Letters and digits only: it is written into a Caddy label.
+  // Unset = open app (local dev).
+  AUTH_PROXY_SECRET: blankIsUnset(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9]{32,}$/, "AUTH_PROXY_SECRET is 32 or more letters and digits: openssl rand -hex 32")
+      .optional(),
+  ),
 
   // Persistence
   DATABASE_URL: z.url(),

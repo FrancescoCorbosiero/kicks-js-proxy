@@ -48,7 +48,8 @@ COPY --from=deps /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 
 USER nextjs
 EXPOSE 3000
-# /login is the one page served without a session: up and rendering = healthy.
+# /api/health answers without the sign-in headers Caddy adds (src/proxy.ts):
+# up and answering = healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/login',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["sh", "-c", "node scripts/migrate.mjs && exec node server.js"]

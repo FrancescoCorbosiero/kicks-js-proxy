@@ -5,24 +5,33 @@ Postgres and Redis, behind the [caddy-docker-proxy](https://github.com/lucaslore
 you already run. Caddy reads the app container's labels and serves both
 addresses over HTTPS, certificates included:
 
-| Address | What it serves |
-| --- | --- |
-| `HUB_HOST` (e.g. `hub.resellpiacenza.shop`) | the operator Hub, every tab |
-| `VETRINA_HOST` (e.g. `vetrina.resellpiacenza.shop`) | the Vetrina only, at `/` |
+| Address | What it serves | Who can open it |
+| --- | --- | --- |
+| `HUB_HOST` (e.g. `hub.resellpiacenza.shop`) | the operator Hub, every tab | operators |
+| `VETRINA_HOST` (e.g. `vetrina.resellpiacenza.shop`) | the Vetrina only, at `/` | the shop's people and operators |
 
 Same app, same container. The app tells the two addresses apart by the Host
-header, which Caddy passes through. Both ask for the same password, but each
-address keeps its own session, so you sign in once on each.
+header, which Caddy passes through.
+
+Nobody reaches either address without signing in to
+[Authelia](https://www.authelia.com), which Caddy asks about every request:
+each person has their own account with a second factor (a passkey or an
+authenticator app), and each address keeps its own session. Authelia runs once
+per server, like Caddy. How it works and how to manage people:
+[docs/auth.md](auth.md).
 
 Everything lives in `deploy/`: `docker-compose.yml` and the settings template
-`.env.example`. The image (`Dockerfile`, repo root) applies the pending
-database migrations every time it starts. The scheduled syncs (store pull,
-feeds, orders) run inside the app, so there is no cron to set up.
+`.env.example`, and Authelia's in `deploy/authelia/`. The image (`Dockerfile`,
+repo root) applies the pending database migrations every time it starts. The
+scheduled syncs (store pull, feeds, orders) run inside the app, so there is no
+cron to set up.
 
 ## What you need
 
 - A VPS with Docker and the Compose plugin (`docker compose version`).
-- caddy-docker-proxy running, with ports 80 and 443 open.
+- caddy-docker-proxy **2.12 or newer** running, with ports 80 and 443 open.
+  Older versions let visitors pass identity headers of their own to the app
+  ([docs/auth.md](auth.md#1-check-caddys-version)).
 - About 2 GB of RAM for the first build. With less, add swap first (see
   *Troubleshooting*).
 
@@ -39,7 +48,7 @@ dig +short vetrina.resellpiacenza.shop      # both print the VPS's IP
 ```
 
 If the domain is on Cloudflare, set both records to **DNS only** (grey cloud)
-for now, so Caddy can obtain its certificates. Step 8 turns the proxy back on
+for now, so Caddy can obtain its certificates. Step 9 turns the proxy back on
 and hides the server's IP again.
 
 ### 2. Find Caddy's network
@@ -52,7 +61,11 @@ docker inspect <caddy-container> --format '{{range $name, $_ := .NetworkSettings
 ```
 
 If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
-in step 4.
+in step 5 (and in `deploy/authelia/.env`, step 4).
+
+Check its version too: `docker exec <caddy-container> caddy version` must print
+v2.11.2 or newer (caddy-docker-proxy 2.12 or newer). If it doesn't, recreate it
+with the image below, keeping its volumes and ports.
 
 **No Caddy container in `docker ps`?** Start caddy-docker-proxy once, then
 continue. It serves every container on the `caddy` network that has `caddy`
@@ -63,7 +76,7 @@ docker network create caddy
 docker run -d --name caddy --restart unless-stopped --network caddy \
   -p 80:80 -p 443:443 -e CADDY_INGRESS_NETWORKS=caddy \
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v caddy_data:/data \
-  lucaslorentz/caddy-docker-proxy:2.9-alpine
+  lucaslorentz/caddy-docker-proxy:2.13-alpine
 ```
 
 ### 3. Get the code
@@ -75,20 +88,33 @@ cd store-hub/deploy
 
 (For a private repo, clone with a GitHub token or a deploy key.)
 
-### 4. Settings
+### 4. Sign-in (Authelia)
+
+Once per server: start Authelia, with the two addresses and the people who may
+open them. Follow [docs/auth.md, "Set up Authelia"](auth.md#set-up-authelia):
+secrets, addresses, people, `docker compose up -d` in `store-hub/deploy/authelia`.
+If Caddy's network is not called `caddy`, first put `CADDY_NETWORK=<its name>`
+in `deploy/authelia/.env`.
+
+Authelia already running for another shop on this server? Add this shop's
+addresses to it instead ([docs/auth.md, "A second shop"](auth.md#a-second-shop)).
+
+### 5. Settings
 
 ```bash
+cd ~/store-hub/deploy
 cp .env.example .env
 openssl rand -hex 24          # copy the output into POSTGRES_PASSWORD
+openssl rand -hex 32          # copy the output into AUTH_PROXY_SECRET
 nano .env
 ```
 
-Fill in `HUB_HOST`, `VETRINA_HOST`, `APP_PASSWORD`, `POSTGRES_PASSWORD`, the
-`WOO_*` keys, and copy any optional secrets you use today (`KICKS_SECRET`,
+Fill in `HUB_HOST`, `VETRINA_HOST`, `AUTH_PROXY_SECRET`, `POSTGRES_PASSWORD`,
+the `WOO_*` keys, and copy any optional secrets you use today (`KICKS_SECRET`,
 `GS_FEED_*`, ...) from your current `.env`. Leave unused lines commented out.
 A line with nothing after `=` stops the app at boot.
 
-### 5. (Optional) Bring your current data
+### 6. (Optional) Bring your current data
 
 Skip this step to start with an empty Hub. To keep your catalog, margins and
 price locks, copy the local database over **before the first start**.
@@ -110,7 +136,7 @@ docker compose cp hub.dump postgres:/tmp/hub.dump
 docker compose exec postgres pg_restore -U kicks -d kicks --no-owner /tmp/hub.dump
 ```
 
-### 6. Start
+### 7. Start
 
 From `store-hub/deploy`, not the repo root: the root's `docker-compose.yml`
 starts only the databases for local development.
@@ -129,11 +155,15 @@ a minute`. That first sync pulls the whole store, so expect
 Caddy requests the two certificates as soon as the app container appears.
 With DNS already pointing here, that takes a few seconds.
 
-### 7. Check
+### 8. Check
 
-- `https://hub.resellpiacenza.shop` → password → the Hub with every tab.
-- `https://vetrina.resellpiacenza.shop` → password → the Vetrina, with no link
-  back to the Hub.
+- `https://hub.resellpiacenza.shop` → Authelia's sign-in page (on the same
+  address, under `/authelia`) → your password and a new device (see
+  [docs/auth.md](auth.md#adding-a-person)) → the Hub with every tab.
+- `https://vetrina.resellpiacenza.shop` → its own sign-in → the Vetrina, with
+  no link back to the Hub.
+- Signed in with the shop's account, `https://hub.resellpiacenza.shop` answers
+  **403**: the shop opens the Vetrina only.
 - `https://vetrina.resellpiacenza.shop/catalog` → sends you back to the Vetrina.
 - In the Vetrina, open a section: its products load from the live site.
 - Hub → Feeds: the *Sincronizzazione automatica* card shows the next run, the
@@ -142,9 +172,9 @@ With DNS already pointing here, that takes a few seconds.
 
 On a phone, open the Vetrina's address and choose *Add to Home Screen*.
 
-### 8. Hide the server's IP again (Cloudflare)
+### 9. Hide the server's IP again (Cloudflare)
 
-Once both addresses open over HTTPS (step 7), Caddy has its certificates:
+Once both addresses open over HTTPS (step 8), Caddy has its certificates:
 
 1. In Cloudflare → **SSL/TLS → Overview**, set the encryption mode to
    **Full (strict)**. Caddy's certificates are real ones, so Cloudflare can
@@ -166,7 +196,7 @@ Two consequences of the proxy:
   hosting provider's firewall. Use the provider's firewall rather than `ufw`,
   because Docker's published ports bypass `ufw`.
 
-### 9. Be told if a sync doesn't happen
+### 10. Be told if a sync doesn't happen
 
 The daily sync and the orders pull run inside the app (see *Scheduled syncs*
 below). To get an email when a daily sync fails or never runs:
@@ -223,7 +253,12 @@ now and then:
 ```
 
 (Create `~/backups` first. In crontab, `%` must be written `\%`.) A dump goes
-back with `pg_restore`, as in step 5.
+back with `pg_restore`, as in step 6.
+
+**People** are managed in Authelia, from `deploy/authelia`: adding someone,
+removing them, a lost phone, a locked account. See
+[docs/auth.md, "Day to day"](auth.md#day-to-day), which also says what to back
+up there.
 
 Run a single app container per shop: the syncs run inside it, so a second
 copy would run every sync twice.
@@ -235,12 +270,14 @@ golden-hive-blocks, next to the first one and behind the same Caddy:
 
 1. Clone the repo into another folder, e.g. `git clone … store-hub-2`.
 2. In `store-hub-2/deploy`, `cp .env.example .env` and fill it in for that
-   shop: its own `HUB_HOST`, `VETRINA_HOST`, `WOO_*` keys, `APP_PASSWORD` and a
-   new `POSTGRES_PASSWORD`.
+   shop: its own `HUB_HOST`, `VETRINA_HOST`, `WOO_*` keys, a new
+   `AUTH_PROXY_SECRET` and a new `POSTGRES_PASSWORD`.
 3. Set **`COMPOSE_PROJECT_NAME=store-hub-2`** in that `.env`. Without it both
    stacks share one name, and the second `up` replaces the first one's
    containers and uses its database.
-4. Add DNS records for the two new names, then `docker compose up -d --build`.
+4. Add the two new addresses, and the shop's people, to the Authelia that is
+   already running ([docs/auth.md, "A second shop"](auth.md#a-second-shop)).
+5. Add DNS records for the two new names, then `docker compose up -d --build`.
 
 Each stack has its own containers, database and scheduler, and Caddy routes
 by hostname. Any other container with `caddy` labels on the `caddy` network
@@ -250,15 +287,17 @@ so a shop that needs different ones needs its own branch.
 
 ## Troubleshooting
 
-- **`set APP_PASSWORD in deploy/.env`** (or another variable): that line is
-  missing from `deploy/.env`.
+- **`set AUTH_PROXY_SECRET in deploy/.env`** (or another variable): that line
+  is missing from `deploy/.env`.
 - **`Invalid environment configuration`** in the app's logs: a value is
   malformed, or a line has nothing after `=`. Comment it out instead.
 - **No certificate / the browser can't connect:** check that DNS points at the
   VPS, that port 80 is reachable, and that Cloudflare is set to DNS only.
   Caddy's own log says why: `docker logs <caddy-container>`.
-- **502 from Caddy:** the app is still starting, or it stopped.
-  `docker compose ps` and `docker compose logs app` show which.
+- **502 from Caddy:** the app is still starting, or it stopped:
+  `docker compose ps` and `docker compose logs app` show which. If the app is
+  fine, Authelia is down: `docker compose ps` in `deploy/authelia`. Sign-in
+  problems: [docs/auth.md, "Troubleshooting"](auth.md#troubleshooting).
 - **The Feeds tab shows a sync error:** the message names the step (store
   pull, GS sync, ...). The step is retried an hour later. If it keeps
   failing, `docker compose logs app | grep scheduler` has the details.
