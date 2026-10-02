@@ -42,6 +42,11 @@ If the domain is on Cloudflare, set both records to **DNS only** (grey cloud)
 for now, so Caddy can obtain its certificates. Step 8 turns the proxy back on
 and hides the server's IP again.
 
+If your firewall already lets only Cloudflare reach ports 80 and 443, keep
+the records **Proxied** from the start instead. Let's Encrypt then reaches
+Caddy through Cloudflare, the same way your other proxied sites renew their
+certificates. With DNS only it would time out.
+
 ### 2. Find Caddy's network
 
 The app must join a Docker network your Caddy container is **already on**:
@@ -282,6 +287,11 @@ so a shop that needs different ones needs its own branch.
 - **No certificate / the browser can't connect:** check that DNS points at the
   VPS, that port 80 is reachable, and that Cloudflare is set to DNS only.
   Caddy's own log says why: `docker logs <caddy-container>`.
+- **Caddy's log says `Timeout during connect (likely firewall problem)`:** Let's
+  Encrypt can't reach port 80 on the server's IP, usually because a firewall
+  lets only Cloudflare in. Set both records to Proxied, run
+  `docker restart <caddy-container>`, and wait for
+  `certificate obtained successfully` (step 1).
 - **Cloudflare error 525 or 526:** Caddy has no certificate for that address,
   usually because the records were proxied before Caddy could get one. Set
   both records to DNS only, run `docker restart <caddy-container>` (your other
