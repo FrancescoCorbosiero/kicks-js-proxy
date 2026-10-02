@@ -29,6 +29,7 @@ import type { PreviewPlan } from "@/lib/plan";
 import { emptySummary, isActionable, type PlanSummary } from "@/lib/plan";
 import { PREVIEW_PAGE_LIMIT, PreviewPage } from "@/lib/preview-page";
 import { useI18n } from "@/i18n/provider";
+import { useShopTime } from "@/components/use-shop-time";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PricingBar } from "@/components/pricing/PricingBar";
@@ -77,6 +78,7 @@ export function SyncWorkspace({
   initialFollowSaleRule: boolean;
 }) {
   const { t } = useI18n();
+  const when = useShopTime(initialState.timeZone);
   const router = useRouter();
 
   // ----- pull -----
@@ -602,7 +604,7 @@ export function SyncWorkspace({
               <span className="tnum">
                 {t.sync.pull.info(
                   snapshotInfo.productCount,
-                  new Date(snapshotInfo.uploadedAt).toLocaleString(),
+                  when.dateTime(snapshotInfo.uploadedAt),
                 )}
               </span>
               <span className="rounded-full border border-line bg-surface-2 px-2 py-0.5 font-medium">
@@ -1016,7 +1018,7 @@ export function SyncWorkspace({
             {history.map((h) => (
               <li key={h.id} className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="text-xs text-faint tnum">
-                  {new Date(h.startedAt).toLocaleString()}
+                  {when.dateTime(h.startedAt)}
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${

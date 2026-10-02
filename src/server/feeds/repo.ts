@@ -104,6 +104,16 @@ export async function activeFeedSkus(feed: string): Promise<Set<string>> {
 }
 
 /**
+ * Every SKU the feed has listed, still active or not. A product the supplier
+ * dropped still has to be planned (its sizes go to stock 0), so the feed's
+ * reach is all of these, not only the active ones.
+ */
+export async function knownFeedSkus(feed: string): Promise<Set<string>> {
+  const rows = await db.selectDistinct({ sku: feedItems.sku }).from(feedItems).where(eq(feedItems.feed, feed));
+  return new Set(rows.map((r) => r.sku));
+}
+
+/**
  * ALL known offers for a set of SKUs (active AND deactivated), grouped by
  * canonical SKU. Ownership is decided by active rows, but a GS-owned product's
  * variant set includes deactivated sizes at qty 0 — a size that vanished from

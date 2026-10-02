@@ -74,6 +74,29 @@ const EnvSchema = z.object({
   // switch at it (healthchecks.io, Uptime Kuma push, ...) to hear about a sync
   // that failed or never ran.
   SCHEDULER_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
+  // The feed cycle: every N minutes on the clock (30 → :00 and :30), the
+  // supplier feed is refreshed and, with AUTO_SYNC=on, its products' changes
+  // are written to the store. Default 0 = off (the feeds refresh daily only).
+  SCHEDULER_FEEDS_MINUTES: blankIsUnset(
+    z.coerce
+      .number()
+      .int()
+      .refine((v) => v === 0 || (v >= 5 && v <= 720), "SCHEDULER_FEEDS_MINUTES is 0 (off) or 5–720 minutes")
+      .optional(),
+  ),
+  // Called after every fully successful feed cycle, like the heartbeat above.
+  SCHEDULER_FEEDS_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
+
+  // Automatic store sync: after the feeds refresh, write the planned price and
+  // stock changes to the LIVE store — the feed's products every feed cycle,
+  // the whole store in the daily sync. Prices and stock only: no size cleanup,
+  // no deletions. OFF by default: arming unattended writes to the shop is the
+  // operator's decision, as with AUTO_REPAIR.
+  AUTO_SYNC: z.enum(["on", "off"]).optional(),
+  // An automatic run that would change more variations than this writes
+  // nothing and says so on the Feeds tab: a change that large is reviewed in
+  // the Sync tab first. Default 500.
+  AUTO_SYNC_MAX_CHANGES: blankIsUnset(z.coerce.number().int().min(1).optional()),
 
   // GoldenSneakers feed — the flat-assortment endpoint (include VAT/markup
   // query params there: presented_price arrives FINAL) and its bearer token.

@@ -57,6 +57,20 @@ export async function prunePlans(keepRuns = KEEP_RUNS): Promise<void> {
   }
 }
 
+/**
+ * Drop one run's plans as soon as it is done with — the scheduler's runs,
+ * which nobody reviews. Left to prunePlans, a run every half hour would push
+ * the operator's own preview out of the runs it keeps while it is still open
+ * in the Sync tab. Rows an audit points at stay, as in prunePlans.
+ */
+export async function deleteRunPlans(runId: string): Promise<void> {
+  await db.execute(sql`
+    delete from ${plans} p
+    where p.run_id = ${runId}
+      and not exists (select 1 from ${applyAudit} a where a.plan_id = p.id)
+  `);
+}
+
 export interface PlanToSave {
   plan: Plan;
   source: string;

@@ -187,21 +187,41 @@ below). To get an email when a daily sync fails or never runs:
    **1 day**, grace **3 hours**.
 2. Put its ping URL in `deploy/.env` as `SCHEDULER_HEARTBEAT_URL=…`, then run
    `docker compose up -d` (no rebuild needed: settings are read at start).
+3. With the feed cycle on (below), add a second check with a period of
+   **30 minutes** and a grace of **1 hour**, as `SCHEDULER_FEEDS_HEARTBEAT_URL=…`.
 
 ## Scheduled syncs
 
 | What | When | Setting |
 | --- | --- | --- |
-| Store pull, GS sync, KicksDB re-pricing, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
+| Store pull, GS sync, KicksDB re-pricing, store sync of the whole store, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
+| GS sync, then store sync of the feed's products | every 30 minutes, if set (off by default) | `SCHEDULER_FEEDS_MINUTES=30` |
 | Recent orders | every 15 minutes | `SCHEDULER_ORDERS_MINUTES` |
+
+**The store sync** writes to WooCommerce only with **`AUTO_SYNC=on`**.
+Without it, the runs refresh the Hub and you apply the changes yourself in
+the Sync tab. When on:
+- **What it writes:** the price and stock changes the Sync tab would apply,
+  manual price locks honored. Only prices and stock: no size cleanup, never
+  a deletion.
+- **The limit:** a run that would change more than `AUTO_SYNC_MAX_CHANGES`
+  variations (default 500) writes nothing, and the Feeds tab says why. Review
+  it in the Sync tab and apply it there: a change that big is a pricing edit
+  or a broken feed.
+- **The record:** every write appears in the Sync tab's history.
+- **Edits in WordPress:** a price changed by hand in WooCommerce is seen at
+  the next store pull (the daily sync). For a product the feed owns, the
+  feed's value wins.
 
 - **A failed step** doesn't stop the others. It is retried an hour later,
   twice at most.
 - **A restart or a deploy** never loses a sync. If the server was down at
   04:30, or that run failed, the sync runs a minute after the next start. A
   deploy after a good run starts nothing.
-- **Every run is kept** in the database (`scheduler_runs`), and the Feeds tab
-  shows the last one.
+- **Every run is kept** in the database (`scheduler_runs`; feed cycles for a
+  week), and the Feeds tab shows the last ones.
+- **Runs never overlap.** A feed cycle skips its turn while another run is
+  going; the daily sync waits for a feed cycle to finish.
 - **Logs:** `docker compose logs app | grep scheduler`.
 
 ## Day to day
