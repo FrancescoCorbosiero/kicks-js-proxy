@@ -44,15 +44,22 @@ and hides the server's IP again.
 
 ### 2. Find Caddy's network
 
-The app joins the Docker network your Caddy container watches:
+The app must join a Docker network your Caddy container is **already on**:
 
 ```bash
 docker ps                                            # find your Caddy container's name
 docker inspect <caddy-container> --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}'
+docker inspect <caddy-container> --format '{{range .Config.Env}}{{println .}}{{end}}' | grep CADDY_INGRESS_NETWORKS
 ```
 
-If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
-in step 4.
+If the last command prints `CADDY_INGRESS_NETWORKS`, use one of the networks
+it lists. If it prints nothing, any network from the second command works.
+If the network isn't called `caddy`, set `CADDY_NETWORK` to its name in step 4.
+
+Don't create a new network for the app when you already run Caddy. The app
+would start and report healthy, but Caddy couldn't reach it: both addresses
+would answer 503, and Caddy's log would say `Container is not in same network
+as caddy`.
 
 **No Caddy container in `docker ps`?** Start caddy-docker-proxy once, then
 continue. It serves every container on the `caddy` network that has `caddy`
@@ -254,9 +261,35 @@ so a shop that needs different ones needs its own branch.
   missing from `deploy/.env`.
 - **`Invalid environment configuration`** in the app's logs: a value is
   malformed, or a line has nothing after `=`. Comment it out instead.
+- **`network caddy declared as external, but could not be found`:** your Caddy
+  is on a network with another name. Set `CADDY_NETWORK` to that name (step 2)
+  instead of creating a `caddy` network.
+- **Both addresses answer 503 or a blank page, while the app is healthy:** the
+  app is not on Caddy's network, and Caddy's log says `Container is not in same
+  network as caddy`. From `deploy/`, compare the networks and look at the site
+  Caddy generated:
+
+  ```bash
+  docker inspect <caddy-container> --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}'
+  docker inspect $(docker compose ps -q app) --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}'
+  docker exec <caddy-container> cat /config/caddy/Caddyfile.autosave
+  ```
+
+  In the block for your two addresses, a `reverse_proxy` line with no address
+  after it confirms the problem. Set `CADDY_NETWORK` in `deploy/.env` to one
+  of Caddy's networks (step 2), then run `docker compose up -d` (no rebuild
+  needed). Caddy picks the app up within seconds.
 - **No certificate / the browser can't connect:** check that DNS points at the
   VPS, that port 80 is reachable, and that Cloudflare is set to DNS only.
   Caddy's own log says why: `docker logs <caddy-container>`.
+- **Cloudflare error 525 or 526:** Caddy has no certificate for that address,
+  usually because the records were proxied before Caddy could get one. Set
+  both records to DNS only, run `docker restart <caddy-container>` (your other
+  sites pause for a few seconds), and wait until its log shows
+  `certificate obtained successfully` for both names. Then go back to Proxied
+  (step 8).
+- **`ERR_TOO_MANY_REDIRECTS` through Cloudflare:** the SSL/TLS mode is Flexible.
+  Set it to Full (strict).
 - **502 from Caddy:** the app is still starting, or it stopped.
   `docker compose ps` and `docker compose logs app` show which.
 - **The Feeds tab shows a sync error:** the message names the step (store
