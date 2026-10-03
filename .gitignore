@@ -25,11 +25,9 @@ npm-debug.log*
 .env.development
 .env.production
 
-# Authelia runs from /srv/authelia; never commit settings, users or secrets
-# filled into the template here by mistake
-/deploy/authelia/config/configuration.yml
-/deploy/authelia/config/users.yml
-/deploy/authelia/secrets/
+# Authelia has its own repo (prd-web-eu1-01-authelia, in /srv/authelia).
+# Checkouts from before may still hold its secrets and users here: never commit them.
+/deploy/authelia/
 
 # typescript
 *.tsbuildinfo

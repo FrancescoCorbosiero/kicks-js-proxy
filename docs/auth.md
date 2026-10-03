@@ -107,29 +107,22 @@ each. An authenticator app's codes work on both.
 
 ## What is where
 
-| File | What it is |
+| Where | What it is |
 | --- | --- |
-| `deploy/authelia/` | the template: Authelia and the Redis that keeps its sessions, settings and people, all as `.example` files |
-| `/srv/authelia/` | the running copy, once per server, next to Caddy's folder: `docker-compose.yml`, `config/configuration.yml` (the settings), `config/users.yml` (the people) and `secrets/` (two random keys). None of it is in git |
+| [prd-web-eu1-01-authelia](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia), cloned to `/srv/authelia` | Authelia itself, once per server: its settings, people, secrets and scripts. Its README covers installing it, adding people, lost devices and sign-ins that fail (`bin/check-login`) |
 | `deploy/docker-compose.yml` | the shop's stack: its Caddy labels send every request through Authelia |
 | `src/proxy.ts` | the app's side: the secret and the identity checks |
 
-Authelia's database (registered passkeys and authenticator apps, bans) and
-`notification.txt` live in the `authelia_data` volume. The sessions live in
-`authelia_sessions`.
+## Before the shop: Authelia and Caddy
 
-## Set up Authelia
+Authelia runs once per server, from its own repo cloned to `/srv/authelia`,
+like Caddy runs from `/srv/caddy`. Never from a shop's checkout: a second copy
+started by mistake would take the sign-in of every site down with it. Install
+it by following [its README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#install). This shop's addresses are already
+in its `config/configuration.yml`; a new shop adds its own there
+([Protect another site](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#protect-another-site)).
 
-Do this once per server, before the shop's stack, because the shop's labels
-send every request to it.
-
-Authelia runs from a folder of its own, `/srv/authelia`, next to Caddy's, never
-from a shop's checkout. Running compose in a checkout would replace the live
-Authelia with that copy's settings and secrets, and break the sign-in of every
-shop. The checkout's `deploy/authelia` is only the template: its compose file
-is named `.example`, so `docker compose` finds nothing to start there.
-
-### 1. Caddy's version
+### Caddy's version
 
 The labels work with caddy-docker-proxy 2.9 (Caddy 2.9.1) and newer. Check
 yours:
@@ -150,82 +143,6 @@ on that fix: they delete every `Remote-*` header a visitor sends before asking
 Authelia, on any version. Updating still brings this fix, others since, and
 everything else that is new.
 
-### 2. Its folder, and secrets
-
-```bash
-cp -r ~/store-hub/deploy/authelia /srv/authelia
-cd /srv/authelia
-mv docker-compose.example.yml docker-compose.yml
-mkdir -p secrets
-openssl rand -hex 64 > secrets/SESSION_SECRET
-openssl rand -hex 64 > secrets/STORAGE_ENCRYPTION_KEY
-chmod 600 secrets/*
-```
-
-Keep a copy of `STORAGE_ENCRYPTION_KEY` off the server: the database of
-registered devices can't be read without it.
-
-### 3. Addresses and rules
-
-```bash
-cp config/configuration.example.yml config/configuration.yml
-nano config/configuration.yml
-```
-
-Change the addresses where the file says `CHANGE`: under `session.cookies`
-(one entry per address) and in every `access_control` rule. They must match
-`HUB_HOST` and `VETRINA_HOST` in `deploy/.env`. To give the shop's group a
-different name than `resellpiacenza`, rename it here and in `users.yml`.
-
-### 4. People
-
-```bash
-cp config/users.example.yml config/users.yml
-docker run --rm -it authelia/authelia:4.39 authelia crypto hash generate argon2   # once per password
-nano config/users.yml
-```
-
-For each person, set:
-
-- the username they will type, their `displayname` and their `email` (Authelia
-  needs one even without an email server);
-- as `password`, the `Digest:` value the command printed;
-- their groups: `operators`, or the shop's group.
-
-Authelia does not start while any password is still the example's placeholder.
-
-### 5. Start it
-
-If Caddy's network is not called `caddy`, first put `CADDY_NETWORK=<its name>`
-in `/srv/authelia/.env`. Then:
-
-```bash
-docker compose up -d
-docker compose logs -f authelia        # wait for "Startup complete"; Ctrl+C stops watching
-```
-
-A warning that it could not reach the NTP server is harmless. A warning that
-the clock is off is not: fix the server's time.
-
-### Already running it from a checkout?
-
-Earlier versions of this guide started Authelia inside the shop's
-`deploy/authelia`. Move it to its own folder. After `git pull` in the checkout:
-
-```bash
-mkdir -p /srv/authelia
-cd ~/store-hub/deploy/authelia
-cp -a config secrets /srv/authelia/
-cp .env /srv/authelia/ 2>/dev/null; true
-cp docker-compose.example.yml /srv/authelia/docker-compose.yml
-cd /srv/authelia && docker compose up -d
-```
-
-The project keeps its name, so the same containers move over with their
-volumes: registered devices and sessions stay, and sign-in pauses for a few
-seconds. Once it answers again, delete the copies left in the checkout: from
-its `deploy/authelia`, `rm -r secrets config/configuration.yml config/users.yml`.
-
 ## Connect a shop
 
 In the shop's `deploy/.env`, set `AUTH_PROXY_SECRET`:
@@ -245,123 +162,28 @@ Check, in a private window:
   Vetrina, and `https://<HUB_HOST>` answers **403**.
 - Signed in as an operator, both open (each address asks once).
 
-## Adding a person
+People, their devices and bans are managed in Authelia's repo, on the server in
+`/srv/authelia` ([its README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)).
 
-1. Add them to `users.yml` (step 4 above). It applies at once, with no restart.
-2. Give them the address, their username and the password. They can change it
-   later in Authelia's settings, at `/authelia/settings`.
-3. They sign in and tick **Remember me** (*Ricordami*). With it, the session
-   lasts a month on the Hub and three months on the Vetrina, used or not.
-   Without it, an idle hour or 12 hours sign them out.
-4. Authelia asks them to register a device (*Registra dispositivo*). A
-   **passkey** is the simplest: Face ID or a fingerprint, nothing to type.
-   **Metodi** switches to an authenticator app (Google Authenticator,
-   1Password, …).
-5. Registering the first device asks for a one-time code "sent by email". There
-   is no email server, so the code is written to a file. From
-   `/srv/authelia`:
-
-   ```bash
-   docker compose exec authelia tail -n 25 /config/notification.txt
-   ```
-
-   The code is in the newest message, which also names the person. Pass it on:
-   it is valid for 5 minutes.
-
-From then on they sign in with their password and the device. With a passkey,
-*Accedi con una chiave di accesso* (sign in with a passkey) saves typing the
-username.
-
-On the phone, the installed Vetrina app needs nothing new: it shows the sign-in
-page once, inside the app.
-
-## Day to day
-
-From `/srv/authelia`:
-
-| To | Do |
-| --- | --- |
-| Remove someone | delete their entry in `config/users.yml`, or add `disabled: true` to it. Their sessions end at their next click |
-| Reset a forgotten password | make a new hash (step 4) and replace theirs in `users.yml` |
-| Deal with a lost phone or passkey | `docker compose exec authelia authelia storage user webauthn delete <user> --all`, and for the app `docker compose exec authelia authelia storage user totp delete <user>`. They register a new device at the next sign-in |
-| Unlock someone after wrong passwords | it lifts by itself after 15 minutes, or now: `docker compose exec authelia authelia storage bans user revoke <user>` |
-| Sign everyone out | `docker compose exec redis redis-cli flushall` |
-| Check the settings after an edit | `docker compose run --rm authelia authelia config validate` |
-| See what happened | `docker compose logs authelia` |
-| Update Authelia | `docker compose pull && docker compose up -d`. The `4.39` tag follows its fixes; read the release notes before moving to `4.40` |
-
-`/srv/authelia` is a copy: a later change to the template in the repo does
-not reach it by itself (the commit that makes one says what to copy over).
-Changes to `users.yml` apply at once. When someone changes their own password,
-Authelia saves `users.yml` again in its own layout: comments are dropped and
-every field is listed. Keep notes elsewhere. Changes to `configuration.yml`
-need `docker compose restart authelia`, which signs nobody out: the sessions
-are in Redis.
-
-**Back up** the `authelia_data` volume (the registered devices) and the
-`secrets/` folder now and then, together. Losing them is not a disaster, just a
-chore: everyone registers their device again.
-
-Five wrong passwords within ten minutes lock that username for 15 minutes. Bans
-are per user, not per IP: behind Cloudflare every visitor arrives from
-Cloudflare's addresses, and banning one of those would lock out everyone using
-it.
-
-## A second shop
-
-The second stack (see [docs/deploy.md](deploy.md#a-second-shop-on-the-same-server))
-uses the same Authelia, in `/srv/authelia`. Its checkout's `deploy/authelia` is
-just another copy of the template.
-
-1. In `config/configuration.yml`, add the new shop's two addresses under
-   `session.cookies` (copy the two entries) and three rules for them (copy the
-   three), with the new shop's own group in place of `resellpiacenza`.
-2. In `config/users.yml`, add its people with that group. Operators keep
-   `operators`, which opens every shop.
-3. Run `docker compose restart authelia`.
-4. In the second shop's `deploy/.env`, set its own `AUTH_PROXY_SECRET`.
-
-## Optional
-
-### Email
-
-With an SMTP server, people get their one-time codes by email and can reset a
-forgotten password themselves. In `config/configuration.yml`, replace the
-`notifier` block with:
-
-```yaml
-notifier:
-  smtp:
-    address: submission://smtp.example.com:587
-    username: hub@example.com
-    sender: Store Hub <hub@example.com>
-```
-
-and set `authentication_backend.password_reset.disable` to `false`. That needs
-two more secrets: the SMTP password, and a key for the reset links
-(`openssl rand -hex 64`). Put each in a file in `secrets/` and add both to
-`docker-compose.yml` like the other two, as
-`AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE` and
-`AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE`. Then validate
-and restart.
-
-### External scheduler
+## External scheduler
 
 The Hub schedules its own syncs. If you turn that off and call `/api/cron/*`
 from outside instead (`SCHEDULER=off` and `CRON_SECRET`, see the README),
-uncomment the last rule in `access_control`: those calls carry `CRON_SECRET`,
-not a session.
+uncomment the cron rule in Authelia's `config/configuration.yml`: those calls
+carry `CRON_SECRET`, not a session.
 
 ## Moving from the shared password
 
 On a server that runs the Hub with `APP_PASSWORD`:
 
-1. In `~/store-hub`, run `git pull`. That brings the template,
-   `deploy/authelia`; the running app is untouched until it is rebuilt.
-2. [Set up Authelia](#set-up-authelia), with yourself in `operators` and the
-   shop's account in its group. Until the next step the old password still
-   guards the app.
-3. In `deploy/.env`, delete the `APP_PASSWORD` line and add `AUTH_PROXY_SECRET`.
+1. [Install Authelia](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#install) in `/srv/authelia`, with yourself in
+   `operators` and the shop's account in its group. Check each with
+   `bin/check-login <name>`. Until step 3 the old password still guards the
+   app.
+2. In the shop's checkout, `git pull`; the running app is untouched until it
+   is rebuilt.
+3. In `deploy/.env`, delete the `APP_PASSWORD` line (or comment it out, to roll
+   back later) and add `AUTH_PROXY_SECRET`.
 4. From `deploy/`, run `docker compose up -d --build`.
 5. Everyone signs in once and registers a device. Sessions of the old password
    stop working.
@@ -371,18 +193,19 @@ start, and the running app is left as it is.
 
 ## Troubleshooting
 
+- **Someone can't sign in:** on the server, `cd /srv/authelia && bin/check-login
+  <name>`. It checks the name, the password against its hash, bans and
+  Authelia's logs.
 - **502 on every page:** Authelia is not running, or not on Caddy's network.
   Check `docker compose ps` in `/srv/authelia`; `docker compose logs authelia`
   says why it stopped.
-- **Authelia restarts in a loop:** its log names the problem, usually a
-  password in `users.yml` that is not a hash yet, or a YAML indentation slip.
-  `authelia config validate` (above) checks `configuration.yml`.
 - **403 after signing in:** that account's groups don't open this address
   (`access_control`). On the Hub, for the shop's account, that is intended.
 - **A plain "Forbidden", and the app's log says `came through Caddy without a
   user`:** the `forward_auth` labels are missing from the app's container.
   Compare them with `deploy/docker-compose.yml`.
+- **A page with only a password box, no username:** that's the app's old
+  login. The address isn't switched to Authelia yet (steps 3–4 above).
 - **The sign-in page comes back after signing in:** the address is missing from
-  `session.cookies`, or the request did not arrive over https.
-- **The one-time code never arrives:** it is in `notification.txt`, not in an
-  inbox (see [Adding a person](#adding-a-person)).
+  `session.cookies` in Authelia's configuration, or the request did not arrive
+  over https.
