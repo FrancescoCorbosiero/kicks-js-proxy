@@ -1,11 +1,13 @@
 # Store Hub in production, behind caddy-docker-proxy: Caddy reads the labels
-# below and serves both addresses over HTTPS, certificates included.
+# below and serves both addresses over HTTPS, certificates included. Authelia
+# (deploy/authelia, started once per server) signs people in before any
+# request reaches the app.
 #
 #   cd deploy && cp .env.example .env   # then fill it in
 #   docker compose up -d --build
 #
-# Walkthrough: docs/deploy.md. (The docker-compose.yml at the repo root is
-# local development only.)
+# Walkthrough: docs/deploy.md and docs/auth.md. (The docker-compose.yml at the
+# repo root is local development only.)
 #
 # The stack's name prefixes its containers, image and database volume. A
 # second shop on the same server sets its own COMPOSE_PROJECT_NAME in its
@@ -28,8 +30,9 @@ services:
     environment:
       DATABASE_URL: postgres://kicks:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/kicks
       REDIS_URL: redis://redis:6379
-      # On the public internet the login is not optional.
-      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in deploy/.env}
+      # On the public internet the sign-in is not optional: the app refuses
+      # every request that did not come through Caddy and Authelia.
+      AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:?set AUTH_PROXY_SECRET in deploy/.env}
       VETRINA_HOST: ${VETRINA_HOST:?set VETRINA_HOST in deploy/.env}
     depends_on:
       postgres:
@@ -43,7 +46,24 @@ services:
       # One site, both addresses. Caddy passes the Host header through and the
       # app tells the Hub from the Vetrina by it.
       caddy: ${HUB_HOST:?set HUB_HOST in deploy/.env}, ${VETRINA_HOST}
-      caddy.reverse_proxy: "{{upstreams 3000}}"
+      # Authelia's sign-in pages, on each address under /authelia.
+      caddy.handle_0: /authelia*
+      caddy.handle_0.reverse_proxy: authelia:9091
+      # Everything else, in this order (the route keeps it):
+      # 0. drop every Remote-* header the visitor sent: only Authelia says who
+      #    someone is. Caddy 2.11.2 and newer do this in forward_auth; older
+      #    ones pass a visitor's own Remote-User on wherever Authelia sets none.
+      # 1. check with Authelia: not signed in → its sign-in page; signed in but
+      #    not allowed on this address → 403. What it allows carries who is
+      #    signed in (Remote-*). Authelia down → 502: nothing gets through
+      #    unchecked.
+      # 2. on to the app, with the secret that tells it the request came this way.
+      caddy.handle_1.route.0_request_header: "-Remote-*"
+      caddy.handle_1.route.1_forward_auth: authelia:9091
+      caddy.handle_1.route.1_forward_auth.uri: /api/authz/forward-auth
+      caddy.handle_1.route.1_forward_auth.copy_headers: Remote-User Remote-Groups Remote-Email Remote-Name
+      caddy.handle_1.route.2_reverse_proxy: "{{upstreams 3000}}"
+      caddy.handle_1.route.2_reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
     logging: *logging
 
   postgres:

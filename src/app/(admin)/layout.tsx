@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { MainNav } from "@/components/MainNav";
 import { getServerDictionary } from "@/i18n/server";
-import { env } from "@/lib/env";
-import { logout } from "@/server/actions/auth";
+import { SIGN_OUT_PATH, signedInUser } from "@/lib/auth";
 
 /** The operator area: every tab of the Hub under one header. */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const { t } = await getServerDictionary();
+  // Who Authelia signed in; nobody in local development, so no sign-out there.
+  const user = signedInUser(await headers());
 
   return (
     <>
@@ -33,15 +35,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             </span>
             <LanguageSwitcher />
             <ThemeToggle />
-            {env.APP_PASSWORD && (
-              <form action={logout}>
-                <button
-                  type="submit"
-                  className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                >
-                  {t.login.logout}
-                </button>
-              </form>
+            {user && (
+              <a
+                href={SIGN_OUT_PATH}
+                title={t.account.signedInAs(user.name)}
+                className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                {t.account.logout}
+              </a>
             )}
           </div>
         </div>

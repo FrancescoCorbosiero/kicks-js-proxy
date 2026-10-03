@@ -919,13 +919,9 @@ export const en: Dictionary = {
       `This run takes ${max}: publishing is a product plus a call per size, and the store cannot take more in one go. The other ${held} stay selected for the next run.`,
     reportTruncated: (n: number) => `…and ${n} more rows (the totals above include them).`,
   },
-  login: {
-    heading: "Sign in",
-    desc: "Enter the password to use Store Hub.",
-    password: "Password",
-    submit: "Enter",
-    wrong: "Wrong password, try again.",
+  account: {
     logout: "Log out",
+    signedInAs: (name: string) => `Signed in as ${name}`,
   },
   orders: {
     title: "Orders",

@@ -938,13 +938,9 @@ export const it = {
       `Questa esecuzione ne prende ${max}: pubblicare crea un prodotto e una chiamata per taglia, e il negozio non regge di più in un colpo solo. Gli altri ${held} restano selezionati per il giro successivo.`,
     reportTruncated: (n: number) => `…e altre ${n} righe (i totali qui sopra le comprendono).`,
   },
-  login: {
-    heading: "Accedi",
-    desc: "Inserisci la password per usare Store Hub.",
-    password: "Password",
-    submit: "Entra",
-    wrong: "Password sbagliata, riprova.",
+  account: {
     logout: "Esci",
+    signedInAs: (name: string) => `Accesso come ${name}`,
   },
   orders: {
     title: "Ordini",

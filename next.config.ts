@@ -23,11 +23,16 @@ const nextConfig: NextConfig = {
    * stays canonical, so every existing link and bookmark keeps working.
    */
   async redirects() {
-    return ["/margins", "/margini", "/markup", "/markups", "/ricarichi"].map((source) => ({
-      source,
-      destination: "/pricing",
-      permanent: false,
-    }));
+    return [
+      ...["/margins", "/margini", "/markup", "/markups", "/ricarichi"].map((source) => ({
+        source,
+        destination: "/pricing",
+        permanent: false,
+      })),
+      // The old password page. Signing in is Authelia's now (docs/auth.md),
+      // done before any page loads, so a bookmark to it just opens the app.
+      { source: "/login", destination: "/", permanent: false },
+    ];
   },
 };
 

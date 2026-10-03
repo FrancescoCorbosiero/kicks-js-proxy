@@ -25,6 +25,11 @@ npm-debug.log*
 .env.development
 .env.production
 
+# Authelia on the server (deploy/authelia): its settings, users and secrets
+/deploy/authelia/config/configuration.yml
+/deploy/authelia/config/users.yml
+/deploy/authelia/secrets/
+
 # typescript
 *.tsbuildinfo
 

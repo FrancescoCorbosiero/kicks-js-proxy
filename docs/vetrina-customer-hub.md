@@ -67,7 +67,8 @@ Branch `claude/custom-product-catalog-ui-sqzewp`, in both repositories.
 
 Notes:
 
-- After login the Hub now opens `/vetrina` (`ui.landing` in `src/config/hub.config.ts`).
+- The installed app opens `/vetrina` (`ui.landing` in `src/config/hub.config.ts`).
+  Signing in, now Authelia's ([auth.md](auth.md)), returns to the page that was asked for.
   Every old tab is still in the nav.
 - Each publish purges the page cache (LiteSpeed, WP Rocket, W3TC, WP Super Cache,
   SiteGround). Behind another cache or a CDN, the change shows when that cache expires.
@@ -182,8 +183,9 @@ v0 proposed a second password on the same login page, about 40 lines. It's dropp
 - `/vetrina` becomes the landing page.
 - The tabs shown in the nav come from code config. That config is how the old UI gets
   progressively leaner.
-- Residual risk: anyone with the password can still open `/sync` by typing the URL.
-  Destructive runs there stay dry-run-first.
+- Residual risk, since closed: with the shared password, anyone who had it could open
+  `/sync` by typing the URL. Sign-in is now per person, with Authelia
+  ([auth.md](auth.md)), and the customer's account opens the Vetrina's address only.
 
 ---
 
@@ -719,7 +721,7 @@ Proposed and assumed unless you object:
 | Gutenberg and the Vetrina edit at the same time | `expected_modified` → 409 → the editor reloads with the latest page |
 | Double margin on GoldenSneakers products | resolver guard + badge |
 | A margin change moves many prices | preview first; bounded to the term; audited; restore by re-applying the previous % |
-| The customer opens destructive tabs by URL | those tabs are off the nav by config; destructive runs stay dry-run-first |
+| The customer opens destructive tabs by URL | their account opens the Vetrina's address only ([auth.md](auth.md)); those tabs are off the nav by config; destructive runs stay dry-run-first |
 | Konsta clashes with the Hub's Tailwind tokens | phase 1 spike, scoped to the `(vetrina)` layout |
 
 ---
