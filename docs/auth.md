@@ -109,10 +109,8 @@ each. An authenticator app's codes work on both.
 
 | File | What it is |
 | --- | --- |
-| `deploy/authelia/docker-compose.yml` | Authelia, and the Redis that keeps its sessions. Once per server |
-| `deploy/authelia/config/configuration.example.yml` | the settings: copy it to `configuration.yml` (yours, not in git) |
-| `deploy/authelia/config/users.example.yml` | the people: copy it to `users.yml` (yours, not in git) |
-| `deploy/authelia/secrets/` | two random keys, made on the server (not in git) |
+| `deploy/authelia/` | the template: Authelia and the Redis that keeps its sessions, settings and people, all as `.example` files |
+| `/srv/authelia/` | the running copy, once per server, next to Caddy's folder: `docker-compose.yml`, `config/configuration.yml` (the settings), `config/users.yml` (the people) and `secrets/` (two random keys). None of it is in git |
 | `deploy/docker-compose.yml` | the shop's stack: its Caddy labels send every request through Authelia |
 | `src/proxy.ts` | the app's side: the secret and the identity checks |
 
@@ -123,7 +121,13 @@ Authelia's database (registered passkeys and authenticator apps, bans) and
 ## Set up Authelia
 
 Do this once per server, before the shop's stack, because the shop's labels
-send every request to it. It runs from the first shop's checkout.
+send every request to it.
+
+Authelia runs from a folder of its own, `/srv/authelia`, next to Caddy's, never
+from a shop's checkout. Running compose in a checkout would replace the live
+Authelia with that copy's settings and secrets, and break the sign-in of every
+shop. The checkout's `deploy/authelia` is only the template: its compose file
+is named `.example`, so `docker compose` finds nothing to start there.
 
 ### 1. Caddy's version
 
@@ -146,10 +150,12 @@ on that fix: they delete every `Remote-*` header a visitor sends before asking
 Authelia, on any version. Updating still brings this fix, others since, and
 everything else that is new.
 
-### 2. Secrets
+### 2. Its folder, and secrets
 
 ```bash
-cd ~/store-hub/deploy/authelia
+cp -r ~/store-hub/deploy/authelia /srv/authelia
+cd /srv/authelia
+mv docker-compose.example.yml docker-compose.yml
 mkdir -p secrets
 openssl rand -hex 64 > secrets/SESSION_SECRET
 openssl rand -hex 64 > secrets/STORAGE_ENCRYPTION_KEY
@@ -191,7 +197,7 @@ Authelia does not start while any password is still the example's placeholder.
 ### 5. Start it
 
 If Caddy's network is not called `caddy`, first put `CADDY_NETWORK=<its name>`
-in `deploy/authelia/.env`. Then:
+in `/srv/authelia/.env`. Then:
 
 ```bash
 docker compose up -d
@@ -200,6 +206,25 @@ docker compose logs -f authelia        # wait for "Startup complete"; Ctrl+C sto
 
 A warning that it could not reach the NTP server is harmless. A warning that
 the clock is off is not: fix the server's time.
+
+### Already running it from a checkout?
+
+Earlier versions of this guide started Authelia inside the shop's
+`deploy/authelia`. Move it to its own folder. After `git pull` in the checkout:
+
+```bash
+mkdir -p /srv/authelia
+cd ~/store-hub/deploy/authelia
+cp -a config secrets /srv/authelia/
+cp .env /srv/authelia/ 2>/dev/null; true
+cp docker-compose.example.yml /srv/authelia/docker-compose.yml
+cd /srv/authelia && docker compose up -d
+```
+
+The project keeps its name, so the same containers move over with their
+volumes: registered devices and sessions stay, and sign-in pauses for a few
+seconds. Once it answers again, delete the copies left in the checkout: from
+its `deploy/authelia`, `rm -r secrets config/configuration.yml config/users.yml`.
 
 ## Connect a shop
 
@@ -234,7 +259,7 @@ Check, in a private window:
    1Password, …).
 5. Registering the first device asks for a one-time code "sent by email". There
    is no email server, so the code is written to a file. From
-   `deploy/authelia`:
+   `/srv/authelia`:
 
    ```bash
    docker compose exec authelia tail -n 25 /config/notification.txt
@@ -252,7 +277,7 @@ page once, inside the app.
 
 ## Day to day
 
-From `deploy/authelia`:
+From `/srv/authelia`:
 
 | To | Do |
 | --- | --- |
@@ -265,6 +290,8 @@ From `deploy/authelia`:
 | See what happened | `docker compose logs authelia` |
 | Update Authelia | `docker compose pull && docker compose up -d`. The `4.39` tag follows its fixes; read the release notes before moving to `4.40` |
 
+`/srv/authelia` is a copy: a later change to the template in the repo does
+not reach it by itself (the commit that makes one says what to copy over).
 Changes to `users.yml` apply at once. When someone changes their own password,
 Authelia saves `users.yml` again in its own layout: comments are dropped and
 every field is listed. Keep notes elsewhere. Changes to `configuration.yml`
@@ -283,8 +310,8 @@ it.
 ## A second shop
 
 The second stack (see [docs/deploy.md](deploy.md#a-second-shop-on-the-same-server))
-uses the same Authelia, the one running from the first shop's folder. The
-second checkout's `deploy/authelia` stays unused.
+uses the same Authelia, in `/srv/authelia`. Its checkout's `deploy/authelia` is
+just another copy of the template.
 
 1. In `config/configuration.yml`, add the new shop's two addresses under
    `session.cookies` (copy the two entries) and three rules for them (copy the
@@ -329,8 +356,8 @@ not a session.
 
 On a server that runs the Hub with `APP_PASSWORD`:
 
-1. In `~/store-hub`, run `git pull`. That brings `deploy/authelia`; the running
-   app is untouched until it is rebuilt.
+1. In `~/store-hub`, run `git pull`. That brings the template,
+   `deploy/authelia`; the running app is untouched until it is rebuilt.
 2. [Set up Authelia](#set-up-authelia), with yourself in `operators` and the
    shop's account in its group. Until the next step the old password still
    guards the app.
@@ -345,7 +372,7 @@ start, and the running app is left as it is.
 ## Troubleshooting
 
 - **502 on every page:** Authelia is not running, or not on Caddy's network.
-  Check `docker compose ps` in `deploy/authelia`; `docker compose logs authelia`
+  Check `docker compose ps` in `/srv/authelia`; `docker compose logs authelia`
   says why it stopped.
 - **Authelia restarts in a loop:** its log names the problem, usually a
   password in `users.yml` that is not a hash yet, or a YAML indentation slip.

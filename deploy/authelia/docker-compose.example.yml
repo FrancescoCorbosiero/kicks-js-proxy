@@ -3,12 +3,21 @@
 # One per server, like Caddy: a second shop adds its addresses to
 # config/configuration.yml instead of running another one.
 #
-#   cd deploy/authelia
-#   # secrets, config and users first: docs/auth.md, "Set up Authelia"
+# This folder is a template. Authelia runs from a copy in a folder of its
+# own, next to Caddy's, never from a shop's checkout:
+#
+#   cp -r deploy/authelia /srv/authelia && cd /srv/authelia
+#   mv docker-compose.example.yml docker-compose.yml
+#   # secrets, config and users: docs/auth.md, "Set up Authelia"
 #   docker compose up -d
 #
+# Here the file is named .example on purpose: "docker compose" run in a
+# checkout finds nothing to start, so it can't replace the running
+# Authelia with this folder's settings.
+#
 # The shop stacks reach it as authelia:9091 on Caddy's network (their labels
-# in deploy/docker-compose.yml), so the service keeps that name.
+# in deploy/docker-compose.yml), so the service keeps that name. The project
+# name below is fixed, so its volumes keep their names wherever it runs from.
 name: authelia
 
 x-logging: &logging
