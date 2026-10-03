@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTimeZone, nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "./schedule";
+import { intervalTimes, isTimeZone, nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "./schedule";
 
 const ROME = "Europe/Rome";
 const at = (iso: string) => new Date(iso);
@@ -71,5 +71,38 @@ describe("retrying failed steps", () => {
   it("does not retry a clean run, or one the next slot will cover", () => {
     expect(retryAt({ ...policy, failed: 0, attempt: 0 })).toBeNull();
     expect(retryAt({ ...policy, failed: 1, attempt: 0, next: at("2026-07-01T04:30:00Z") })).toBeNull();
+  });
+});
+
+describe("an interval on the clock", () => {
+  it("lists the times of day, from midnight", () => {
+    const every30 = intervalTimes(30);
+    expect(every30).toHaveLength(48);
+    expect(every30.slice(0, 3)).toEqual(["00:00", "00:30", "01:00"]);
+    expect(every30.at(-1)).toBe("23:30");
+    expect(intervalTimes(45).at(-1)).toBe("23:15");
+    expect(() => intervalTimes(0)).toThrow();
+    expect(() => intervalTimes(721)).toThrow();
+  });
+
+  it("lands on the next half hour, in the shop's time", () => {
+    const every30 = intervalTimes(30);
+    expect(iso(nextSlot(at("2026-07-01T10:07:00Z"), every30, ROME))).toBe("2026-07-01T10:30:00.000Z");
+    expect(iso(nextSlot(at("2026-07-01T10:30:00Z"), every30, ROME))).toBe("2026-07-01T11:00:00.000Z");
+  });
+
+  it("keeps going through both daylight-saving nights: forward, never twice, no long gap", () => {
+    const every30 = intervalTimes(30);
+    for (const [from, to] of [
+      ["2026-03-28T20:00:00Z", "2026-03-29T06:00:00Z"], // 02:00 CET jumps to 03:00 CEST
+      ["2026-10-24T20:00:00Z", "2026-10-25T06:00:00Z"], // 03:00 CEST falls back to 02:00 CET
+    ]) {
+      const runs: number[] = [];
+      for (let t = at(from); t < at(to); t = nextSlot(t, every30, ROME)) runs.push(t.getTime());
+      const gaps = runs.slice(1).map((r, i) => (r - runs[i]) / 60_000);
+      expect(Math.min(...gaps)).toBeGreaterThan(0);
+      expect(Math.max(...gaps)).toBeLessThanOrEqual(90);
+      expect(runs.length).toBeGreaterThanOrEqual(18); // ~20 half hours in 10 hours
+    }
   });
 });
