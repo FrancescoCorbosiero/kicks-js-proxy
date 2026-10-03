@@ -266,14 +266,31 @@ copy would run every sync twice.
 
 The labels work with caddy-docker-proxy 2.9 and newer. Moving to the current
 image still brings Caddy's security fixes, CVE-2026-30851 among them (see
-[docs/auth.md](auth.md#1-caddys-version)). First, see how the running container
-was started:
+[docs/auth.md](auth.md#1-caddys-version)). How to update depends on how the
+running container was started:
 
 ```bash
 docker inspect caddy --format '{{.Config.Image}}{{range .Mounts}}  {{.Destination}} <- {{or .Name .Source}}{{end}}'
 ```
 
-If it shows `/data <- caddy_data`, it was started like in step 2. Replace it:
+**Volume names with a prefix, such as `/data <- caddy_caddy_data`:** it was
+started by docker compose, which names volumes after the compose file's
+folder. Don't remove the container. Change the tag on the `image:` line of that
+compose file to `lucaslorentz/caddy-docker-proxy:2.13-alpine`, then, from its
+folder:
+
+```bash
+docker compose pull && docker compose up -d
+docker exec caddy caddy version        # v2.11.4
+```
+
+If you don't know where the compose file is:
+
+```bash
+find / \( -path /proc -o -path /sys -o -path /var/lib/docker \) -prune -o -type f \( -name 'docker-compose.y*ml' -o -name 'compose.y*ml' \) -exec grep -l 'caddy-docker-proxy' {} + 2>/dev/null
+```
+
+**Exactly `/data <- caddy_data`:** it was started like in step 2. Replace it:
 
 ```bash
 docker pull lucaslorentz/caddy-docker-proxy:2.13-alpine
@@ -285,10 +302,10 @@ docker run -d --name caddy --restart unless-stopped --network caddy \
 docker exec caddy caddy version        # v2.11.4
 ```
 
-The certificates are kept in the `caddy_data` volume, so none are issued again.
-Every site behind Caddy is offline for the few seconds between `rm` and `run`.
-If the container was started another way (a compose file, more ports, other
-volumes or networks), keep all of that and change only the image tag.
+Either way the certificates stay in the data volume, so none are issued again,
+and every site behind Caddy is offline for a few seconds. A container removed
+by mistake loses nothing either: `docker rm` keeps the volumes, so start it
+again the same way, with the same volumes.
 
 The Hub and the Vetrina work on the new version. If other sites run behind the
 same Caddy, skim Caddy's release notes since your version, and check
