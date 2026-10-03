@@ -43,6 +43,7 @@ same login.
                  ├─ /authelia/…  ─────────────────────────────►  Authelia: sign-in pages and API
                  │
                  └─ anything else:
+                      0. drop any Remote-* header the visitor sent
                       1. GET /api/authz/forward-auth  ────────►  Authelia: is this session signed in,
                          (original host, path and method,           and allowed on this address?
                           the session cookie)
@@ -50,15 +51,16 @@ same login.
                               Remote-Name, Remote-Email            → step 3
                          ◄── 302/303 to https://<same address>/authelia/?rd=<page>   (not signed in)
                          ◄── 403                                    (signed in, not allowed here)
-                      3. drop any Remote-* the visitor sent, copy Authelia's,
+                      3. copy Authelia's Remote-*,
                          add X-Auth-Proxy-Secret  ─────────────►  the app (src/proxy.ts)
 ```
 
 1. Every request for the Hub or the Vetrina reaches Caddy. `/authelia/…` goes
    to Authelia, whose sign-in pages are served on each protected address.
-2. For anything else, Caddy first asks Authelia, passing on the original
-   request's address, path and method, and its session cookie. The request
-   itself waits.
+2. For anything else, Caddy first deletes every `Remote-*` header the visitor
+   sent: only Authelia may say who someone is. Then it asks Authelia, passing
+   on the original request's address, path and method, and its session cookie.
+   The request itself waits.
 3. Authelia answers one of three ways:
    - **200**, with the person in `Remote-User`, `Remote-Groups`, `Remote-Name`
      and `Remote-Email`: Caddy forwards the request.
@@ -67,9 +69,8 @@ same login.
      After signing in, the browser lands back on that page.
    - **403**: signed in, but this address is not theirs (the shop's account on
      the Hub).
-4. Caddy deletes any `Remote-*` header the visitor sent, sets Authelia's, adds
-   `X-Auth-Proxy-Secret` (`AUTH_PROXY_SECRET` from `deploy/.env`), and passes
-   the request to the app.
+4. Caddy sets Authelia's `Remote-*` headers, adds `X-Auth-Proxy-Secret`
+   (`AUTH_PROXY_SECRET` from `deploy/.env`), and passes the request to the app.
 5. The app checks both ([src/proxy.ts](../src/proxy.ts)). Without the right
    secret, a request did not come through Caddy (it came from another container
    on Caddy's network, say), and the app answers 403 whatever `Remote-User`
@@ -124,23 +125,26 @@ Authelia's database (registered passkeys and authenticator apps, bans) and
 Do this once per server, before the shop's stack, because the shop's labels
 send every request to it. It runs from the first shop's checkout.
 
-### 1. Check Caddy's version
+### 1. Caddy's version
 
-Caddy removes a `Remote-*` header that a visitor sends themselves only since
-**v2.11.2**, which caddy-docker-proxy ships from **2.12**:
+The labels work with caddy-docker-proxy 2.9 (Caddy 2.9.1) and newer. Check
+yours:
 
 ```bash
 docker ps --format '{{.Names}}  {{.Image}}' | grep caddy   # the container's name and image
-docker exec caddy caddy version                            # v2.11.2 or newer
+docker exec caddy caddy version
 ```
 
 `caddy` comes twice in the second command: first the container's name (as the
 first command printed it), then the program inside it.
 
-If it is older, run the image `lucaslorentz/caddy-docker-proxy:2.13-alpine`
-instead, with the same volumes and ports. On an older Caddy, a visitor could
-add their own `Remote-*` headers wherever Authelia sets none. The app ignores
-them on those paths, but update anyway.
+Older than **v2.11.2**? Update it when convenient
+([docs/deploy.md, "Update Caddy"](deploy.md#update-caddy)). Before v2.11.2,
+Caddy's `forward_auth` passes a `Remote-User` the visitor sent themselves on to
+the app whenever Authelia sets none (CVE-2026-30851). The labels don't depend
+on that fix: they delete every `Remote-*` header a visitor sends before asking
+Authelia, on any version. Updating still brings this fix, others since, and
+everything else that is new.
 
 ### 2. Secrets
 

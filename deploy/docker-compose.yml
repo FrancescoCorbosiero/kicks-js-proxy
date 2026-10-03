@@ -49,16 +49,21 @@ services:
       # Authelia's sign-in pages, on each address under /authelia.
       caddy.handle_0: /authelia*
       caddy.handle_0.reverse_proxy: authelia:9091
-      # Everything else is checked with Authelia first: not signed in → its
-      # sign-in page; signed in but not allowed on this address → 403. What it
-      # allows goes on to the app with who is signed in (Remote-*) and the
-      # secret that tells the app the request came this way. Authelia down →
-      # 502: nothing gets through unchecked.
-      caddy.handle_1.forward_auth: authelia:9091
-      caddy.handle_1.forward_auth.uri: /api/authz/forward-auth
-      caddy.handle_1.forward_auth.copy_headers: Remote-User Remote-Groups Remote-Email Remote-Name
-      caddy.handle_1.reverse_proxy: "{{upstreams 3000}}"
-      caddy.handle_1.reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
+      # Everything else, in this order (the route keeps it):
+      # 0. drop every Remote-* header the visitor sent: only Authelia says who
+      #    someone is. Caddy 2.11.2 and newer do this in forward_auth; older
+      #    ones pass a visitor's own Remote-User on wherever Authelia sets none.
+      # 1. check with Authelia: not signed in → its sign-in page; signed in but
+      #    not allowed on this address → 403. What it allows carries who is
+      #    signed in (Remote-*). Authelia down → 502: nothing gets through
+      #    unchecked.
+      # 2. on to the app, with the secret that tells it the request came this way.
+      caddy.handle_1.route.0_request_header: "-Remote-*"
+      caddy.handle_1.route.1_forward_auth: authelia:9091
+      caddy.handle_1.route.1_forward_auth.uri: /api/authz/forward-auth
+      caddy.handle_1.route.1_forward_auth.copy_headers: Remote-User Remote-Groups Remote-Email Remote-Name
+      caddy.handle_1.route.2_reverse_proxy: "{{upstreams 3000}}"
+      caddy.handle_1.route.2_reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
     logging: *logging
 
   postgres:

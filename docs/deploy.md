@@ -29,9 +29,8 @@ cron to set up.
 ## What you need
 
 - A VPS with Docker and the Compose plugin (`docker compose version`).
-- caddy-docker-proxy **2.12 or newer** running, with ports 80 and 443 open.
-  Older versions let visitors pass identity headers of their own to the app
-  ([docs/auth.md](auth.md#1-check-caddys-version)).
+- caddy-docker-proxy 2.9 or newer running, with ports 80 and 443 open. 2.13 is
+  current: see [Update Caddy](#update-caddy).
 - About 2 GB of RAM for the first build. With less, add swap first (see
   *Troubleshooting*).
 
@@ -64,9 +63,8 @@ If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
 in step 5 (and in `deploy/authelia/.env`, step 4).
 
 Check its version too: `docker exec caddy caddy version` (the container's name,
-then the program inside it) must print v2.11.2 or newer (caddy-docker-proxy 2.12
-or newer). If it doesn't, recreate it with the image below, keeping its volumes
-and ports.
+then the program inside it). Older than v2.11.2 still works, but update it when
+convenient: see [Update Caddy](#update-caddy).
 
 **No Caddy container in `docker ps`?** Start caddy-docker-proxy once, then
 continue. It serves every container on the `caddy` network that has `caddy`
@@ -263,6 +261,38 @@ up there.
 
 Run a single app container per shop: the syncs run inside it, so a second
 copy would run every sync twice.
+
+### Update Caddy
+
+The labels work with caddy-docker-proxy 2.9 and newer. Moving to the current
+image still brings Caddy's security fixes, CVE-2026-30851 among them (see
+[docs/auth.md](auth.md#1-caddys-version)). First, see how the running container
+was started:
+
+```bash
+docker inspect caddy --format '{{.Config.Image}}{{range .Mounts}}  {{.Destination}} <- {{or .Name .Source}}{{end}}'
+```
+
+If it shows `/data <- caddy_data`, it was started like in step 2. Replace it:
+
+```bash
+docker pull lucaslorentz/caddy-docker-proxy:2.13-alpine
+docker stop caddy && docker rm caddy
+docker run -d --name caddy --restart unless-stopped --network caddy \
+  -p 80:80 -p 443:443 -e CADDY_INGRESS_NETWORKS=caddy \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro -v caddy_data:/data \
+  lucaslorentz/caddy-docker-proxy:2.13-alpine
+docker exec caddy caddy version        # v2.11.4
+```
+
+The certificates are kept in the `caddy_data` volume, so none are issued again.
+Every site behind Caddy is offline for the few seconds between `rm` and `run`.
+If the container was started another way (a compose file, more ports, other
+volumes or networks), keep all of that and change only the image tag.
+
+The Hub and the Vetrina work on the new version. If other sites run behind the
+same Caddy, skim Caddy's release notes since your version, and check
+`docker logs caddy` after the switch.
 
 ## A second shop on the same server
 
