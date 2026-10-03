@@ -25,7 +25,8 @@ npm-debug.log*
 .env.development
 .env.production
 
-# Authelia on the server (deploy/authelia): its settings, users and secrets
+# Authelia runs from /srv/authelia; never commit settings, users or secrets
+# filled into the template here by mistake
 /deploy/authelia/config/configuration.yml
 /deploy/authelia/config/users.yml
 /deploy/authelia/secrets/
