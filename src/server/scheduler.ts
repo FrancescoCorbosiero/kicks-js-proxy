@@ -1,6 +1,6 @@
-import { desc, eq, isNotNull, max } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, max, ne } from "drizzle-orm";
 import { env } from "@/lib/env";
-import { nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "@/lib/schedule";
+import { DEFAULT_TIMEZONE, intervalTimes, nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "@/lib/schedule";
 import { runKicksdbRefresh } from "@/server/actions/feeds";
 import { kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { db } from "@/server/db/client";
@@ -15,13 +15,24 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  *   1. the store pull — the Hub's copy of every product on WooCommerce;
  *   2. the GoldenSneakers complete sync;
  *   3. a KicksDB re-pricing pass, so whatever the sync registered is priced;
- *   4. self-repair (AUTO_REPAIR=on only), metadata backfill, recategorize.
+ *   4. with AUTO_SYNC=on, the store sync: every price and stock change the
+ *      sources now call for, written to the store (see syncStore);
+ *   5. self-repair (AUTO_REPAIR=on only), metadata backfill, recategorize.
  * A step that fails does not stop the others, and is retried an hour later
  * (twice at most). Every run is recorded in scheduler_runs, so a restarting
  * server knows whether the last slot ran: one missed while the server was
  * down, or whose run failed, runs a minute after boot — while a deploy after
  * a good run starts nothing. A fully successful run calls
  * SCHEDULER_HEARTBEAT_URL, for a monitor that alerts when the calls stop.
+ *
+ * The feed cycle, every SCHEDULER_FEEDS_MINUTES on the clock (30 → :00 and
+ * :30; off by default), is the short version for a supplier whose stock moves
+ * during the day: the GoldenSneakers sync, then — with AUTO_SYNC=on — the
+ * store sync of the feed's products only. KicksDB-priced products wait for the
+ * daily run: planning them asks KicksDB about every one, every time. A cycle
+ * never overlaps another run: it skips its turn while one is going, and the
+ * daily run waits for a cycle to finish rather than lose its slot. A fully
+ * successful cycle calls SCHEDULER_FEEDS_HEARTBEAT_URL.
  *
  * Alongside, the recent orders are pulled every SCHEDULER_ORDERS_MINUTES
  * (default 15), so new orders reach the Orders tab without a click.
@@ -44,31 +55,41 @@ const MAX_RETRIES = 2;
 /** A store pull the Sync tab moved forward this recently is still being driven. */
 const ACTIVE_PULL_MS = 2 * 60 * 1000;
 const DEFAULT_TIMES = "04:30";
-const DEFAULT_TIMEZONE = "Europe/Rome";
 const DEFAULT_ORDERS_MINUTES = 15;
+/** Variations an automatic store sync may change in one run (AUTO_SYNC_MAX_CHANGES). */
+const DEFAULT_MAX_CHANGES = 500;
+/** How long the daily run waits for a feed cycle still going before it gives up. */
+const WAIT_FOR_IDLE_MS = 60 * 60 * 1000;
+/** Feed cycles kept in scheduler_runs. */
+const FEED_HISTORY_DAYS = 7;
 
-const STEPS = ["pull", "gs", "kicksdb", "repair", "backfill", "recategorize"] as const;
-type StepName = (typeof STEPS)[number];
+const DAILY_STEPS = ["pull", "gs", "kicksdb", "storeSync", "repair", "backfill", "recategorize"] as const;
+const FEED_STEPS = ["gs", "feedSync"] as const;
+type StepName = (typeof DAILY_STEPS)[number] | (typeof FEED_STEPS)[number];
 type StepOutcome = { ok: boolean; count?: number; note?: string };
 
 const LABEL: Record<StepName, string> = {
   pull: "store pull",
   gs: "GS sync",
   kicksdb: "KicksDB refresh",
+  storeSync: "store sync",
+  feedSync: "store sync",
   repair: "repair",
   backfill: "metadata backfill",
   recategorize: "recategorize",
 };
 
-/** The status counters each step reports into. */
+/** The status counters the daily run's steps report into. */
 const COUNTER = {
   pull: "lastPulled",
   gs: "lastGsSkus",
   kicksdb: "lastRefreshed",
+  storeSync: "lastWritten",
   repair: "lastRepaired",
 } as const satisfies Partial<Record<StepName, keyof SchedulerStatus>>;
 
 interface Job {
+  kind: "daily" | "feeds";
   /** The scheduled time this run is for (a catch-up or a retry keeps its slot's). */
   slot: Date;
   trigger: SchedulerRunRow["trigger"];
@@ -88,7 +109,15 @@ export interface SchedulerStatus {
   lastGsSkus: number | null; // SKUs in the last GS sync (null = not run)
   lastRefreshed: number | null; // entries re-priced in the last pass
   lastRepaired: number | null; // products healed in the last pass (null = off)
+  lastWritten: number | null; // variations the last store sync wrote (null = not run)
   lastError: string | null;
+  autoSync: boolean; // AUTO_SYNC=on: the runs write to the store
+  autoSyncMax: number; // …at most this many variations per run
+  feedsEveryMinutes: number; // 0 = no feed cycle
+  feedsNextAt: number | null;
+  feedsLastAt: number | null;
+  feedsLastWritten: number | null; // variations the last cycle wrote
+  feedsError: string | null;
   ordersEveryMinutes: number; // 0 = orders are pulled by hand only
   ordersLastAt: number | null;
   ordersError: string | null;
@@ -112,7 +141,15 @@ function store(): SchedulerState {
     lastGsSkus: null,
     lastRefreshed: null,
     lastRepaired: null,
+    lastWritten: null,
     lastError: null,
+    autoSync: false,
+    autoSyncMax: DEFAULT_MAX_CHANGES,
+    feedsEveryMinutes: 0,
+    feedsNextAt: null,
+    feedsLastAt: null,
+    feedsLastWritten: null,
+    feedsError: null,
     ordersEveryMinutes: 0,
     ordersLastAt: null,
     ordersError: null,
@@ -125,6 +162,7 @@ export function getSchedulerStatus(): SchedulerStatus {
 }
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** "2026-10-01 04:30" in the schedule's zone, for the log. */
 const when = (date: Date) =>
@@ -148,8 +186,82 @@ async function refreshCatalog(): Promise<{ refreshed: number; error: string | nu
 }
 
 /**
- * The daily sync's steps, in order. Each answers what it did, null when it
- * does not apply to this shop (its source is not configured), or throws.
+ * The store sync, unattended: the same preview the Sync tab runs, then its
+ * apply — what an operator does by pressing "apply all" — over the whole
+ * store (the daily run) or the products the feed has ever listed (the feed
+ * cycle; dropped ones included, so their sizes go to 0).
+ *
+ * Narrower than the tab, on purpose: prices and stock only — no size cleanup
+ * (it deletes variations) and no identifiers. A run that would change more
+ * than AUTO_SYNC_MAX_CHANGES variations writes nothing: a change that large is
+ * a pricing edit or a broken feed, and either is reviewed in the Sync tab
+ * first. Every write lands in the Sync tab's history like a manual apply.
+ * The run's plans are dropped afterwards (see deleteRunPlans).
+ */
+async function syncStore(scope: "store" | "feed"): Promise<StepOutcome | null> {
+  if (env.AUTO_SYNC !== "on") return null;
+  const { wooConfigured } = await import("@/server/woo/client");
+  if (!wooConfigured()) return null;
+
+  let skus: string[] | undefined;
+  if (scope === "feed") {
+    const { GS_FEED, knownFeedSkus } = await import("@/server/feeds/repo");
+    const { listStoreSkuSpellings } = await import("@/server/store-json/repo");
+    const { skuKey } = await import("@/lib/skus");
+    const known = await knownFeedSkus(GS_FEED);
+    skus = (await listStoreSkuSpellings()).filter((sku) => known.has(skuKey(sku)));
+    if (skus.length === 0) return { ok: true, count: 0, note: "no feed products on the store" };
+  }
+
+  const preview = await import("@/server/actions/preview");
+  const { deleteRunPlans } = await import("@/server/plans/repo");
+  const started = await preview.startStoreSync(undefined, skus);
+  if (!started.ok || !started.progress) throw new Error(started.error ?? "the store sync could not start");
+  const runId = started.progress.runId;
+  try {
+    let progress = started.progress;
+    // A step plans 250 SKUs and always moves the cursor or ends the run;
+    // the bound only guards against a run that stops doing either.
+    const maxSteps = Math.ceil(progress.total / 100) + 10;
+    for (let step = 0; !progress.done; step++) {
+      if (progress.status !== "running") throw new Error(progress.error ?? `the store sync was ${progress.status}`);
+      if (step > maxSteps) throw new Error("the store sync did not finish");
+      const next = await preview.advanceStoreSync(runId);
+      if (!next.ok || !next.progress) throw new Error(next.error ?? "a store sync step failed");
+      progress = next.progress;
+    }
+
+    const planned = progress.result?.totals?.update ?? 0;
+    if (planned === 0) return { ok: true, count: 0 };
+    const limit = store().autoSyncMax;
+    if (planned > limit) {
+      throw new Error(
+        `${planned} changes planned, more than the ${limit} an automatic run may write (AUTO_SYNC_MAX_CHANGES): ` +
+          "nothing written. Review and apply them in the Sync tab.",
+      );
+    }
+
+    const { applySync } = await import("@/server/woo/apply");
+    const outcome = await applySync({ runId, priceScope: "all", dryRun: false, sanitize: false, backfillGtins: false });
+    if (outcome.failedTotal > 0) {
+      throw new Error(
+        `${outcome.updated} of ${outcome.variations} changes written, ${outcome.failedTotal} failed: ` +
+          (outcome.failed[0]?.error ?? "no reason given"),
+      );
+    }
+    console.log(
+      `[scheduler] store sync: ${outcome.updated} change(s) written (${scope === "feed" ? "feed products" : "whole store"})`,
+    );
+    return { ok: true, count: outcome.updated };
+  } finally {
+    await deleteRunPlans(runId).catch((e) => console.warn(`[scheduler] plans of run ${runId} kept: ${messageOf(e)}`));
+  }
+}
+
+/**
+ * The scheduled runs' steps. Each answers what it did, null when it does not
+ * apply to this shop (its source is not configured, or AUTO_SYNC is off), or
+ * throws.
  */
 const RUN_STEP: Record<StepName, () => Promise<StepOutcome | null>> = {
   async pull() {
@@ -187,6 +299,9 @@ const RUN_STEP: Record<StepName, () => Promise<StepOutcome | null>> = {
     if (error) throw new Error(`${error} (after ${refreshed} re-priced)`);
     return { ok: true, count: refreshed };
   },
+
+  storeSync: () => syncStore("store"),
+  feedSync: () => syncStore("feed"),
 
   // Self-repair: products already online that lost a field to a source's
   // change of shape. Additive and idempotent, but it writes to the LIVE
@@ -267,11 +382,28 @@ const history = {
       console.error(`[scheduler] could not record the run's outcome: ${messageOf(e)}`);
     }
   },
+
+  /** Feed cycles older than a week: dozens a day, read only for the last one. */
+  async prune(): Promise<void> {
+    try {
+      await db
+        .delete(schedulerRuns)
+        .where(
+          and(
+            eq(schedulerRuns.trigger, "interval"),
+            lt(schedulerRuns.startedAt, new Date(Date.now() - FEED_HISTORY_DAYS * 24 * 60 * 60 * 1000)),
+          ),
+        );
+    } catch (e) {
+      console.warn(`[scheduler] old feed cycles kept: ${messageOf(e)}`);
+    }
+  },
 };
 
 /**
- * At boot: close the runs a stopped server left open, show the last run on
- * /feeds again, and return the latest slot a run completed successfully.
+ * At boot: close the runs a stopped server left open, show the last daily run
+ * and the last feed cycle on /feeds again, and return the latest slot a daily
+ * run completed successfully.
  */
 async function loadHistory(s: SchedulerState): Promise<Date | null> {
   await db
@@ -282,7 +414,7 @@ async function loadHistory(s: SchedulerState): Promise<Date | null> {
   const [last] = await db
     .select()
     .from(schedulerRuns)
-    .where(isNotNull(schedulerRuns.finishedAt))
+    .where(and(isNotNull(schedulerRuns.finishedAt), ne(schedulerRuns.trigger, "interval")))
     .orderBy(desc(schedulerRuns.startedAt))
     .limit(1);
   if (last) {
@@ -294,16 +426,28 @@ async function loadHistory(s: SchedulerState): Promise<Date | null> {
     }
   }
 
+  const [cycle] = await db
+    .select()
+    .from(schedulerRuns)
+    .where(and(isNotNull(schedulerRuns.finishedAt), eq(schedulerRuns.trigger, "interval")))
+    .orderBy(desc(schedulerRuns.startedAt))
+    .limit(1);
+  if (cycle) {
+    s.feedsLastAt = (cycle.finishedAt ?? cycle.startedAt).getTime();
+    s.feedsError = cycle.error;
+    const written = cycle.summary?.feedSync;
+    if (written?.ok) s.feedsLastWritten = written.count ?? null;
+  }
+
   const [served] = await db
     .select({ slot: max(schedulerRuns.slotAt) })
     .from(schedulerRuns)
-    .where(eq(schedulerRuns.status, "ok"));
+    .where(and(eq(schedulerRuns.status, "ok"), ne(schedulerRuns.trigger, "interval")));
   return served?.slot ? new Date(served.slot) : null;
 }
 
-/** Tell the monitor behind SCHEDULER_HEARTBEAT_URL that a sync went through. */
-async function heartbeat(): Promise<void> {
-  const url = env.SCHEDULER_HEARTBEAT_URL;
+/** Tell the monitor behind a heartbeat URL that a run went through. */
+async function heartbeat(url: string | undefined): Promise<void> {
   if (!url) return;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
@@ -313,12 +457,25 @@ async function heartbeat(): Promise<void> {
   }
 }
 
-/** Run a job's steps in order; answers the steps that failed. */
-async function run(job: Job): Promise<StepName[]> {
+/**
+ * Run a job's steps in order; answers the steps that failed, or null when a
+ * feed cycle found another run going and skipped its turn.
+ */
+async function run(job: Job): Promise<StepName[] | null> {
   const s = store();
   if (s.running) {
-    console.warn("[scheduler] the previous run is still going — this one is skipped");
-    return [];
+    if (job.kind === "feeds") {
+      console.log("[scheduler] feed cycle skipped: another run is still going");
+      return null;
+    }
+    // The daily run waits for a feed cycle rather than lose its slot.
+    const deadline = Date.now() + WAIT_FOR_IDLE_MS;
+    while (s.running && Date.now() < deadline) await sleep(5_000);
+    if (s.running) {
+      s.lastError = "another run has been going for an hour: this run did not start";
+      console.error(`[scheduler] ${s.lastError}`);
+      return [...job.steps];
+    }
   }
   s.running = true;
   const id = await history.open(job);
@@ -337,18 +494,29 @@ async function run(job: Job): Promise<StepName[]> {
     }
   } finally {
     s.running = false;
-    s.lastRunAt = Date.now();
-    for (const step of job.steps) {
-      if (step in COUNTER) {
-        const outcome = summary[step];
-        s[COUNTER[step as keyof typeof COUNTER]] = outcome?.ok ? (outcome.count ?? null) : null;
+    const error = failed.length > 0 ? failed.map((step) => `${LABEL[step]}: ${summary[step].note}`).join(" · ") : null;
+    if (job.kind === "feeds") {
+      s.feedsLastAt = Date.now();
+      s.feedsError = error;
+      const written = summary.feedSync;
+      s.feedsLastWritten = written?.ok ? (written.count ?? null) : null;
+    } else {
+      s.lastRunAt = Date.now();
+      s.lastError = error;
+      for (const step of job.steps) {
+        if (step in COUNTER) {
+          const outcome = summary[step];
+          s[COUNTER[step as keyof typeof COUNTER]] = outcome?.ok ? (outcome.count ?? null) : null;
+        }
       }
     }
-    s.lastError = failed.length > 0 ? failed.map((step) => `${LABEL[step]}: ${summary[step].note}`).join(" · ") : null;
-    await history.close(id, summary, s.lastError);
+    await history.close(id, summary, error);
   }
-  // Every step of the slot has now succeeded (a retry runs only the failed ones).
-  if (failed.length === 0) await heartbeat();
+  // Every step has now succeeded (a retry runs only the failed ones).
+  if (failed.length === 0) {
+    await heartbeat(job.kind === "feeds" ? env.SCHEDULER_FEEDS_HEARTBEAT_URL : env.SCHEDULER_HEARTBEAT_URL);
+  }
+  if (job.kind === "daily") await history.prune();
   return failed;
 }
 
@@ -357,12 +525,12 @@ function arm(at: number, job: Job): void {
   setTimeout(() => void fire(job), Math.max(0, at - Date.now())).unref();
 }
 
-/** Run a job, then arm what comes next: a retry of its failed steps, or the next slot. */
+/** Run a daily job, then arm what comes next: a retry of its failed steps, or the next slot. */
 async function fire(job: Job): Promise<void> {
   const s = store();
   let failed: readonly StepName[];
   try {
-    failed = await run(job);
+    failed = (await run(job)) ?? [];
   } catch (e) {
     console.error(`[scheduler] run crashed: ${messageOf(e)}`);
     failed = job.steps;
@@ -378,9 +546,9 @@ async function fire(job: Job): Promise<void> {
   });
   if (retry) {
     console.log(`[scheduler] retrying ${failed.map((step) => LABEL[step]).join(", ")} at ${when(retry)}`);
-    arm(retry.getTime(), { slot: job.slot, trigger: "retry", steps: failed, attempt: job.attempt + 1 });
+    arm(retry.getTime(), { kind: "daily", slot: job.slot, trigger: "retry", steps: failed, attempt: job.attempt + 1 });
   } else {
-    arm(next.getTime(), { slot: next, trigger: "schedule", steps: STEPS, attempt: 0 });
+    arm(next.getTime(), { kind: "daily", slot: next, trigger: "schedule", steps: DAILY_STEPS, attempt: 0 });
   }
 }
 
@@ -396,11 +564,31 @@ async function boot(s: SchedulerState): Promise<void> {
   if (slotMissed(served, now, s.times, s.timeZone)) {
     const slot = previousSlot(now, s.times, s.timeZone);
     console.log(`[scheduler] the ${when(slot)} sync never completed — running it in a minute`);
-    arm(Date.now() + CATCH_UP_DELAY_MS, { slot, trigger: "catch-up", steps: STEPS, attempt: 0 });
+    arm(Date.now() + CATCH_UP_DELAY_MS, { kind: "daily", slot, trigger: "catch-up", steps: DAILY_STEPS, attempt: 0 });
   } else {
     const slot = nextSlot(now, s.times, s.timeZone);
-    arm(slot.getTime(), { slot, trigger: "schedule", steps: STEPS, attempt: 0 });
+    arm(slot.getTime(), { kind: "daily", slot, trigger: "schedule", steps: DAILY_STEPS, attempt: 0 });
   }
+}
+
+/**
+ * The feed cycle's timer: the next mark on the clock after `after`. No
+ * catch-up and no retries — the next cycle is never far off.
+ */
+function armFeeds(after: Date): void {
+  const s = store();
+  const slot = nextSlot(after, intervalTimes(s.feedsEveryMinutes), s.timeZone);
+  s.feedsNextAt = slot.getTime();
+  setTimeout(() => void fireFeeds(slot), Math.max(0, slot.getTime() - Date.now())).unref();
+}
+
+async function fireFeeds(slot: Date): Promise<void> {
+  try {
+    await run({ kind: "feeds", slot, trigger: "interval", steps: FEED_STEPS, attempt: 0 });
+  } catch (e) {
+    console.error(`[scheduler] feed cycle crashed: ${messageOf(e)}`);
+  }
+  armFeeds(new Date(Math.max(Date.now(), slot.getTime())));
 }
 
 /** Pull the recent orders, then again every SCHEDULER_ORDERS_MINUTES. */
@@ -430,6 +618,9 @@ export function startScheduler(): void {
   s.times = parseTimes(env.SCHEDULER_TIMES ?? DEFAULT_TIMES);
   s.timeZone = env.SCHEDULER_TIMEZONE ?? DEFAULT_TIMEZONE;
   s.ordersEveryMinutes = env.SCHEDULER_ORDERS_MINUTES ?? DEFAULT_ORDERS_MINUTES;
+  s.feedsEveryMinutes = env.SCHEDULER_FEEDS_MINUTES ?? 0;
+  s.autoSync = env.AUTO_SYNC === "on";
+  s.autoSyncMax = env.AUTO_SYNC_MAX_CHANGES ?? DEFAULT_MAX_CHANGES;
 
   const enabled =
     env.SCHEDULER === "on" || (env.SCHEDULER === undefined && process.env.NODE_ENV === "production");
@@ -440,10 +631,13 @@ export function startScheduler(): void {
   s.started = true;
   s.enabled = true;
 
+  const sync = s.autoSync ? `, store sync (up to ${s.autoSyncMax} changes)` : "";
   console.log(
-    `[scheduler] on — daily sync at ${s.times.join(", ")} (${s.timeZone}): store pull, GS sync, KicksDB re-pricing; ` +
+    `[scheduler] on — daily sync at ${s.times.join(", ")} (${s.timeZone}): store pull, GS sync, KicksDB re-pricing${sync}; ` +
+      (s.feedsEveryMinutes > 0 ? `feeds every ${s.feedsEveryMinutes} min${s.autoSync ? " + store sync" : ""}; ` : "") +
       (s.ordersEveryMinutes > 0 ? `orders every ${s.ordersEveryMinutes} min` : "orders by hand only"),
   );
   void boot(s);
+  if (s.feedsEveryMinutes > 0) armFeeds(new Date());
   if (s.ordersEveryMinutes > 0) setTimeout(() => void pullOrders(), CATCH_UP_DELAY_MS).unref();
 }

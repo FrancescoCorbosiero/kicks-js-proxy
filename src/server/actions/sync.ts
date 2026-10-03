@@ -20,6 +20,8 @@ import { countUnpublishedCandidates } from "@/server/catalog/repo";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
 import { syncRunApplicable } from "@/server/sync/runs";
 import { snapshotSiteMatch } from "@/server/woo/site-guard";
+import { env } from "@/lib/env";
+import { DEFAULT_TIMEZONE } from "@/lib/schedule";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -102,6 +104,8 @@ export interface SyncPageState {
    * Postgres). Every write refuses while this is set; the page says so first.
    */
   siteMismatch: { snapshot: string; connected: string } | null;
+  /** The shop's time zone: the page prints its dates in it. */
+  timeZone: string;
 }
 
 /** Everything the sync page header needs (also used to refresh after actions). */
@@ -118,6 +122,7 @@ export async function getSyncState(): Promise<SyncPageState> {
   ]);
   return {
     wooConfigured: wooConfigured(),
+    timeZone: env.SCHEDULER_TIMEZONE ?? DEFAULT_TIMEZONE,
     unpublished,
     siteMismatch:
       site.status === "mismatch" ? { snapshot: site.snapshot, connected: site.connected } : null,

@@ -8,6 +8,9 @@
  * 03:00 are never affected.
  */
 
+/** The shop's time zone unless SCHEDULER_TIMEZONE says otherwise. */
+export const DEFAULT_TIMEZONE = "Europe/Rome";
+
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** "13:30, 04:30" → ["04:30", "13:30"]: trimmed, de-duplicated, in order. Throws on anything else. */
@@ -129,4 +132,21 @@ export function retryAt(run: {
   if (run.failed === 0 || run.attempt >= run.maxRetries) return null;
   const at = run.now.getTime() + run.delayMs;
   return at + run.delayMs <= run.next.getTime() ? new Date(at) : null;
+}
+
+/**
+ * Every `minutes` minutes on the clock, from midnight: 30 → 00:00, 00:30, …,
+ * 23:30. Used as a list of times of day, so an interval shares the slot math
+ * above, daylight-saving days included. A step that does not divide the day
+ * makes the last gap before midnight shorter.
+ */
+export function intervalTimes(minutes: number): string[] {
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 720) {
+    throw new Error(`Not an interval in minutes (1–720): ${minutes}`);
+  }
+  const times: string[] = [];
+  for (let m = 0; m < 24 * 60; m += minutes) {
+    times.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  }
+  return times;
 }

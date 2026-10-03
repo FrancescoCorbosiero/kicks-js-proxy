@@ -13,6 +13,7 @@ import {
 } from "@/server/actions/feeds";
 import type { FeedProductsPage } from "@/server/feeds/repo";
 import { useI18n } from "@/i18n/provider";
+import { useShopTime } from "@/components/use-shop-time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -141,24 +142,6 @@ export function FeedsWorkspace({ initialState }: { initialState: FeedsState }) {
   );
 }
 
-/**
- * A date on this page, in the shop's time zone and the UI's language. Fixed
- * both ways so the server and the browser print the same text, which the
- * page's hydration requires.
- */
-function useShopTime(timeZone: string) {
-  const { locale } = useI18n();
-  return React.useMemo(() => {
-    const tag = locale === "it" ? "it-IT" : "en-GB";
-    const dateTime = new Intl.DateTimeFormat(tag, { timeZone, dateStyle: "short", timeStyle: "short" });
-    const time = new Intl.DateTimeFormat(tag, { timeZone, timeStyle: "short" });
-    return {
-      dateTime: (at: number | string | Date) => dateTime.format(new Date(at)),
-      time: (at: number | string | Date) => time.format(new Date(at)),
-    };
-  }, [locale, timeZone]);
-}
-
 function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
   const { t } = useI18n();
   const s = t.feeds.scheduler;
@@ -208,9 +191,20 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                   {status.lastPulled != null && ` · ${s.lastPulled(status.lastPulled)}`}
                   {status.lastGsSkus != null && ` · ${s.lastGs(status.lastGsSkus)}`}
                   {status.lastRefreshed != null && ` · ${s.lastRepriced(status.lastRefreshed)}`}
+                  {status.lastWritten != null && ` · ${s.written(status.lastWritten)}`}
                   {status.lastRepaired != null && ` · ${s.lastRepaired(status.lastRepaired)}`}
                 </div>
               )}
+              <div className="text-faint">
+                {status.feedsEveryMinutes > 0 ? s.feeds(status.feedsEveryMinutes) : s.feedsDaily}
+                {status.feedsEveryMinutes > 0 &&
+                  status.feedsLastAt &&
+                  ` · ${s.feedsLast(when.time(status.feedsLastAt))}`}
+                {status.feedsEveryMinutes > 0 &&
+                  status.feedsLastWritten != null &&
+                  ` · ${s.written(status.feedsLastWritten)}`}
+              </div>
+              <div className="text-faint">{status.autoSync ? s.autoSyncOn(status.autoSyncMax) : s.autoSyncOff}</div>
               <div className="text-faint">
                 {status.ordersEveryMinutes > 0 ? s.orders(status.ordersEveryMinutes) : s.ordersOff}
                 {status.ordersLastAt && ` · ${s.ordersLast(when.time(status.ordersLastAt))}`}
@@ -222,6 +216,11 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
         </div>
       </div>
       {status.lastError && <p className="mt-2 text-sm text-skip">{status.lastError}</p>}
+      {status.feedsError && (
+        <p className="mt-2 text-sm text-skip">
+          {s.feedsErrorPrefix} {status.feedsError}
+        </p>
+      )}
       {status.ordersError && <p className="mt-2 text-sm text-skip">{status.ordersError}</p>}
     </section>
   );

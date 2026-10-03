@@ -183,29 +183,57 @@ filters/sorts/paginates in SQL.
 
 **The app schedules itself.** In production (`next start`, Docker) an in-app
 scheduler (`src/server/scheduler.ts`, started from `src/instrumentation.ts`)
-runs two cadences:
+runs three cadences:
 
 - **The daily sync**, every day at `SCHEDULER_TIMES` (default `04:30`) in
-  `SCHEDULER_TIMEZONE` (default `Europe/Rome`). In order: the **store pull**
-  (the Hub's copy of every product on WooCommerce), the GoldenSneakers
-  complete sync, a KicksDB re-pricing pass, then self-repair (with
-  `AUTO_REPAIR=on`), metadata backfill and recategorization. A failed step
-  doesn't stop the others and is retried an hour later, twice at most.
-  `SCHEDULER_TIMES=04:30,13:30` runs it twice a day.
+  `SCHEDULER_TIMEZONE` (default `Europe/Rome`). In order:
+  1. the **store pull** (the Hub's copy of every product on WooCommerce);
+  2. the GoldenSneakers complete sync;
+  3. a KicksDB re-pricing pass;
+  4. with `AUTO_SYNC=on`, the **store sync** of the whole store (below);
+  5. self-repair (with `AUTO_REPAIR=on`), metadata backfill and
+     recategorization.
+
+  A failed step doesn't stop the others and is retried an hour later, twice
+  at most. `SCHEDULER_TIMES=04:30,13:30` runs it twice a day.
+- **The feed cycle**, every `SCHEDULER_FEEDS_MINUTES` on the clock (`30` runs
+  at :00 and :30; default `0` = off). It runs the GoldenSneakers sync, then,
+  with `AUTO_SYNC=on`, the store sync of the feed's products. KicksDB-priced
+  products wait for the daily sync, because planning them asks KicksDB about
+  every one of them, every time. A cycle skips its turn while another run is
+  going, and the daily sync waits for a cycle to finish.
 - **The orders pull**, every `SCHEDULER_ORDERS_MINUTES` (default 15; `0` =
   by hand only): the latest orders reach the Orders tab without a click.
 
-Every daily run is recorded in the `scheduler_runs` table, so a restart
-knows where it stands. A slot that was missed while the server was down, or
-whose run failed, runs a minute after the next boot. A deploy after a good
-run starts nothing. The Feeds tab shows the times, the last run and any
-error.
+**The store sync** (`AUTO_SYNC=on`, off by default) does unattended what the
+Sync tab does with "apply all": it plans the price and stock changes the
+sources call for and writes them to WooCommerce. It is narrower than the tab
+on purpose:
+- It writes **prices and stock only**: no size cleanup (which deletes
+  variations) and no GTINs.
+- A run that would change more than `AUTO_SYNC_MAX_CHANGES` variations
+  (default 500) writes nothing. The Feeds tab shows the reason, and the change
+  is reviewed and applied by hand in the Sync tab. A change that large is a
+  pricing edit or a broken feed.
+- Manual price locks are honored, as in the tab.
+- Every automatic write appears in the Sync tab's history.
+
+Edits made directly in WooCommerce are seen at the next store pull, which
+the daily sync runs.
+
+Every run is recorded in the `scheduler_runs` table (feed cycles for a
+week), so a restart knows where it stands. A daily slot that was missed while
+the server was down, or whose run failed, runs a minute after the next boot.
+A deploy after a good run starts nothing. The Feeds tab shows the cadences,
+the last runs, whether the store is synced automatically, and any error.
 
 **Be told when it doesn't run.** Set `SCHEDULER_HEARTBEAT_URL` to a
 dead-man's-switch check (for example a free healthchecks.io check with a
 1-day period and a few hours' grace). Each fully successful daily run calls
 that URL. If the calls stop, because a run failed or the server is down, the
-service alerts you.
+service alerts you. `SCHEDULER_FEEDS_HEARTBEAT_URL` does the same for the
+feed cycle. Give that check a period matching the cycle, e.g. 30 minutes with
+an hour's grace.
 
 `SCHEDULER=on|off` overrides the default (on in production, off in dev). The
 scheduler needs a long-running server — `next start`, Docker, a VPS — not a

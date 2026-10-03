@@ -378,7 +378,7 @@ export const orderWorkflow = pgTable("order_workflow", {
 
 /**
  * The in-app scheduler's runs (src/server/scheduler.ts): one row per run of
- * the daily sync. `slot_at` is the scheduled time the run is for — a
+ * the daily sync, and of each feed cycle (trigger "interval", kept a week). `slot_at` is the scheduled time the run is for — a
  * catch-up after downtime and a retry of failed steps carry the slot they
  * make up for — so the last successful slot tells a restarting server
  * whether it missed one.
@@ -388,7 +388,8 @@ export const schedulerRuns = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     slotAt: timestamp("slot_at", { withTimezone: true }).notNull(),
-    trigger: text("trigger", { enum: ["schedule", "catch-up", "retry"] }).notNull(),
+    // "interval": a feed cycle (SCHEDULER_FEEDS_MINUTES); the others are daily runs.
+    trigger: text("trigger", { enum: ["schedule", "catch-up", "retry", "interval"] }).notNull(),
     status: text("status", { enum: ["running", "ok", "failed", "interrupted"] })
       .notNull()
       .default("running"),

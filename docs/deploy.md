@@ -50,17 +50,30 @@ If the domain is on Cloudflare, set both records to **DNS only** (grey cloud)
 for now, so Caddy can obtain its certificates. Step 9 turns the proxy back on
 and hides the server's IP again.
 
+If your firewall already lets only Cloudflare reach ports 80 and 443, keep
+the records **Proxied** from the start instead. Let's Encrypt then reaches
+Caddy through Cloudflare, the same way your other proxied sites renew their
+certificates. With DNS only it would time out.
+
 ### 2. Find Caddy's network
 
-The app joins the Docker network your Caddy container watches:
+The app must join a Docker network your Caddy container is **already on**:
 
 ```bash
 docker ps                                            # find your Caddy container's name
 docker inspect <caddy-container> --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}'
+docker inspect <caddy-container> --format '{{range .Config.Env}}{{println .}}{{end}}' | grep CADDY_INGRESS_NETWORKS
 ```
 
-If it is called something other than `caddy`, set `CADDY_NETWORK` to that name
-in step 5 (and in `deploy/authelia/.env`, step 4).
+If the last command prints `CADDY_INGRESS_NETWORKS`, use one of the networks
+it lists. If it prints nothing, any network from the second command works.
+If the network isn't called `caddy`, set `CADDY_NETWORK` to its name in step 5
+(and in `deploy/authelia/.env`, step 4).
+
+Don't create a new network for the app when you already run Caddy. The app
+would start and report healthy, but Caddy couldn't reach it: both addresses
+would answer 503, and Caddy's log would say `Container is not in same network
+as caddy`.
 
 Check its version too: `docker exec caddy caddy version` (the container's name,
 then the program inside it). Older than v2.11.2 still works, but update it when
@@ -204,21 +217,41 @@ below). To get an email when a daily sync fails or never runs:
    **1 day**, grace **3 hours**.
 2. Put its ping URL in `deploy/.env` as `SCHEDULER_HEARTBEAT_URL=…`, then run
    `docker compose up -d` (no rebuild needed: settings are read at start).
+3. With the feed cycle on (below), add a second check with a period of
+   **30 minutes** and a grace of **1 hour**, as `SCHEDULER_FEEDS_HEARTBEAT_URL=…`.
 
 ## Scheduled syncs
 
 | What | When | Setting |
 | --- | --- | --- |
-| Store pull, GS sync, KicksDB re-pricing, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
+| Store pull, GS sync, KicksDB re-pricing, store sync of the whole store, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
+| GS sync, then store sync of the feed's products | every 30 minutes, if set (off by default) | `SCHEDULER_FEEDS_MINUTES=30` |
 | Recent orders | every 15 minutes | `SCHEDULER_ORDERS_MINUTES` |
+
+**The store sync** writes to WooCommerce only with **`AUTO_SYNC=on`**.
+Without it, the runs refresh the Hub and you apply the changes yourself in
+the Sync tab. When on:
+- **What it writes:** the price and stock changes the Sync tab would apply,
+  manual price locks honored. Only prices and stock: no size cleanup, never
+  a deletion.
+- **The limit:** a run that would change more than `AUTO_SYNC_MAX_CHANGES`
+  variations (default 500) writes nothing, and the Feeds tab says why. Review
+  it in the Sync tab and apply it there: a change that big is a pricing edit
+  or a broken feed.
+- **The record:** every write appears in the Sync tab's history.
+- **Edits in WordPress:** a price changed by hand in WooCommerce is seen at
+  the next store pull (the daily sync). For a product the feed owns, the
+  feed's value wins.
 
 - **A failed step** doesn't stop the others. It is retried an hour later,
   twice at most.
 - **A restart or a deploy** never loses a sync. If the server was down at
   04:30, or that run failed, the sync runs a minute after the next start. A
   deploy after a good run starts nothing.
-- **Every run is kept** in the database (`scheduler_runs`), and the Feeds tab
-  shows the last one.
+- **Every run is kept** in the database (`scheduler_runs`; feed cycles for a
+  week), and the Feeds tab shows the last ones.
+- **Runs never overlap.** A feed cycle skips its turn while another run is
+  going; the daily sync waits for a feed cycle to finish.
 - **Logs:** `docker compose logs app | grep scheduler`.
 
 ## Day to day
@@ -339,9 +372,56 @@ so a shop that needs different ones needs its own branch.
   is missing from `deploy/.env`.
 - **`Invalid environment configuration`** in the app's logs: a value is
   malformed, or a line has nothing after `=`. Comment it out instead.
+- **`network caddy declared as external, but could not be found`:** your Caddy
+  is on a network with another name. Set `CADDY_NETWORK` to that name (step 2)
+  instead of creating a `caddy` network.
+- **Both addresses answer 503 or a blank page, while the app is healthy:** the
+  app is not on Caddy's network, and Caddy's log says `Container is not in same
+  network as caddy`. From `deploy/`, compare the networks and look at the site
+  Caddy generated:
+
+  ```bash
+  docker inspect <caddy-container> --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}'
+  docker inspect $(docker compose ps -q app) --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}'
+  docker exec <caddy-container> cat /config/caddy/Caddyfile.autosave
+  ```
+
+  In the block for your two addresses, a `reverse_proxy` line with no address
+  after it confirms the problem. Set `CADDY_NETWORK` in `deploy/.env` to one
+  of Caddy's networks (step 2), then run `docker compose up -d` (no rebuild
+  needed). Caddy picks the app up within seconds.
 - **No certificate / the browser can't connect:** check that DNS points at the
   VPS, that port 80 is reachable, and that Cloudflare is set to DNS only.
   Caddy's own log says why: `docker logs <caddy-container>`.
+- **Caddy's log says `Timeout during connect (likely firewall problem)`:** Let's
+  Encrypt can't reach the server's IP, usually because a firewall lets only
+  Cloudflare in. Let it come through Cloudflare instead:
+  1. Set both records to Proxied and wait 5 minutes, so the old DNS answer
+     expires everywhere.
+  2. Check the path Let's Encrypt will take:
+
+     ```bash
+     curl -s -o /dev/null -w '%{http_code} via %{remote_ip}\n' http://<hub-host>/.well-known/acme-challenge/check
+     ```
+
+     - `308 via` a Cloudflare address: Caddy answers. Go on to step 3.
+     - `301`: Cloudflare redirects to HTTPS before Caddy can answer. Turn off
+       SSL/TLS → Edge Certificates → **Always Use HTTPS**. Nothing changes for
+       visitors, because Caddy sends every visitor to HTTPS itself.
+     - `521` or `522`: Cloudflare can't reach port 80. Allow port 80 for
+       Cloudflare's IP ranges wherever you allowed 443.
+     - `via` the server's own IP: the record isn't proxied yet, or the old DNS
+       answer is still cached. Wait and run it again.
+  3. Run `docker restart <caddy-container>` (your other sites pause for a few
+     seconds) and wait for `certificate obtained successfully` in its log.
+- **Cloudflare error 525 or 526:** Caddy has no certificate for that address,
+  usually because the records were proxied before Caddy could get one. Set
+  both records to DNS only, run `docker restart <caddy-container>` (your other
+  sites pause for a few seconds), and wait until its log shows
+  `certificate obtained successfully` for both names. Then go back to Proxied
+  (step 9).
+- **`ERR_TOO_MANY_REDIRECTS` through Cloudflare:** the SSL/TLS mode is Flexible.
+  Set it to Full (strict).
 - **502 from Caddy:** the app is still starting, or it stopped:
   `docker compose ps` and `docker compose logs app` show which. If the app is
   fine, Authelia is down: `docker compose ps` in `deploy/authelia`. Sign-in
