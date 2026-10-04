@@ -21,7 +21,8 @@ per server, like Caddy. How it works and how to manage people:
 [docs/auth.md](auth.md).
 
 Everything lives in `deploy/`: `docker-compose.yml` and the settings template
-`.env.example`, and Authelia's in `deploy/authelia/`. The image (`Dockerfile`,
+`.env.example`. Authelia has its own repo,
+[prd-web-eu1-01-authelia](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia), cloned once per server to `/srv/authelia`. The image (`Dockerfile`,
 repo root) applies the pending database migrations every time it starts. The
 scheduled syncs (store pull, feeds, orders) run inside the app, so there is no
 cron to set up.
@@ -68,7 +69,7 @@ docker inspect <caddy-container> --format '{{range .Config.Env}}{{println .}}{{e
 If the last command prints `CADDY_INGRESS_NETWORKS`, use one of the networks
 it lists. If it prints nothing, any network from the second command works.
 If the network isn't called `caddy`, set `CADDY_NETWORK` to its name in step 5
-(and in `deploy/authelia/.env`, step 4).
+(and in `/srv/authelia/.env`, step 4).
 
 Don't create a new network for the app when you already run Caddy. The app
 would start and report healthy, but Caddy couldn't reach it: both addresses
@@ -102,14 +103,12 @@ cd store-hub/deploy
 
 ### 4. Sign-in (Authelia)
 
-Once per server: start Authelia, with the two addresses and the people who may
-open them. Follow [docs/auth.md, "Set up Authelia"](auth.md#set-up-authelia):
-secrets, addresses, people, `docker compose up -d` in `store-hub/deploy/authelia`.
-If Caddy's network is not called `caddy`, first put `CADDY_NETWORK=<its name>`
-in `deploy/authelia/.env`.
+Once per server: install Authelia from its own repo into `/srv/authelia`,
+following [its README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#install), with the two addresses and the people
+who may open them. Never start it from this checkout.
 
-Authelia already running for another shop on this server? Add this shop's
-addresses to it instead ([docs/auth.md, "A second shop"](auth.md#a-second-shop)).
+Authelia already running on this server for another site? Add this shop's
+addresses to it instead ([Protect another site](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#protect-another-site)).
 
 ### 5. Settings
 
@@ -171,7 +170,7 @@ With DNS already pointing here, that takes a few seconds.
 
 - `https://hub.resellpiacenza.shop` → Authelia's sign-in page (on the same
   address, under `/authelia`) → your password and a new device (see
-  [docs/auth.md](auth.md#adding-a-person)) → the Hub with every tab.
+  [Authelia's README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)) → the Hub with every tab.
 - `https://vetrina.resellpiacenza.shop` → its own sign-in → the Vetrina, with
   no link back to the Hub.
 - Signed in with the shop's account, `https://hub.resellpiacenza.shop` answers
@@ -287,9 +286,9 @@ now and then:
 (Create `~/backups` first. In crontab, `%` must be written `\%`.) A dump goes
 back with `pg_restore`, as in step 6.
 
-**People** are managed in Authelia, from `deploy/authelia`: adding someone,
+**People** are managed in Authelia, from `/srv/authelia`: adding someone,
 removing them, a lost phone, a locked account. See
-[docs/auth.md, "Day to day"](auth.md#day-to-day), which also says what to back
+[Authelia's README, "Day to day"](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#day-to-day), which also says what to back
 up there.
 
 Run a single app container per shop: the syncs run inside it, so a second
@@ -299,7 +298,7 @@ copy would run every sync twice.
 
 The labels work with caddy-docker-proxy 2.9 and newer. Moving to the current
 image still brings Caddy's security fixes, CVE-2026-30851 among them (see
-[docs/auth.md](auth.md#1-caddys-version)). How to update depends on how the
+[docs/auth.md](auth.md#caddys-version)). How to update depends on how the
 running container was started:
 
 ```bash
@@ -357,7 +356,7 @@ golden-hive-blocks, next to the first one and behind the same Caddy:
    stacks share one name, and the second `up` replaces the first one's
    containers and uses its database.
 4. Add the two new addresses, and the shop's people, to the Authelia that is
-   already running ([docs/auth.md, "A second shop"](auth.md#a-second-shop)).
+   already running ([Protect another site](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#protect-another-site)).
 5. Add DNS records for the two new names, then `docker compose up -d --build`.
 
 Each stack has its own containers, database and scheduler, and Caddy routes
@@ -424,7 +423,7 @@ so a shop that needs different ones needs its own branch.
   Set it to Full (strict).
 - **502 from Caddy:** the app is still starting, or it stopped:
   `docker compose ps` and `docker compose logs app` show which. If the app is
-  fine, Authelia is down: `docker compose ps` in `deploy/authelia`. Sign-in
+  fine, Authelia is down: `docker compose ps` in `/srv/authelia`. Sign-in
   problems: [docs/auth.md, "Troubleshooting"](auth.md#troubleshooting).
 - **The Feeds tab shows a sync error:** the message names the step (store
   pull, GS sync, ...). The step is retried an hour later. If it keeps

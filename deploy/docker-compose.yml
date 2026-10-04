@@ -1,7 +1,7 @@
 # Store Hub in production, behind caddy-docker-proxy: Caddy reads the labels
 # below and serves both addresses over HTTPS, certificates included. Authelia
-# (deploy/authelia, started once per server) signs people in before any
-# request reaches the app.
+# (once per server, from /srv/authelia: see docs/auth.md) signs people in
+# before any request reaches the app.
 #
 #   cd deploy && cp .env.example .env   # then fill it in
 #   docker compose up -d --build
