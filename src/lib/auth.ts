@@ -1,6 +1,6 @@
 /**
  * Who is signed in, as the app learns it. Signing in is not the app's job: in
- * production Authelia does it, in front of the app (deploy/authelia,
+ * production Authelia does it, in front of the app (prd-web-eu1-01-authelia,
  * docs/auth.md). Caddy checks every request with Authelia and forwards the
  * ones it allows with the person in the Remote-* headers, plus the
  * AUTH_PROXY_SECRET in AUTH_PROXY_HEADER: the proof the request came that way.
@@ -16,8 +16,15 @@ export const AUTH_PROXY_HEADER = "x-auth-proxy-secret";
 /** The identity Authelia answers with, copied onto the request by Caddy. */
 export const IDENTITY_HEADERS = ["remote-user", "remote-groups", "remote-email", "remote-name"] as const;
 
-/** Authelia's sign-out page: its pages are served on every address under /authelia. */
-export const SIGN_OUT_PATH = "/authelia/logout";
+/**
+ * The app's own sign-in page (src/app/sign-in). Browsers see it at /authelia/,
+ * where Authelia sends anyone without a session: Caddy rewrites that path to
+ * this one.
+ */
+export const SIGN_IN_PATH = "/sign-in";
+
+/** Sign out: the sign-in page ends the session with Authelia, then offers the form again. */
+export const SIGN_OUT_PATH = "/authelia/?signout=1";
 
 /** Constant-time comparison: how long it takes does not tell how much of the secret matched. */
 export function secretMatches(candidate: string | null, secret: string): boolean {

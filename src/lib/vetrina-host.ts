@@ -24,7 +24,7 @@ export function requestHost(headers: { get(name: string): string | null }): stri
  * What the Vetrina host serves: its home ("/" is the Vetrina), the Vetrina's
  * pages, and the home-screen app's install files. Everything else — the
  * operator tabs, the API, the cron endpoints — stays on the Hub's own address.
- * (The sign-in pages are Authelia's, under /authelia: Caddy sends those there.)
+ * (Signing in happens under /authelia, which Caddy routes before the app.)
  */
 export function servedOnVetrinaHost(pathname: string, installFiles: ReadonlySet<string>): boolean {
   return (

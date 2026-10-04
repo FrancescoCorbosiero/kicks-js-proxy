@@ -148,6 +148,22 @@ describe("the sign-in, done by Authelia in front of the app", () => {
     }
   });
 
+  it("serves the sign-in page without a session on both addresses, but only through Caddy", async () => {
+    process.env.VETRINA_HOST = VETRINA;
+    process.env.AUTH_PROXY_SECRET = SECRET;
+
+    for (const host of [HUB, VETRINA]) {
+      const page = await proxy(proxied(host, "/sign-in?rd=https%3A%2F%2Fx%2F", { secret: SECRET }));
+      expect(passed(page)).toBe(true);
+      expect(rewrittenTo(page)).toBeNull(); // not the Vetrina, not redirected home
+      expect((await proxy(proxied(host, "/sign-in", {}))).status).toBe(403);
+    }
+
+    // Nobody is signed in on it: an identity sent along is dropped.
+    const forged = await proxy(proxied(HUB, "/sign-in", { secret: SECRET, user: "operator" }));
+    expect(forwardedHeaders(forged)).not.toContain("remote-user");
+  });
+
   it("answers the container's health check, which calls the app directly", async () => {
     process.env.AUTH_PROXY_SECRET = SECRET;
     const res = await proxy(new NextRequest("http://127.0.0.1:3000/api/health"));

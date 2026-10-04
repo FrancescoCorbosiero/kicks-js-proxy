@@ -7,16 +7,16 @@ addresses over HTTPS, certificates included:
 
 | Address | What it serves | Who can open it |
 | --- | --- | --- |
-| `HUB_HOST` (e.g. `hub.resellpiacenza.shop`) | the operator Hub, every tab | operators |
-| `VETRINA_HOST` (e.g. `vetrina.resellpiacenza.shop`) | the Vetrina only, at `/` | the shop's people and operators |
+| `HUB_HOST` (e.g. `hub.resellpiacenza.shop`) | the Hub, every tab | the shop's account and the admin |
+| `VETRINA_HOST` (e.g. `vetrina.resellpiacenza.shop`) | the Vetrina only, at `/` | the shop's account and the admin |
 
 Same app, same container. The app tells the two addresses apart by the Host
 header, which Caddy passes through.
 
 Nobody reaches either address without signing in to
 [Authelia](https://www.authelia.com), which Caddy asks about every request:
-each person has their own account with a second factor (a passkey or an
-authenticator app), and each address keeps its own session. Authelia runs once
+each person has their own account (name and password), and each address
+keeps its own session. Authelia runs once
 per server, like Caddy. How it works and how to manage people:
 [docs/auth.md](auth.md).
 
@@ -168,13 +168,13 @@ With DNS already pointing here, that takes a few seconds.
 
 ### 8. Check
 
-- `https://hub.resellpiacenza.shop` → Authelia's sign-in page (on the same
-  address, under `/authelia`) → your password and a new device (see
-  [Authelia's README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)) → the Hub with every tab.
+- `https://hub.resellpiacenza.shop` → the sign-in page (on the same
+  address, under `/authelia`) → your account's name (not its email) and
+  password (see [Authelia's README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)) → the Hub with every tab.
 - `https://vetrina.resellpiacenza.shop` → its own sign-in → the Vetrina, with
   no link back to the Hub.
-- Signed in with the shop's account, `https://hub.resellpiacenza.shop` answers
-  **403**: the shop opens the Vetrina only.
+- In a private window, the shop's account opens both addresses, and another
+  shop's addresses answer **403** to it.
 - `https://vetrina.resellpiacenza.shop/catalog` → sends you back to the Vetrina.
 - In the Vetrina, open a section: its products load from the live site.
 - Hub → Feeds: the *Sincronizzazione automatica* card shows the next run, the

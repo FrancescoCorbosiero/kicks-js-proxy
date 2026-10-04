@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_PROXY_HEADER, IDENTITY_HEADERS, secretMatches } from "@/lib/auth";
+import { AUTH_PROXY_HEADER, IDENTITY_HEADERS, SIGN_IN_PATH, secretMatches } from "@/lib/auth";
 import { isVetrinaHost, requestHost, servedOnVetrinaHost } from "@/lib/vetrina-host";
 
 /**
@@ -14,7 +14,8 @@ import { isVetrinaHost, requestHost, servedOnVetrinaHost } from "@/lib/vetrina-h
  * - a page that arrives without Remote-User was not checked by Authelia (a
  *   proxy config that lost its forward_auth) and is refused, not served open.
  *
- * Without a session: the home-screen app's install files (Authelia lets them
+ * Without a session: the sign-in page (SIGN_IN_PATH, which Caddy serves at
+ * /authelia/), the home-screen app's install files (Authelia lets them
  * through, see PUBLIC_APP_FILES) and /api/cron/* (headless schedulers send
  * CRON_SECRET instead). Without the secret either: /api/health, the
  * container's health check, which calls the app directly. Unset secret =
@@ -37,7 +38,7 @@ import { isVetrinaHost, requestHost, servedOnVetrinaHost } from "@/lib/vetrina-h
  * The install files of the home-screen app. Browsers fetch the manifest
  * without cookies, so behind the sign-in it would be a redirect and the app
  * would not install. They hold no data: a name, a start page, an icon.
- * Authelia's bypass rule in deploy/authelia lists the same files.
+ * Authelia's bypass rule (prd-web-eu1-01-authelia) lists the same files.
  */
 const PUBLIC_APP_FILES = new Set(["/manifest.webmanifest", "/icon", "/apple-icon"]);
 
@@ -99,7 +100,7 @@ export async function proxy(req: NextRequest) {
   }
 
   const onVetrina = isVetrinaHost(requestHost(req.headers), process.env.VETRINA_HOST);
-  if (onVetrina && !servedOnVetrinaHost(pathname, PUBLIC_APP_FILES)) {
+  if (onVetrina && !servedOnVetrinaHost(pathname, PUBLIC_APP_FILES) && pathname !== SIGN_IN_PATH) {
     // An operator page asked on the Vetrina's address: back to the Vetrina.
     // Anything else (the API, a form post) simply does not exist here.
     if (req.method === "GET" || req.method === "HEAD") {
@@ -108,7 +109,8 @@ export async function proxy(req: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  const anonymous = health || PUBLIC_APP_FILES.has(pathname) || pathname.startsWith("/api/cron/");
+  const anonymous =
+    health || pathname === SIGN_IN_PATH || PUBLIC_APP_FILES.has(pathname) || pathname.startsWith("/api/cron/");
   if (!secret || anonymous) return pass(req, onVetrina, false);
 
   if (!req.headers.get("remote-user")) {
