@@ -236,6 +236,40 @@ body::after {
 }
 .spin { animation: kx-spin 0.7s linear infinite; }
 
+/* ----- The dock (components/JourneyDock.tsx) ------------------------------ */
+.dock-surface {
+  box-shadow:
+    var(--shadow-pop),
+    inset 0 1px 0 color-mix(in oklab, #fff 8%, transparent);
+}
+.dark .dock-surface {
+  box-shadow:
+    0 24px 60px -18px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 color-mix(in oklab, #fff 6%, transparent);
+}
+@keyframes kx-dock-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-dock-in { animation: kx-dock-in 0.7s var(--ease-spring) 0.1s both; }
+/* "You are here": the gold blob, with a soft glow of its own colour. */
+.dock-here {
+  box-shadow: 0 6px 18px -6px color-mix(in oklab, var(--accent) 70%, transparent);
+}
+/* A stretch of the path filling with gold as it is walked. */
+.dock-segment {
+  transition: transform 0.32s var(--ease-spring);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 80%, transparent);
+}
+/* Work waiting at a station: a slow breath, not a blink. */
+@keyframes kx-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 45%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 0%, transparent); }
+}
+.dock-waiting { animation: kx-breathe 2.6s ease-in-out infinite; }
+/* A pull in flight: the sync arrows turn. */
+.dock-busy { animation: kx-spin 1.6s linear infinite; color: var(--accent-text); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;

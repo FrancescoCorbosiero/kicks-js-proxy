@@ -143,6 +143,19 @@ export async function listOrders(): Promise<OrderView[]> {
   return orders.map((o) => toView(o, byId.get(o.id) ?? null));
 }
 
+/**
+ * Orders still to fulfil (local status new or processing) — the dock's badge.
+ * An order the operator hasn't touched yet has no workflow row and counts as new.
+ */
+export async function countOpenOrders(): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(storeOrders)
+    .leftJoin(orderWorkflow, eq(orderWorkflow.orderId, storeOrders.id))
+    .where(sql`coalesce(${orderWorkflow.status}, 'new') in ('new', 'processing')`);
+  return rows[0]?.n ?? 0;
+}
+
 /** True when the order exists in the snapshot (workflow writes require it). */
 export async function orderExists(orderId: number): Promise<boolean> {
   const rows = await db

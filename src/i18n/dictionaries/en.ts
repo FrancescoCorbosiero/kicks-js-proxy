@@ -8,7 +8,6 @@ export const en: Dictionary = {
       "The bridge between the WooCommerce store and its price lists: full inventory, prices and sync",
   },
   header: {
-    tagline: "WooCommerce · price lists · prices",
     navVetrina: "Showcase",
     navDashboard: "Overview",
     navCatalog: "Catalog",
@@ -19,9 +18,50 @@ export const en: Dictionary = {
     navImport: "Import",
     navTaxonomies: "Taxonomies",
     navFeeds: "Feeds",
-    internalTool: "internal tool",
     toggleTheme: "Toggle theme",
     language: "Language",
+  },
+  dock: {
+    label: "Path",
+    step: (n, of) => `Step ${n} of ${of}`,
+    homeHint: "Everything at a glance. The path starts here.",
+    importHint: "Add SKUs to the catalog, by hand or from a file.",
+    catalogHint: (n) =>
+      n == null ? "The whole inventory in one place." : `${n} products in the catalog.`,
+    publishHint: (n) =>
+      n == null
+        ? "Create the products you have in the catalog on the store."
+        : n === 0
+          ? "The whole catalog is already on the store."
+          : n === 1
+            ? "1 product ready to create on the store."
+            : `${n} products ready to create on the store.`,
+    syncHint: (ago) =>
+      ago == null ? "Keep the store's prices and stock aligned." : `Last sync: ${ago}.`,
+    syncPulling: "Downloading the store…",
+    vetrinaHint: "The store's homepage: sections and featured products.",
+    ordersHint: (n) =>
+      n == null
+        ? "The store's orders, from processing to shipping."
+        : n === 0
+          ? "No orders waiting."
+          : n === 1
+            ? "1 order to fulfil."
+            : `${n} orders to fulfil.`,
+    ago: (minutes) =>
+      minutes < 1
+        ? "just now"
+        : minutes < 60
+          ? `${minutes} min ago`
+          : minutes < 60 * 24
+            ? `${Math.floor(minutes / 60)} h ago`
+            : `${Math.floor(minutes / (60 * 24))} d ago`,
+    setup: "Setup",
+    setupDesc: "Set once, rarely touched.",
+    marginsHint: "Pricing rules and markups.",
+    taxonomiesHint: "Categories and identity fields on the store.",
+    feedsHint: "The sources that feed the catalog.",
+    preferences: "Preferences",
   },
   dashboard: {
     title: "Overview",

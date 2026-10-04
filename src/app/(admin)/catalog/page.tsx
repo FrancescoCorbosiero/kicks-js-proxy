@@ -199,7 +199,7 @@ export default async function CatalogPage({
       <div className="flex items-start gap-6">
         {/* Category sidebar (desktop): the silhouette tree, not brands. */}
         {categoryTree.length > 0 && (
-          <aside className="sticky top-20 hidden w-52 shrink-0 lg:block">
+          <aside className="sticky top-6 hidden w-52 shrink-0 lg:block">
             <div className="rounded-xl border border-line bg-surface p-2 shadow-xs">
               <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t.discovery.categories}

@@ -1,53 +1,23 @@
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { MainNav } from "@/components/MainNav";
-import { getServerDictionary } from "@/i18n/server";
+import { JourneyDock } from "@/components/JourneyDock";
 import { SIGN_OUT_PATH, signedInUser } from "@/lib/auth";
 
-/** The operator area: every tab of the Hub under one header. */
+/**
+ * The operator area: every page of the Hub, and the dock that walks them as
+ * one path. No top bar — the page's own title says where you are, the dock
+ * says where you are on the way.
+ */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  const { t } = await getServerDictionary();
   // Who Authelia signed in; nobody in local development, so no sign-out there.
   const user = signedInUser(await headers());
 
   return (
-    <>
-      <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur-sm">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
-          <a href="/" className="group flex items-center gap-2.5">
-            <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent font-extrabold text-accent-fg shadow-[0_4px_12px_-6px] shadow-accent/35 transition-transform group-hover:scale-105">
-              S
-            </span>
-            <span className="flex flex-col leading-none">
-              <span className="text-[13.5px] font-semibold tracking-tight">Store Hub</span>
-              <span className="text-[10.5px] font-medium text-faint">{t.header.tagline}</span>
-            </span>
-          </a>
-
-          <MainNav />
-
-          <div className="ml-auto flex items-center gap-2">
-            <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-muted lg:inline-flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-down" />
-              {t.header.internalTool}
-            </span>
-            <LanguageSwitcher />
-            <ThemeToggle />
-            {user && (
-              <a
-                href={SIGN_OUT_PATH}
-                title={t.account.signedInAs(user.name)}
-                className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-              >
-                {t.account.logout}
-              </a>
-            )}
-          </div>
-        </div>
-      </header>
+    // --dock-clearance: what bottom-sticky bars inside the pages add to their
+    // offset so they ride above the dock instead of under it.
+    <div className="pb-28 [--dock-clearance:5.5rem]">
       {children}
-    </>
+      <JourneyDock signOut={user ? { href: SIGN_OUT_PATH, name: user.name } : null} />
+    </div>
   );
 }

@@ -15,7 +15,6 @@ export const it = {
       "Il ponte tra il negozio WooCommerce e i listini: inventario completo, prezzi e sincronizzazione",
   },
   header: {
-    tagline: "WooCommerce · listini · prezzi",
     navVetrina: "Vetrina",
     navDashboard: "Panoramica",
     navCatalog: "Catalogo",
@@ -26,9 +25,50 @@ export const it = {
     navImport: "Importa",
     navTaxonomies: "Tassonomie",
     navFeeds: "Feed",
-    internalTool: "strumento interno",
     toggleTheme: "Cambia tema",
     language: "Lingua",
+  },
+  dock: {
+    label: "Percorso",
+    step: (n: number, of: number) => `Passo ${n} di ${of}`,
+    homeHint: "Lo stato di tutto, in un colpo d'occhio. Da qui parte il percorso.",
+    importHint: "Aggiungi SKU al catalogo, a mano o da file.",
+    catalogHint: (n: number | null) =>
+      n == null ? "Tutto l'inventario in un posto solo." : `${n} prodotti a catalogo.`,
+    publishHint: (n: number | null) =>
+      n == null
+        ? "Crea sul negozio i prodotti che hai a catalogo."
+        : n === 0
+          ? "Tutto il catalogo è già sul negozio."
+          : n === 1
+            ? "1 prodotto pronto da creare sul negozio."
+            : `${n} prodotti pronti da creare sul negozio.`,
+    syncHint: (ago: string | null) =>
+      ago == null ? "Allinea prezzi e giacenze del negozio." : `Ultima sincronizzazione: ${ago}.`,
+    syncPulling: "Scaricamento del negozio in corso…",
+    vetrinaHint: "La homepage del negozio: sezioni e prodotti in evidenza.",
+    ordersHint: (n: number | null) =>
+      n == null
+        ? "Gli ordini del negozio, dalla lavorazione alla spedizione."
+        : n === 0
+          ? "Nessun ordine in attesa."
+          : n === 1
+            ? "1 ordine da evadere."
+            : `${n} ordini da evadere.`,
+    ago: (minutes: number) =>
+      minutes < 1
+        ? "adesso"
+        : minutes < 60
+          ? `${minutes} min fa`
+          : minutes < 60 * 24
+            ? `${Math.floor(minutes / 60)} h fa`
+            : `${Math.floor(minutes / (60 * 24))} g fa`,
+    setup: "Configurazione",
+    setupDesc: "Si imposta una volta, si tocca di rado.",
+    marginsHint: "Le regole di prezzo e i ricarichi.",
+    taxonomiesHint: "Categorie e campi identità sul negozio.",
+    feedsHint: "Le sorgenti che alimentano il catalogo.",
+    preferences: "Preferenze",
   },
   dashboard: {
     title: "Panoramica",

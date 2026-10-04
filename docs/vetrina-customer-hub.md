@@ -436,8 +436,9 @@ export default defineHubConfig({
   ui: {
     landing: "/vetrina",
     theme: "ios",                         // "ios" | "material"
-    // Tabs in the nav. Leaning the old UI = removing entries here.
-    nav: ["/vetrina", "/vetrina/margini", "/orders", "/catalog", "/pricing", "/sync"],
+    // The dock: the guided path, in order, and the set-up-once pages.
+    journey: ["/import", "/catalog", "/publish", "/sync", "/vetrina", "/orders"],
+    setup: ["/pricing", "/taxonomies", "/feeds"],
   },
   vetrina: {
     page: "front",                        // or { id: 123 }

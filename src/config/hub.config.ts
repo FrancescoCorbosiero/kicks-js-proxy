@@ -10,7 +10,8 @@ import { defineHubConfig } from "./schema";
 export default defineHubConfig({
   ui: {
     landing: "/vetrina",
-    nav: ["/vetrina", "/", "/catalog", "/orders", "/pricing", "/sync", "/publish", "/import", "/taxonomies", "/feeds"],
+    journey: ["/import", "/catalog", "/publish", "/sync", "/vetrina", "/orders"],
+    setup: ["/pricing", "/taxonomies", "/feeds"],
   },
 
   vetrina: {

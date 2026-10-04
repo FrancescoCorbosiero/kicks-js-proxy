@@ -53,7 +53,7 @@ export function ExportBar({ selections, kicksdbVariationIds, previewedProductIds
   }
 
   return (
-    <div className="sticky bottom-4 z-20 rounded-xl border border-line-strong bg-elevated/90 p-3.5 shadow-pop backdrop-blur-xl">
+    <div className="sticky bottom-[calc(var(--dock-clearance,0px)+1rem)] z-20 rounded-xl border border-line-strong bg-elevated/90 p-3.5 shadow-pop backdrop-blur-xl">
       <div className="flex flex-wrap items-center gap-3">
         <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/15 text-accent-text">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-[18px] w-[18px]">
