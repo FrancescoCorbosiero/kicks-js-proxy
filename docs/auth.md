@@ -1,22 +1,28 @@
 # Sign-in: Authelia in front of the Hub and the Vetrina
 
 The app has no login of its own. [Authelia](https://www.authelia.com) signs
-people in before any request reaches it. Everyone has their own account, with
-a password and a second factor: a passkey (Face ID, a fingerprint, a security
-key) or an authenticator app. Each account opens only its own addresses:
+people in before any request reaches it. Everyone has their own account and
+signs in with its name (not the email) and password. Five wrong passwords lock
+that name for 15 minutes. Each account opens only its own shop:
 
-| Address | Who can open it |
-| --- | --- |
-| `HUB_HOST` (the Hub, every tab) | operators (group `operators`) |
-| `VETRINA_HOST` (the Vetrina) | the shop's own people (group `resellpiacenza`) and operators |
+| Account | Authelia group | Opens |
+| --- | --- | --- |
+| the admin | `operators` | every shop's Hub and Vetrina |
+| a shop's account | the shop's group, e.g. `resellpiacenza` | that shop's `HUB_HOST` and `VETRINA_HOST`, nothing of another shop |
+
+Authelia can also ask for a second factor (an authenticator app or a passkey),
+for the admin only or for everyone. It's off; turning it on takes a few lines
+of its settings ([its README, "A second factor"](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#a-second-factor-optional)).
 
 This replaces the shared password (`APP_PASSWORD`), which opened both
-addresses, every Hub tab included, for anyone who knew it. To switch a running
+addresses, every Hub tab included, for anyone who knew it, and the same for
+every shop that used it. To switch a running
 server over, see [Moving from the shared password](#moving-from-the-shared-password).
 
 ## Why Authelia, not Authentik
 
-Both do forward auth with Caddy, passkeys and authenticator apps. For one VPS,
+Both do forward auth with Caddy, and both can add passkeys and authenticator
+apps. For one VPS,
 a handful of people and caddy-docker-proxy, Authelia is the lighter fit:
 
 | | Authelia | Authentik |
@@ -65,10 +71,10 @@ same login.
    - **200**, with the person in `Remote-User`, `Remote-Groups`, `Remote-Name`
      and `Remote-Email`: Caddy forwards the request.
    - **A redirect to its sign-in page** on the same address, with the page that
-     was asked for in `rd`: not signed in yet, or the second factor is missing.
+     was asked for in `rd`: not signed in yet.
      After signing in, the browser lands back on that page.
-   - **403**: signed in, but this address is not theirs (the shop's account on
-     the Hub).
+   - **403**: signed in, but this address is not theirs (one shop's account on
+     another shop's address).
 4. Caddy sets Authelia's `Remote-*` headers, adds `X-Auth-Proxy-Secret`
    (`AUTH_PROXY_SECRET` from `deploy/.env`), and passes the request to the app.
 5. The app checks both ([src/proxy.ts](../src/proxy.ts)). Without the right
@@ -101,9 +107,10 @@ instead:
   it.
 - **Keeps what you had:** each address signs in on its own.
 
-The cost: an operator signs in on the Hub and on the Vetrina separately, and a
-passkey belongs to the address it was registered on, so they register one on
-each. An authenticator app's codes work on both.
+The cost: each address asks once. Signed in on the Hub is not signed in on
+the Vetrina, and a session can belong to a different account on each address.
+To try another account, use a private window, or sign out first at
+`/authelia/logout` on that address.
 
 ## What is where
 
@@ -158,11 +165,12 @@ Check, in a private window:
 
 - `https://<HUB_HOST>` shows Authelia's sign-in page, at
   `https://<HUB_HOST>/authelia/`.
-- Signed in with the shop's account, `https://<VETRINA_HOST>` opens the
-  Vetrina, and `https://<HUB_HOST>` answers **403**.
-- Signed in as an operator, both open (each address asks once).
+- Signed in with the shop's account, both `https://<HUB_HOST>` and
+  `https://<VETRINA_HOST>` open (each address asks once). Another shop's
+  addresses answer **403** to it.
+- Signed in as the admin, both open too.
 
-People, their devices and bans are managed in Authelia's repo, on the server in
+People and bans are managed in Authelia's repo, on the server in
 `/srv/authelia` ([its README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)).
 
 ## External scheduler
@@ -177,7 +185,7 @@ carry `CRON_SECRET`, not a session.
 On a server that runs the Hub with `APP_PASSWORD`:
 
 1. [Install Authelia](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#install) in `/srv/authelia`, with yourself in
-   `operators` and the shop's account in its group. Check each with
+   `operators` and the shop's account in the shop's group. Check each with
    `bin/check-login <name>`. Until step 3 the old password still guards the
    app.
 2. In the shop's checkout, `git pull`; the running app is untouched until it
@@ -185,22 +193,26 @@ On a server that runs the Hub with `APP_PASSWORD`:
 3. In `deploy/.env`, delete the `APP_PASSWORD` line (or comment it out, to roll
    back later) and add `AUTH_PROXY_SECRET`.
 4. From `deploy/`, run `docker compose up -d --build`.
-5. Everyone signs in once and registers a device. Sessions of the old password
-   stop working.
+5. Everyone signs in once with their own name and password. Sessions of the
+   old password stop working.
 
 Until `AUTH_PROXY_SECRET` is in `deploy/.env`, `docker compose up` refuses to
 start, and the running app is left as it is.
 
 ## Troubleshooting
 
-- **Someone can't sign in:** on the server, `cd /srv/authelia && bin/check-login
-  <name>`. It checks the name, the password against its hash, bans and
-  Authelia's logs.
+- **Someone can't sign in:** first, the name is the account's key in
+  `users.yml`, not its email. Then, on the server, `cd /srv/authelia &&
+  bin/check-login <name>`. It checks the name, the password against its hash,
+  bans and Authelia's logs.
 - **502 on every page:** Authelia is not running, or not on Caddy's network.
   Check `docker compose ps` in `/srv/authelia`; `docker compose logs authelia`
   says why it stopped.
-- **403 after signing in:** that account's groups don't open this address
-  (`access_control`). On the Hub, for the shop's account, that is intended.
+- **403 after signing in:** the account signed in on this address doesn't
+  open it. `docker compose logs authelia | grep forbidden` in `/srv/authelia`
+  names it. Often it's another account still signed in on that address: sign
+  out at `/authelia/logout` and sign in again. Otherwise, its group in
+  `users.yml` doesn't match the shop's rule in Authelia's settings.
 - **A plain "Forbidden", and the app's log says `came through Caddy without a
   user`:** the `forward_auth` labels are missing from the app's container.
   Compare them with `deploy/docker-compose.yml`.

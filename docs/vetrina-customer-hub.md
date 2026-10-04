@@ -183,9 +183,12 @@ v0 proposed a second password on the same login page, about 40 lines. It's dropp
 - `/vetrina` becomes the landing page.
 - The tabs shown in the nav come from code config. That config is how the old UI gets
   progressively leaner.
-- Residual risk, since closed: with the shared password, anyone who had it could open
-  `/sync` by typing the URL. Sign-in is now per person, with Authelia
-  ([auth.md](auth.md)), and the customer's account opens the Vetrina's address only.
+- Residual risk: with the shared password, anyone who had it could open `/sync` by
+  typing the URL. Sign-in is now per person, with Authelia ([auth.md](auth.md)),
+  and the shop's account opens its own Hub as well as the Vetrina, by choice: the
+  shop can still reach every Hub tab, its own shop's only. To shut the shop out
+  of the Hub again, limit the Hub's address to `group:operators` in Authelia's
+  settings.
 
 ---
 
