@@ -168,7 +168,7 @@ With DNS already pointing here, that takes a few seconds.
 
 ### 8. Check
 
-- `https://hub.resellpiacenza.shop` → Authelia's sign-in page (on the same
+- `https://hub.resellpiacenza.shop` → the sign-in page (on the same
   address, under `/authelia`) → your account's name (not its email) and
   password (see [Authelia's README](https://github.com/FrancescoCorbosiero/prd-web-eu1-01-authelia#add-a-person)) → the Hub with every tab.
 - `https://vetrina.resellpiacenza.shop` → its own sign-in → the Vetrina, with

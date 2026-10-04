@@ -46,9 +46,21 @@ services:
       # One site, both addresses. Caddy passes the Host header through and the
       # app tells the Hub from the Vetrina by it.
       caddy: ${HUB_HOST:?set HUB_HOST in deploy/.env}, ${VETRINA_HOST}
-      # Authelia's sign-in pages, on each address under /authelia.
-      caddy.handle_0: /authelia*
-      caddy.handle_0.reverse_proxy: authelia:9091
+      # Signing in, on each address under /authelia (docs/auth.md):
+      # - /authelia/ is the sign-in page, where Authelia sends anyone without a
+      #   session: the app's own (src/app/sign-in), in the Hub's look. It posts
+      #   to Authelia's API below, which checks the password and sets the
+      #   session. No session needed, but still the secret: only Caddy may ask.
+      # - the rest of /authelia/ is Authelia: its API, and its own pages
+      #   (settings, a second factor if one is ever required).
+      # Caddy tries the exact /authelia/ before /authelia/* on every version.
+      caddy.redir: /authelia /authelia/ 308
+      caddy.handle_0: /authelia/
+      caddy.handle_0.rewrite: "* /sign-in"
+      caddy.handle_0.reverse_proxy: "{{upstreams 3000}}"
+      caddy.handle_0.reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
+      caddy.handle_1: /authelia/*
+      caddy.handle_1.reverse_proxy: authelia:9091
       # Everything else, in this order (the route keeps it):
       # 0. drop every Remote-* header the visitor sent: only Authelia says who
       #    someone is. Caddy 2.11.2 and newer do this in forward_auth; older
@@ -58,12 +70,12 @@ services:
       #    signed in (Remote-*). Authelia down → 502: nothing gets through
       #    unchecked.
       # 2. on to the app, with the secret that tells it the request came this way.
-      caddy.handle_1.route.0_request_header: "-Remote-*"
-      caddy.handle_1.route.1_forward_auth: authelia:9091
-      caddy.handle_1.route.1_forward_auth.uri: /api/authz/forward-auth
-      caddy.handle_1.route.1_forward_auth.copy_headers: Remote-User Remote-Groups Remote-Email Remote-Name
-      caddy.handle_1.route.2_reverse_proxy: "{{upstreams 3000}}"
-      caddy.handle_1.route.2_reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
+      caddy.handle_2.route.0_request_header: "-Remote-*"
+      caddy.handle_2.route.1_forward_auth: authelia:9091
+      caddy.handle_2.route.1_forward_auth.uri: /api/authz/forward-auth
+      caddy.handle_2.route.1_forward_auth.copy_headers: Remote-User Remote-Groups Remote-Email Remote-Name
+      caddy.handle_2.route.2_reverse_proxy: "{{upstreams 3000}}"
+      caddy.handle_2.route.2_reverse_proxy.header_up: X-Auth-Proxy-Secret ${AUTH_PROXY_SECRET}
     logging: *logging
 
   postgres:
