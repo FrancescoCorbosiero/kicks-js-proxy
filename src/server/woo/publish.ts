@@ -184,9 +184,10 @@ export type PublishTarget = Pick<
  * live per-SKU check at publish time is what keeps that from creating a
  * duplicate parent.
  */
-export async function listPublishTargets(query: PublishQuery = {}): Promise<
-  PublishPage<PublishTarget> & { hasSnapshot: boolean }
-> {
+export async function listPublishTargets(
+  query: PublishQuery = {},
+  limit?: number,
+): Promise<PublishPage<PublishTarget> & { hasSnapshot: boolean }> {
   const config = await getActiveConfig();
   // The SKU set and the "is there a snapshot at all" flag, WITHOUT the blob:
   // this runs on every render of the tab, including the one that follows each
@@ -213,8 +214,20 @@ export async function listPublishTargets(query: PublishQuery = {}): Promise<
       onStore: storeSkus.has(skuKey(r.sku)),
     })),
     query,
+    limit,
   );
   return { ...page, hasSnapshot: info != null };
+}
+
+/**
+ * Every SKU the filters match — the whole pool, not the page the list shows.
+ * "Select all" means all: the list stops at PAGE_LIMIT rows to keep the page
+ * light, but the operator selecting everything wants everything, and a SKU
+ * is a few bytes where a rendered row is not.
+ */
+export async function listPublishTargetSkus(query: PublishQuery = {}): Promise<string[]> {
+  const page = await listPublishTargets(query, Number.MAX_SAFE_INTEGER);
+  return page.candidates.map((c) => c.sku);
 }
 
 /**
