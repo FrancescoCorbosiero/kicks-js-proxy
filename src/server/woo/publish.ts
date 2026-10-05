@@ -4,6 +4,7 @@ import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getActiveConfig } from "@/server/config/repo";
 import {
   getSnapshotInfo,
+  listSizelessStoreSkus,
   listStoreSkus,
   upsertSnapshotProducts,
 } from "@/server/store-json/repo";
@@ -28,7 +29,7 @@ import {
 } from "./publish-plan";
 import { buildIdentityResolver } from "./identity";
 import { toStoreProduct } from "./store-product";
-import { getWooClient, type WooClient } from "./client";
+import { getWooClient, type WooClient, type WooRestProduct, type WooRestVariation } from "./client";
 import { withTaxonomyCache } from "./taxonomy-cache";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
@@ -49,7 +50,12 @@ import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
  * be undone by running the tool again.
  */
 
-export type PublishAction = "create" | "reimport" | "skip";
+/**
+ * "complete": the product is on the store WITHOUT a single size — a publish
+ * that broke half-way (the parent was created, its sizes never were). It
+ * sells nothing, so it is not "already published": it gets its sizes.
+ */
+export type PublishAction = "create" | "reimport" | "complete" | "skip";
 
 /**
  * Why a product was left alone. A CODE, not a sentence: these are shown to a
@@ -92,6 +98,7 @@ export interface PublishOutcome {
   products: PublishProductReport[];
   created: number; // parent products created
   reimported: number; // existing parents refreshed
+  completed: number; // parents on the store without sizes, given their sizes
   variations: number; // variations created
   skipped: number;
   failed: number;
@@ -109,6 +116,52 @@ export interface PublishOptions {
   force?: boolean;
   /** On a force reimport, re-sideload the images (off = keep the store's). */
   replaceMedia?: boolean;
+}
+
+/** No usable answer came back: a timeout, a dropped connection, a gateway error. */
+function answerLost(e: unknown): boolean {
+  const status = (e as { status?: number })?.status;
+  return status == null || status >= 500;
+}
+
+/** WooCommerce refused the SKU as already taken. */
+function skuTaken(e: unknown): boolean {
+  const err = e as { status?: number; body?: string; message?: string };
+  return err?.status === 400 && /product_invalid_sku/.test(err.body ?? err.message ?? "");
+}
+
+/**
+ * Create the parent — or find it, when the create's answer cannot be trusted.
+ *
+ * A lost answer (a timeout, Cloudflare's 524 after 100 s) usually means
+ * WordPress went on and created the product anyway; "SKU already used" right
+ * after a lookup that found nothing means the same thing seen from the other
+ * side. Either way the SKU is looked up again before anything is called a
+ * failure, and a product found is carried on with — given its sizes — instead
+ * of being left on the shop with none.
+ */
+async function createOrAdopt(
+  client: WooClient,
+  sku: string,
+  body: Record<string, unknown>,
+  identity: Parameters<typeof withoutIdentity>[1],
+  identityRejected: Set<string>,
+): Promise<{ product: WooRestProduct; adopted: boolean }> {
+  try {
+    try {
+      return { product: await client.createProduct(body), adopted: false };
+    } catch (e) {
+      const field = identityRejection(e);
+      if (!field) throw e;
+      identityRejected.add(field);
+      return { product: await client.createProduct(withoutIdentity(body, identity)), adopted: false };
+    }
+  } catch (e) {
+    if (!answerLost(e) && !skuTaken(e)) throw e;
+    const found = (await client.findProductsBySku(sku))[0];
+    if (!found) throw e;
+    return { product: found, adopted: true };
+  }
 }
 
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -172,7 +225,11 @@ export type PublishTarget = Pick<
   | "secondaryCategory"
   | "minAsk"
   | "variantCount"
-> & { onStore: boolean };
+> & {
+  onStore: boolean;
+  /** On the store, but without a single size: listed again, completed by the run. */
+  sizeless: boolean;
+};
 
 /**
  * Every catalog product the Publisher can act on, flagged with whether the
@@ -194,9 +251,10 @@ export async function listPublishTargets(
   // this runs on every render of the tab, including the one that follows each
   // publish call, and deserializing the whole store to ask "does it have X"
   // is how the dev server ran out of heap.
-  const [info, storeSkus, rows] = await Promise.all([
+  const [info, storeSkus, sizeless, rows] = await Promise.all([
     getSnapshotInfo().catch(() => null),
     listStoreSkus(),
+    listSizelessStoreSkus(),
     listPublishCandidates(config.source.market),
   ]);
   // Filtered and sliced HERE: the whole delta stays on the server, and only a
@@ -212,7 +270,9 @@ export async function listPublishTargets(
       secondaryCategory: r.secondaryCategory,
       minAsk: r.minAsk,
       variantCount: r.variantCount,
-      onStore: storeSkus.has(skuKey(r.sku)),
+      // A product with no sizes sells nothing: not published yet.
+      onStore: storeSkus.has(skuKey(r.sku)) && !sizeless.has(skuKey(r.sku)),
+      sizeless: sizeless.has(skuKey(r.sku)),
     })),
     query,
     limit,
@@ -318,6 +378,7 @@ async function publishClaimed(
       });
   let created = 0;
   let reimported = 0;
+  let completed = 0;
   let variations = 0;
 
   await forEachLimit(uniqueSkus, 3, async (sku) => {
@@ -399,27 +460,31 @@ async function publishClaimed(
       // a SKU the store already has is the one unrecoverable mistake here.
       const existing = await client.findProductsBySku(sku);
       const onStore = existing[0] ?? null;
+      // What it has. Null when unreadable right now: then it counts as
+      // published, and nothing is filed for it — a product recorded with no
+      // sizes would make the sync skip its prices.
+      let onStoreSizes: WooRestVariation[] | null = null;
+      if (onStore) {
+        try {
+          onStoreSizes = await client.getAllVariations(onStore.id);
+        } catch {
+          onStoreSizes = null;
+        }
+      }
+      const sizeless = onStore != null && onStoreSizes != null && onStoreSizes.length === 0;
 
-      if (onStore && !options.force) {
+      if (onStore && !sizeless && !options.force) {
         report.action = "skip";
         report.storeProductId = onStore.id;
         report.reason = "alreadyOnStore";
         // Close the loop that kept this product on the list: read back what
         // the store actually has and record THAT. Not the plan — the plan is
         // what we would have written, not what is there.
-        if (!dryRun) {
-          try {
-            reconciled.push(toStoreProduct(onStore, await client.getAllVariations(onStore.id)));
-          } catch {
-            // Unreadable right now: leave the snapshot alone rather than file a
-            // product with no sizes, which would make the sync skip its prices.
-            // The next run tries again.
-          }
-        }
+        if (!dryRun && onStoreSizes) reconciled.push(toStoreProduct(onStore, onStoreSizes));
         return;
       }
 
-      report.action = onStore ? "reimport" : "create";
+      report.action = !onStore ? "create" : options.force ? "reimport" : "complete";
       if (dryRun) {
         report.storeProductId = onStore?.id ?? null;
         return;
@@ -430,7 +495,8 @@ async function publishClaimed(
       // real variation ids exist. The snapshot patch below needs them.
       let createdRows: { id?: number; error?: unknown }[] = [];
       if (onStore) {
-        // Refresh identity + option list, then replace the variation set.
+        // Refresh identity + option list, then replace the variation set (a
+        // product being completed has none to replace).
         productId = onStore.id;
         const reimportBody = planReimportParent(plan, {
           replaceMedia: options.replaceMedia ?? false,
@@ -444,7 +510,7 @@ async function publishClaimed(
           identityRejected.add(field);
           await client.updateProduct(productId, withoutIdentity(reimportBody, resolvedIdentity));
         }
-        const old = await client.getAllVariations(productId);
+        const old = onStoreSizes ?? (await client.getAllVariations(productId));
         const res = await client.batchVariations(productId, {
           delete: old.map((v) => v.id),
           create: plan.variations.map((v) => v.payload),
@@ -455,19 +521,30 @@ async function publishClaimed(
         if (failedRows.length > 0) {
           report.error = `${failedRows.length}/${plan.variations.length} variations failed: ${failedRows[0].error?.message ?? "unknown"}`;
         }
-        reimported += 1;
+        if (report.action === "complete") completed += 1;
+        else reimported += 1;
       } else {
-        let parent;
-        try {
-          parent = await client.createProduct(plan.parentBody);
-        } catch (e) {
-          const field = identityRejection(e);
-          if (!field) throw e;
-          identityRejected.add(field);
-          parent = await client.createProduct(withoutIdentity(plan.parentBody, resolvedIdentity));
-        }
+        const { product: parent, adopted } = await createOrAdopt(
+          client,
+          sku,
+          plan.parentBody,
+          resolvedIdentity,
+          identityRejected,
+        );
         productId = parent.id;
         report.permalink = parent.permalink ?? null;
+        if (adopted) {
+          // Found after a lost answer. With sizes already, some other run
+          // finished it: published, nothing to add. Without, it gets them now.
+          const sizes = await client.getAllVariations(productId);
+          if (sizes.length > 0) {
+            report.action = "skip";
+            report.reason = "alreadyOnStore";
+            report.storeProductId = productId;
+            reconciled.push(toStoreProduct(parent, sizes));
+            return;
+          }
+        }
         const res = await client.batchVariations(productId, {
           create: plan.variations.map((v) => v.payload),
         });
@@ -512,7 +589,7 @@ async function publishClaimed(
 
   const failed = reports.filter((r) => r.error != null).length;
   const skipped = reports.filter((r) => r.action === "skip" && r.error == null).length;
-  const acted = created + reimported;
+  const acted = created + reimported + completed;
   const status: ApplyAuditRow["status"] = dryRun
     ? "dry_run"
     : failed === 0
@@ -535,6 +612,7 @@ async function publishClaimed(
         products: reports.length,
         created,
         reimported,
+        completed,
         variations,
         skipped,
         failedProducts: failed,
@@ -551,6 +629,7 @@ async function publishClaimed(
     products: reports,
     created,
     reimported,
+    completed,
     variations,
     skipped,
     failed,

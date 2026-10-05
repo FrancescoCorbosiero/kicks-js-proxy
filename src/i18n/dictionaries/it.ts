@@ -838,10 +838,15 @@ export const it = {
     hint: "Rimette quello che manca ai prodotti già online — foto, marchio, categoria, genere — prendendolo dalla fonte che li possiede. Riempie solo i campi VUOTI: una foto che hai caricato a mano o una categoria che hai curato non vengono mai toccate. Nessuna variante viene eliminata, e rieseguirla non cambia nulla.",
     scan: "Cerca i prodotti incompleti",
     scanning: "Scansione…",
+    // `repairable` is every product on the store a source knows — NOT a count
+    // of broken ones: which of them miss a brand, category or gender is only
+    // known once each is read live, by the dry run.
     scanResult: (incomplete: number, repairable: number) =>
-      `${incomplete} senza foto · ${repairable} riparabili in tutto`,
+      incomplete === 0
+        ? `Nessun prodotto senza foto · ${repairable} sul negozio si possono controllare anche per marchio, categoria e genere`
+        : `${incomplete} senza foto · ${repairable} sul negozio si possono controllare anche per marchio, categoria e genere`,
     useIncomplete: (n: number) => `Usa i ${n} senza foto`,
-    useAll: (n: number) => `Usa tutti e ${n}`,
+    useAll: (n: number) => `Controlla tutti e ${n}`,
     placeholder: "DM0032-601, IH6001, JI2626…",
     parsed: (n: number) => `${n} SKU`,
     dryRun: (n: number) => `Prova a vuoto (${n})`,
@@ -994,6 +999,11 @@ export const it = {
     liveTitle: "Pubblicazione eseguita",
     willCreate: (n: number) => `${n} da creare`,
     willReimport: (n: number) => `${n} da reimportare`,
+    willComplete: (n: number) => `${n} da completare`,
+    completeNote: "era sul negozio senza taglie: gli vengono create",
+    sizeless: "senza taglie",
+    sizelessHint:
+      "Il prodotto è sul negozio ma senza nessuna taglia: una pubblicazione si era interrotta a metà (prodotto creato, taglie no). Non è in vendita: pubblicandolo gli vengono create le taglie, senza toccare il resto.",
     wasSkipped: (n: number) => `${n} saltati`,
     variationsCreated: (n: number) => `${n} taglie create`,
     failedCount: (n: number) => `${n} con errori`,

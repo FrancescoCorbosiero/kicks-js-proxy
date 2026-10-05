@@ -1,9 +1,9 @@
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { storeSnapshot } from "@/server/db/schema";
 import { countOf, rowsOf } from "@/server/db/rows";
-import type { StoreModel } from "./model";
+import type { StoreModel, StoreProductModel } from "./model";
 
 /**
  * The snapshot is a single row. Exported because anything querying the blob in
@@ -14,6 +14,71 @@ export const SNAPSHOT_ID = "current";
 const SINGLETON = SNAPSHOT_ID;
 
 export type SnapshotSource = "upload" | "rest";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Every write to the snapshot goes through here, one at a time.
+ *
+ * The snapshot is ONE jsonb value, and a patch is a read-modify-write of all
+ * of it. Two at once — two publish batches finishing together, a batch the
+ * proxy gave up on still finishing beside the next one, a batch and a sync
+ * apply — both read the same old value, and the second write silently drops
+ * the first one's products: the store has them, the Hub does not, and Publish
+ * offers them again. Reproduced: two batches of 6 at a time, five times over,
+ * created 60 products and left 30 in the snapshot.
+ *
+ * A transaction-scoped advisory lock queues the writers; each statement after
+ * it reads what the previous writer committed.
+ */
+async function withSnapshotWriteLock<T>(write: (tx: Tx) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('store-hub:store_snapshot'))`);
+    return write(tx);
+  });
+}
+
+/**
+ * Rewrite the snapshot's product list as the products `keep` matches plus
+ * `incoming`, under the write lock's transaction. Postgres does the swap; only
+ * the changed products cross the wire. Returns the new product count, or null
+ * when there is no snapshot (nothing pulled yet — no "on the store" to correct).
+ */
+async function rewriteProducts(
+  tx: Tx,
+  keep: SQL,
+  incoming: StoreModel["products"],
+): Promise<number | null> {
+  const res = await tx.execute(sql`
+    with incoming as (
+      select p as product from jsonb_array_elements(${JSON.stringify(incoming)}::jsonb) as p
+    ),
+    kept as (
+      select p as product
+      from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
+      where s.id = ${SINGLETON} and (${keep})
+    ),
+    merged as (
+      select coalesce(jsonb_agg(product), '[]'::jsonb) as arr
+      from (select product from kept union all select product from incoming) t
+    )
+    update ${storeSnapshot} s
+    set data = jsonb_set(
+                 jsonb_set(s.data, '{products}', m.arr),
+                 '{product_count}',
+                 to_jsonb(jsonb_array_length(m.arr))
+               ),
+        product_count = jsonb_array_length(m.arr),
+        uploaded_at = now()
+    from merged m
+    where s.id = ${SINGLETON}
+    returning s.product_count as n
+  `);
+  return rowsOf<{ n: number | string }>(res).length === 0 ? null : countOf(res);
+}
+
+/** A product's store id in SQL, -1 for none: a product without one is never matched by id. */
+const productId = sql`coalesce((p->>'id')::bigint, -1)`;
 
 export interface SnapshotInfo {
   siteUrl: string | null;
@@ -30,7 +95,8 @@ export async function saveSnapshot(
   model: StoreModel,
   source: SnapshotSource = "upload",
 ): Promise<void> {
-  await db
+  await withSnapshotWriteLock((tx) =>
+    tx
     .insert(storeSnapshot)
     .values({
       id: SINGLETON,
@@ -48,7 +114,8 @@ export async function saveSnapshot(
         data: sql`excluded.data`,
         uploadedAt: sql`now()`,
       },
-    });
+    }),
+  );
 }
 
 export async function getActiveSnapshot(): Promise<StoreModel | null> {
@@ -86,6 +153,30 @@ export async function listStoreSkus(): Promise<Set<string>> {
     return out;
   } catch (e) {
     console.warn("[snapshot] store SKUs skipped:", e instanceof Error ? e.message : e);
+    return new Set();
+  }
+}
+
+/**
+ * Store SKUs with no sizes at all — on every product that carries them.
+ *
+ * A publish that broke half-way leaves exactly this: the parent was created,
+ * its sizes never were. Such a product sells nothing, so Publish does not
+ * count it as published (it lists it again, and the run gives it its sizes).
+ */
+export async function listSizelessStoreSkus(): Promise<Set<string>> {
+  try {
+    const res = await db.execute(sql`
+      select upper(trim(p->>'sku')) as sku
+      from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+      where ${storeSnapshot.id} = ${SINGLETON} and coalesce(trim(p->>'sku'), '') <> ''
+      group by 1
+      having max(case when jsonb_typeof(p->'variations') = 'array'
+                      then jsonb_array_length(p->'variations') else 0 end) = 0
+    `);
+    return new Set(rowsOf<{ sku: string }>(res).map((r) => r.sku));
+  } catch (e) {
+    console.warn("[snapshot] sizeless SKUs skipped:", e instanceof Error ? e.message : e);
     return new Set();
   }
 }
@@ -218,40 +309,56 @@ export async function upsertSnapshotProducts(
   products: StoreModel["products"],
 ): Promise<number | null> {
   if (products.length === 0) return null;
+  // Keyed by canonical SKU; a product without one replaces nothing (it is added).
+  const keys = [...new Set(products.map((p) => (p.sku ?? "").trim().toUpperCase()).filter(Boolean))];
   try {
-    const res = await db.execute(sql`
-      with incoming as (
-        select p as product, upper(trim(coalesce(p->>'sku', ''))) as key
-        from jsonb_array_elements(${JSON.stringify(products)}::jsonb) as p
+    return await withSnapshotWriteLock((tx) =>
+      rewriteProducts(
+        tx,
+        sql`upper(trim(coalesce(p->>'sku', ''))) not in (select jsonb_array_elements_text(${JSON.stringify(keys)}::jsonb))`,
+        products,
       ),
-      kept as (
-        select p as product
-        from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
-        where s.id = ${SINGLETON}
-          and upper(trim(coalesce(p->>'sku', '')))
-              not in (select key from incoming where key <> '')
-      ),
-      merged as (
-        select coalesce(jsonb_agg(product), '[]'::jsonb) as arr
-        from (select product from kept union all select product from incoming) t
-      )
-      update ${storeSnapshot} s
-      set data = jsonb_set(
-                   jsonb_set(s.data, '{products}', m.arr),
-                   '{product_count}',
-                   to_jsonb(jsonb_array_length(m.arr))
-                 ),
-          product_count = jsonb_array_length(m.arr),
-          uploaded_at = now()
-      from merged m
-      where s.id = ${SINGLETON}
-      returning s.product_count as n
-    `);
-    const rows = rowsOf<{ n: number | string }>(res);
-    if (rows.length === 0) return null; // nothing pulled yet
-    return countOf(res);
+    );
   } catch (e) {
     console.warn("[snapshot] patch skipped:", e instanceof Error ? e.message : e);
     return null;
   }
+}
+
+/**
+ * Change one product of the snapshot, found by store id: read, changed and
+ * written back under the write lock, so nothing written meanwhile is lost —
+ * where loading the whole snapshot to edit one price, then saving all of it,
+ * put back everything as it was at the load. False when the product is not
+ * in the snapshot.
+ */
+export async function patchSnapshotProduct(
+  storeProductId: number,
+  change: (product: StoreProductModel) => void,
+): Promise<boolean> {
+  return withSnapshotWriteLock(async (tx) => {
+    const res = await tx.execute(sql`
+      select p as product
+      from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
+      where s.id = ${SINGLETON} and ${productId} = ${storeProductId}
+      limit 1
+    `);
+    const product = rowsOf<{ product: StoreProductModel }>(res)[0]?.product;
+    if (!product) return false;
+    change(product);
+    await rewriteProducts(tx, sql`${productId} <> ${storeProductId}`, [product]);
+    return true;
+  });
+}
+
+/** Drop products from the snapshot by store id (e.g. a duplicate just trashed). */
+export async function removeSnapshotProducts(storeProductIds: number[]): Promise<void> {
+  if (storeProductIds.length === 0) return;
+  await withSnapshotWriteLock((tx) =>
+    rewriteProducts(
+      tx,
+      sql`${productId} not in (select jsonb_array_elements_text(${JSON.stringify(storeProductIds)}::jsonb)::bigint)`,
+      [],
+    ),
+  );
 }

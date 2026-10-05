@@ -59,6 +59,20 @@ export type BatchResultRow = z.infer<typeof BatchRowSchema>;
 
 const VARIATIONS_PER_PAGE = 100;
 
+/**
+ * Writes that create or delete are never retried blind. A retry is safe only
+ * when the first attempt certainly did nothing, and a timeout or a gateway
+ * error (Cloudflare's 524 after 100 s) says nothing of the kind: WordPress
+ * usually goes on and finishes creating the product after the answer is lost.
+ * Retried, the request met its own product — "SKU already used by #…" — and
+ * the product stayed on the shop without a single size. So: one attempt, a
+ * timeout long enough for WordPress to download and resize the photos, and the
+ * caller checks what actually happened (see publish's createOrAdopt).
+ */
+const WRITE_ONCE: RetryPolicy = { attempts: 1, backoffMs: 0, timeoutMs: 95_000 };
+/** Writes that set fields to values: repeating one is harmless, but give it time. */
+const IDEMPOTENT_WRITE: RetryPolicy = { attempts: 3, backoffMs: 1_000, timeoutMs: 60_000 };
+
 export class WooClient {
   constructor(
     private readonly baseUrl: string,
@@ -72,6 +86,11 @@ export class WooClient {
     const root = base.includes("/wp-json") ? base : `${base}/wp-json/wc/v3`;
     const u = new URL(`${root}/${path.replace(/^\//, "")}`);
     for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v);
+    // Never served from a cache. A shop behind a page cache or a CDN rule
+    // that caches /wp-json answered "no product with this SKU" from before
+    // the product existed; a URL no one has asked for before cannot be a hit.
+    // WordPress ignores the parameter.
+    u.searchParams.set("_hub", `${Date.now()}${Math.random().toString(36).slice(2, 6)}`);
     return u.toString();
   }
 
@@ -81,6 +100,8 @@ export class WooClient {
       Authorization: `Basic ${token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
     };
   }
 
@@ -304,7 +325,7 @@ export class WooClient {
       const raw = await requestJson(
         this.apiUrl(path),
         { method: "POST", headers: this.headers(), body: JSON.stringify(body) },
-        this.retry,
+        WRITE_ONCE,
       );
       return z.looseObject({ id: z.number(), name: z.string(), slug: z.string() }).parse(raw);
     } catch (e) {
@@ -338,7 +359,8 @@ export class WooClient {
     const raw = await requestJson(
       this.apiUrl(`products/${productId}/variations/batch`),
       { method: "POST", headers: this.headers(), body: JSON.stringify(payload) },
-      this.retry,
+      // Creating or deleting sizes is not repeatable blind; setting prices is.
+      payload.create?.length || payload.delete?.length ? WRITE_ONCE : IDEMPOTENT_WRITE,
     );
     const parsed = BatchResponseSchema.parse(raw);
     return {
@@ -356,7 +378,7 @@ export class WooClient {
     await requestJson(
       this.apiUrl(`products/${productId}`, force ? { force: "true" } : {}),
       { method: "DELETE", headers: this.headers() },
-      this.retry,
+      WRITE_ONCE,
     );
   }
 
@@ -376,12 +398,15 @@ export class WooClient {
     return z.array(WooProductSchema).parse(raw);
   }
 
-  /** Create a product (the publisher's parent). Returns the new product. */
+  /**
+   * Create a product (the publisher's parent). Returns the new product. One
+   * attempt: on a lost answer the caller looks the SKU up (see WRITE_ONCE).
+   */
   async createProduct(body: Record<string, unknown>): Promise<WooRestProduct> {
     const raw = await requestJson(
       this.apiUrl("products"),
       { method: "POST", headers: this.headers(), body: JSON.stringify(body) },
-      this.retry,
+      WRITE_ONCE,
     );
     return WooProductSchema.parse(raw);
   }
@@ -391,7 +416,7 @@ export class WooClient {
     await requestJson(
       this.apiUrl(`products/${productId}`),
       { method: "PUT", headers: this.headers(), body: JSON.stringify(body) },
-      this.retry,
+      IDEMPOTENT_WRITE,
     );
   }
 }

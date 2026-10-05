@@ -822,9 +822,11 @@ export const en: Dictionary = {
     scan: "Find incomplete products",
     scanning: "Scanning…",
     scanResult: (incomplete: number, repairable: number) =>
-      `${incomplete} with no photo · ${repairable} repairable in total`,
+      incomplete === 0
+        ? `No product without a photo · ${repairable} on the store can also be checked for brand, category and gender`
+        : `${incomplete} without a photo · ${repairable} on the store can also be checked for brand, category and gender`,
     useIncomplete: (n: number) => `Use the ${n} with no photo`,
-    useAll: (n: number) => `Use all ${n}`,
+    useAll: (n: number) => `Check all ${n}`,
     placeholder: "DM0032-601, IH6001, JI2626…",
     parsed: (n: number) => `${n} SKUs`,
     dryRun: (n: number) => `Dry run (${n})`,
@@ -972,6 +974,11 @@ export const en: Dictionary = {
     liveTitle: "Published",
     willCreate: (n: number) => `${n} to create`,
     willReimport: (n: number) => `${n} to reimport`,
+    willComplete: (n) => `${n} to complete`,
+    completeNote: "was on the store without sizes: they are created now",
+    sizeless: "no sizes",
+    sizelessHint:
+      "The product is on the store but has no sizes: a publish broke half-way (product created, sizes not). It is not for sale: publishing it creates its sizes, nothing else is touched.",
     wasSkipped: (n: number) => `${n} skipped`,
     variationsCreated: (n: number) => `${n} sizes created`,
     failedCount: (n: number) => `${n} with errors`,
