@@ -32,5 +32,8 @@ export async function assertSchemaCurrent(): Promise<void> {
   await db.execute(sql`select 1 from "order_workflow" limit 1`);
   // 0017: the photo queue the Publisher files into.
   await db.execute(sql`select 1 from "media_jobs" limit 1`);
+  // 0018: automatic categories — their rules, the store index they read, their log.
+  await db.execute(sql`select 1 from "smart_collections" limit 1`);
+  await db.execute(sql`select 1 from "store_index" limit 1`);
   verified = true;
 }

@@ -52,6 +52,10 @@ export function withTaxonomyCache(client: WooClient): WooClient {
           return () => remember("brands", () => target.listBrands());
         case "listCategories":
           return () => remember("categories", () => target.listCategories());
+        case "listTags":
+          return () => remember("tags", () => target.listTags());
+        case "createTag":
+          return (name: string) => thenForget("tags", () => target.createTag(name));
         case "listAttributeTerms":
           return (id: number) => remember(`terms:${id}`, () => target.listAttributeTerms(id));
         case "createAttribute":

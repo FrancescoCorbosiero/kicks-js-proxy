@@ -50,6 +50,87 @@ const WooProductSchema = z.looseObject({
 export type WooRestProduct = z.infer<typeof WooProductSchema>;
 export type WooRestVariation = z.infer<typeof WooVariationSchema>;
 
+const IndexTermSchema = z.looseObject({
+  id: z.number(),
+  name: z.string().catch(""),
+  slug: z.string().catch(""),
+});
+
+/**
+ * A product as the automatic categories read it (see src/server/collections):
+ * its taxonomies and the few facts a rule can ask about. Every field but the id
+ * is optional — a store without the brands taxonomy simply sends no `brands`.
+ */
+const WooIndexProductSchema = z.looseObject({
+  id: z.number(),
+  sku: z.string().nullish(),
+  name: z.string().nullish(),
+  type: z.string().nullish(),
+  status: z.string().nullish(),
+  permalink: z.string().nullish(),
+  categories: z.array(IndexTermSchema).nullish(),
+  tags: z.array(IndexTermSchema).nullish(),
+  brands: z.array(IndexTermSchema).nullish(),
+  attributes: z
+    .array(
+      z.looseObject({
+        id: z.number().nullish(),
+        name: z.string().nullish(),
+        options: z.array(z.union([z.string(), z.number()])).nullish(),
+      }),
+    )
+    .nullish(),
+  price: z.union([z.string(), z.number()]).nullish(),
+  on_sale: z.boolean().nullish(),
+  stock_status: z.string().nullish(),
+  date_created_gmt: z.string().nullish(),
+  date_modified_gmt: z.string().nullish(),
+});
+export type WooIndexProduct = z.infer<typeof WooIndexProductSchema>;
+
+/** The fields a light listing asks for (`_fields`): no descriptions, no photos, no meta. */
+const INDEX_FIELDS = [
+  "id",
+  "sku",
+  "name",
+  "type",
+  "status",
+  "permalink",
+  "categories",
+  "tags",
+  "brands",
+  "attributes",
+  "price",
+  "on_sale",
+  "stock_status",
+  "date_created_gmt",
+  "date_modified_gmt",
+].join(",");
+
+/**
+ * Parse a list row by row: one product the schema cannot read is skipped and
+ * said once, instead of failing the page — and with it every product on it.
+ */
+function parseIndexRows(raw: unknown, where: string): WooIndexProduct[] {
+  if (!Array.isArray(raw)) throw new Error(`${where}: expected a list of products`);
+  const out: WooIndexProduct[] = [];
+  let skipped = 0;
+  for (const row of raw) {
+    const parsed = WooIndexProductSchema.safeParse(row);
+    if (parsed.success) out.push(parsed.data);
+    else skipped += 1;
+  }
+  if (skipped > 0) console.warn(`[woo] ${where}: ${skipped} unreadable product(s) skipped`);
+  return out;
+}
+
+/** One row of a products/batch answer: the product as saved, or why not. */
+export interface ProductBatchRow {
+  id: number;
+  product: WooIndexProduct | null;
+  error: string | null;
+}
+
 /** One row of a variations/batch response: an id on success, error on failure. */
 const BatchRowSchema = z.looseObject({
   id: z.number().optional(),
@@ -273,6 +354,15 @@ export class WooClient {
     return this.createTerm("products/categories", parent ? { name, parent } : { name });
   }
 
+  /** Product tags (`products/tags`) — flat, no parents. */
+  async listTags(): Promise<{ id: number; name: string; slug: string }[]> {
+    return this.listTerms("products/tags");
+  }
+
+  async createTag(name: string): Promise<{ id: number; name: string; slug: string } | null> {
+    return this.createTerm("products/tags", { name });
+  }
+
   /** Terms of one global attribute (e.g. every value of pa_brand). */
   async listAttributeTerms(attributeId: number): Promise<{ id: number; name: string; slug: string }[]> {
     return this.listTerms(`products/attributes/${attributeId}/terms`);
@@ -373,6 +463,93 @@ export class WooClient {
       update: parsed.update ?? [],
       delete: parsed.delete ?? [],
     };
+  }
+
+  /**
+   * One page of the store's products as the automatic categories read them:
+   * every status but the bin, every type, only the light fields (`_fields`).
+   *
+   * - `modifiedAfter`: only what changed since then (UTC), oldest change
+   *   first — the frequent check. The caller verifies the store honoured it:
+   *   one that ignores the parameter answers with everything.
+   * - `include`: exactly these products — the live re-read before a write.
+   * - neither: everything, by id — the full read.
+   *
+   * `total` / `totalPages` come from X-WP-Total / X-WP-TotalPages when the
+   * store sends them.
+   */
+  async getProductIndexPage(opts: {
+    page: number;
+    perPage: number;
+    modifiedAfter?: Date;
+    include?: number[];
+  }): Promise<{ products: WooIndexProduct[]; total: number | null; totalPages: number | null }> {
+    const query: Record<string, string> = {
+      status: "any",
+      page: String(opts.page),
+      per_page: String(opts.perPage),
+      _fields: INDEX_FIELDS,
+    };
+    if (opts.include) {
+      query.include = opts.include.join(",");
+      query.orderby = "include";
+    } else if (opts.modifiedAfter) {
+      // Whole seconds, no zone: with dates_are_gmt the store reads it as UTC.
+      query.modified_after = opts.modifiedAfter.toISOString().slice(0, 19);
+      query.dates_are_gmt = "true";
+      query.orderby = "modified";
+      query.order = "asc";
+    } else {
+      query.orderby = "id";
+      query.order = "asc";
+    }
+    const { data, headers } = await requestJsonWithHeaders(
+      this.apiUrl("products", query),
+      { method: "GET", headers: this.headers() },
+      this.retry,
+    );
+    const count = (name: string) => {
+      const n = Number.parseInt(headers.get(name) ?? "", 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    return {
+      products: parseIndexRows(data, "products index"),
+      total: count("x-wp-total"),
+      totalPages: count("x-wp-totalpages"),
+    };
+  }
+
+  /**
+   * Update several products in one request (`products/batch`, at most 100).
+   * Every row says what it got: the product as saved, or the store's reason.
+   * Setting fields to values is repeatable, so a lost answer is retried.
+   */
+  async batchUpdateProducts(updates: ({ id: number } & Record<string, unknown>)[]): Promise<ProductBatchRow[]> {
+    if (updates.length === 0) return [];
+    const raw = await requestJson(
+      this.apiUrl("products/batch"),
+      { method: "POST", headers: this.headers(), body: JSON.stringify({ update: updates }) },
+      IDEMPOTENT_WRITE,
+    );
+    const rows = z.looseObject({ update: z.array(z.unknown()).optional() }).parse(raw).update ?? [];
+    // The store answers row by row, in the order asked; a refused row carries its id.
+    return rows.map((row, i): ProductBatchRow => {
+      const id = updates[i]?.id ?? 0;
+      const failed = z
+        .looseObject({
+          id: z.number().optional(),
+          error: z.looseObject({ message: z.string().optional(), code: z.string().optional() }),
+        })
+        .safeParse(row);
+      if (failed.success) {
+        const reason = failed.data.error.message ?? failed.data.error.code ?? "refused";
+        return { id: failed.data.id ?? id, product: null, error: reason };
+      }
+      const product = WooIndexProductSchema.safeParse(row);
+      return product.success
+        ? { id: product.data.id, product: product.data, error: null }
+        : { id, product: null, error: "unreadable answer" };
+    });
   }
 
   /**

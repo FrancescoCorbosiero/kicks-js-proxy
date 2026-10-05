@@ -27,7 +27,8 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  *   3. a KicksDB re-pricing pass, so whatever the sync registered is priced;
  *   4. with AUTO_SYNC=on, the store sync of the whole store: every price and
  *      stock change the sources now call for, written to it (see syncStore);
- *   5. self-repair (AUTO_REPAIR=on only), metadata backfill, recategorize.
+ *   5. the automatic categories, against a full read of the store;
+ *   6. self-repair (AUTO_REPAIR=on only), metadata backfill, recategorize.
  * A step that fails does not stop the others, and is retried an hour later
  * (twice at most). Every run is recorded in scheduler_runs, so a restarting
  * server knows whether the last slot ran: one missed while the server was
@@ -52,6 +53,11 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  * photo. It pauses while a store pull runs — a product put on sale as the pull
  * assembles its copy of the store would be left out of it.
  *
+ * And every SCHEDULER_COLLECTIONS_MINUTES (default 5) the automatic
+ * categories check the store for changes and take in or let go of the
+ * products their rules now say (src/server/collections). Not a single
+ * request reaches the store while no category is automatic.
+ *
  * On by default in production, off in dev; SCHEDULER=on|off overrides.
  * Needs a long-running server (`next start`, Docker) — a serverless
  * platform that freezes the process between requests won't tick.
@@ -71,6 +77,7 @@ const MAX_RETRIES = 2;
 const ACTIVE_PULL_MS = 2 * 60 * 1000;
 const DEFAULT_TIMES = "04:30";
 const DEFAULT_ORDERS_MINUTES = 15;
+const DEFAULT_COLLECTIONS_MINUTES = 5;
 /** Variations an automatic store sync may change in one run (AUTO_SYNC_MAX_CHANGES). */
 const DEFAULT_MAX_CHANGES = 500;
 /** How long the daily run waits for a feed cycle still going before it gives up. */
@@ -84,7 +91,7 @@ const MEDIA_BUDGET_MS = 4 * 60 * 1000;
 /** …this many products at once: every photo is a download and a round of thumbnails on the shop's server. */
 const MEDIA_CONCURRENCY = 2;
 
-const DAILY_STEPS = ["pull", "gs", "kicksdb", "storeSync", "repair", "backfill", "recategorize"] as const;
+const DAILY_STEPS = ["pull", "gs", "kicksdb", "storeSync", "collections", "repair", "backfill", "recategorize"] as const;
 const FEED_STEPS = ["gs", "feedSync"] as const;
 type StepName = (typeof DAILY_STEPS)[number] | (typeof FEED_STEPS)[number];
 type StepOutcome = { ok: boolean; count?: number; note?: string };
@@ -95,6 +102,7 @@ const LABEL: Record<StepName, string> = {
   kicksdb: "KicksDB refresh",
   storeSync: "store sync",
   feedSync: "store sync",
+  collections: "automatic categories",
   repair: "repair",
   backfill: "metadata backfill",
   recategorize: "recategorize",
@@ -144,6 +152,10 @@ export interface SchedulerStatus {
   ordersError: string | null;
   mediaLastAt: number | null; // the photo queue last worked on something
   mediaError: string | null;
+  collectionsEveryMinutes: number; // 0 = only in the daily sync
+  collectionsLastAt: number | null; // the last check that had work to do
+  collectionsLastMoved: number | null; // products it moved
+  collectionsError: string | null;
 }
 
 // Instrumentation and the server-action bundle each get their own copy of
@@ -178,6 +190,10 @@ function store(): SchedulerState {
     ordersError: null,
     mediaLastAt: null,
     mediaError: null,
+    collectionsEveryMinutes: 0,
+    collectionsLastAt: null,
+    collectionsLastMoved: null,
+    collectionsError: null,
   });
 }
 
@@ -328,6 +344,17 @@ const RUN_STEP: Record<StepName, () => Promise<StepOutcome | null>> = {
 
   storeSync: () => syncStore("store"),
   feedSync: () => syncStore("feed"),
+
+  // The automatic categories against a FULL read of the store: what the
+  // frequent check cannot see — a product binned, a change that left the
+  // product's modified time alone — is caught here, once a day.
+  async collections() {
+    const { runFull } = await import("@/server/collections/runner");
+    const outcome = await runFull();
+    if (!outcome) return null;
+    console.log(`[scheduler] automatic categories: ${outcome.read} products read, ${outcome.moved} moved`);
+    return { ok: true, count: outcome.moved, note: `${outcome.read} products read` };
+  },
 
   // Self-repair: products already online that lost a field to a source's
   // change of shape. Additive and idempotent, but it writes to the LIVE
@@ -639,6 +666,29 @@ async function pullOrders(): Promise<void> {
 }
 
 /**
+ * The automatic categories' check, then again every SCHEDULER_COLLECTIONS_MINUTES.
+ * Said once when it starts failing and once when it recovers, not every round.
+ */
+async function checkCollections(): Promise<void> {
+  const s = store();
+  try {
+    const { runCheck } = await import("@/server/collections/runner");
+    const outcome = await runCheck();
+    if (outcome) {
+      if (s.collectionsError) console.log("[scheduler] automatic categories are working again");
+      s.collectionsLastAt = Date.now();
+      s.collectionsLastMoved = outcome.moved;
+    }
+    s.collectionsError = null;
+  } catch (e) {
+    if (s.collectionsError !== messageOf(e)) console.error(`[scheduler] automatic categories: ${messageOf(e)}`);
+    s.collectionsError = messageOf(e);
+  } finally {
+    setTimeout(() => void checkCollections(), s.collectionsEveryMinutes * 60 * 1000).unref();
+  }
+}
+
+/**
  * Work the photo queue while something is due, then look again in a minute.
  * Paused while a store pull runs (see the header).
  */
@@ -681,6 +731,7 @@ export function startScheduler(): void {
   s.times = parseTimes(env.SCHEDULER_TIMES ?? DEFAULT_TIMES);
   s.timeZone = env.SCHEDULER_TIMEZONE ?? DEFAULT_TIMEZONE;
   s.ordersEveryMinutes = env.SCHEDULER_ORDERS_MINUTES ?? DEFAULT_ORDERS_MINUTES;
+  s.collectionsEveryMinutes = env.SCHEDULER_COLLECTIONS_MINUTES ?? DEFAULT_COLLECTIONS_MINUTES;
   const feeds = feedSchedule({
     feedsMinutes: env.SCHEDULER_FEEDS_MINUTES,
     autoSync: env.AUTO_SYNC,
@@ -706,10 +757,12 @@ export function startScheduler(): void {
     `[scheduler] on — daily sync at ${s.times.join(", ")} (${s.timeZone}): store pull, GS sync, KicksDB re-pricing${sync}; ` +
       (s.feedsEveryMinutes > 0 ? `feeds every ${s.feedsEveryMinutes} min${feedSync}; ` : "") +
       (s.ordersEveryMinutes > 0 ? `orders every ${s.ordersEveryMinutes} min` : "orders by hand only") +
+      (s.collectionsEveryMinutes > 0 ? `; automatic categories every ${s.collectionsEveryMinutes} min` : "") +
       "; photo queue in the background",
   );
   void boot(s);
   if (s.feedsEveryMinutes > 0) armFeeds(new Date());
   if (s.ordersEveryMinutes > 0) setTimeout(() => void pullOrders(), CATCH_UP_DELAY_MS).unref();
   setTimeout(() => void workMedia(), CATCH_UP_DELAY_MS).unref();
+  if (s.collectionsEveryMinutes > 0) setTimeout(() => void checkCollections(), CATCH_UP_DELAY_MS).unref();
 }

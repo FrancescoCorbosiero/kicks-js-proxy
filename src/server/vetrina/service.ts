@@ -15,6 +15,8 @@ import type {
   RailWriteResult,
   VetrinaErrorCode,
 } from "@/lib/vetrina/types";
+import { railCategory } from "@/lib/collections/rail";
+import type { RailCollection } from "@/lib/collections/types";
 import { getVetrinaSource, VetrinaError } from "./source";
 
 /**
@@ -50,9 +52,25 @@ async function locksFor(cards: ProductCard[]): Promise<Record<string, number>> {
   return out;
 }
 
+/**
+ * The automatic categories, by category id: a rail showing one of them is
+ * filled by its rule. Best-effort, like the locks — a Hub without the table
+ * (or a database) still shows the homepage.
+ */
+async function automaticCategories(): Promise<Record<number, RailCollection>> {
+  try {
+    const { collectionsByTerm } = await import("@/server/collections/service");
+    return await collectionsByTerm();
+  } catch {
+    return {};
+  }
+}
+
 export interface VetrinaHome {
   home: Homepage;
   locks: Record<string, number>;
+  /** Automatic categories by category id. */
+  collections: Record<number, RailCollection>;
   source: "wordpress" | "fixture";
 }
 
@@ -60,19 +78,24 @@ export async function readHome(): Promise<VetrinaHome> {
   const source = await getVetrinaSource();
   const home = await source.homepage();
   const shown = home.blocks.flatMap((b) => (b.kind === "rail" ? b.rail.products : []));
-  return { home, locks: await locksFor(shown), source: source.kind };
+  const [locks, collections] = await Promise.all([locksFor(shown), automaticCategories()]);
+  return { home, locks, collections, source: source.kind };
 }
 
 export interface VetrinaRail {
   rail: RailDetail;
   locks: Record<string, number>;
+  /** The rule filling the rail's category, if it has one. */
+  collection: RailCollection | null;
   source: "wordpress" | "fixture";
 }
 
 export async function readRail(key: string, fallback?: RailFallback): Promise<VetrinaRail> {
   const source = await getVetrinaSource();
   const rail = await source.rail(key, { count: hubConfig.vetrina.pageSize, fallback });
-  return { rail, locks: await locksFor([...rail.items, ...rail.hidden]), source: source.kind };
+  const [locks, collections] = await Promise.all([locksFor([...rail.items, ...rail.hidden]), automaticCategories()]);
+  const term = railCategory(rail);
+  return { rail, locks, collection: term != null ? (collections[term] ?? null) : null, source: source.kind };
 }
 
 export async function readCards(ids: number[]): Promise<{ cards: ProductCard[]; locks: Record<string, number> }> {

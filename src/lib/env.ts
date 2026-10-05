@@ -87,6 +87,15 @@ const EnvSchema = z.object({
   ),
   // Called after every fully successful feed cycle, like the heartbeat above.
   SCHEDULER_FEEDS_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
+  // Automatic categories (src/server/collections): every N minutes the store
+  // is asked what changed, and every automatic category takes in or lets go
+  // of the products its rule now says. Default 5; 0 = off (the daily sync
+  // still runs them once a day). Costs nothing while no category is automatic.
+  SCHEDULER_COLLECTIONS_MINUTES: blankIsUnset(z.coerce.number().int().min(0).max(1440).optional()),
+  // An automatic run that would move more products in or out of one category
+  // than this leaves that category alone until the change is confirmed in the
+  // Hub (as it does with one that would empty a category). Default 200.
+  COLLECTIONS_MAX_CHANGES: blankIsUnset(z.coerce.number().int().min(1).optional()),
 
   // Automatic store sync: after the feeds refresh, write the planned price and
   // stock changes to the LIVE store. Prices and stock only: no size cleanup,

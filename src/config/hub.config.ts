@@ -11,7 +11,7 @@ export default defineHubConfig({
   ui: {
     landing: "/vetrina",
     journey: ["/import", "/catalog", "/publish", "/sync", "/vetrina", "/orders"],
-    setup: ["/pricing", "/taxonomies", "/feeds"],
+    setup: ["/pricing", "/taxonomies", "/collections", "/feeds"],
   },
 
   vetrina: {

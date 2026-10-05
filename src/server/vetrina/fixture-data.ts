@@ -12,8 +12,12 @@ export interface DemoProduct {
   name: string;
   brand: string; // brand term slug
   categories: string[]; // product_cat slugs
+  tags: string[]; // product_tag slugs
   price: number;
+  onSale: boolean;
   created: string; // ISO
+  /** When the product last changed (epoch ms): the automatic categories ask for what changed. */
+  modified: number;
   menuOrder: number;
   totalSales: number;
   inStock: boolean;
@@ -31,6 +35,33 @@ export const DEMO_BRAND_PARENT: Record<string, string | null> = {
   "new-balance": null,
   asics: null,
 };
+
+/**
+ * Term ids, so the demo shop's categories and brands can be addressed the way
+ * the real ones are — by id — by the automatic categories (collections/
+ * fixture-client.ts) and the rails that show them.
+ */
+export const DEMO_TERM_IDS: Record<string, number> = {
+  "featured-sneakers-originali-streetwear": 101,
+  "saldi-sneakers-outlet": 102,
+  "saldi-sneakers-in-offerta": 103,
+  "new-nuove-release": 104,
+  nike: 201,
+  "nike-off-white": 202,
+  "nike-air-force-1": 203,
+  "nike-dunk": 204,
+  adidas: 205,
+  "adidas-samba": 206,
+  "new-balance": 207,
+  asics: 208,
+};
+
+/** The demo shop's tags, by slug: what the automatic categories can be told to follow. */
+export const DEMO_TAGS: { id: number; slug: string; name: string }[] = [
+  { id: 301, slug: "saldi", name: "saldi" },
+  { id: 302, slug: "estate", name: "estate" },
+  { id: 303, slug: "esclusiva", name: "esclusiva" },
+];
 
 export const DEMO_TERM_NAMES: Record<string, string> = {
   "featured-sneakers-originali-streetwear": "Prodotti in tendenza",
@@ -91,6 +122,9 @@ function demoImage(label: string, tint: string): string {
 
 export function demoProducts(): DemoProduct[] {
   const random = rng(20260930);
+  // A second sequence for what was added later (tags), so the first one —
+  // and with it every demo product as it always was — stays the same.
+  const later = rng(20261005);
   const now = Date.parse("2026-09-30T12:00:00Z");
   const out: DemoProduct[] = [];
   let id = 1001;
@@ -102,14 +136,19 @@ export function demoProducts(): DemoProduct[] {
       if (random() < 0.28) categories.push("saldi-sneakers-in-offerta");
       if (random() < 0.34) categories.push("new-nuove-release");
       const label = `${model.name.split(" ").slice(-2).join(" ")} · ${colorway}`;
+      const tags = DEMO_TAGS.filter(() => later() < 0.22).map((t) => t.slug);
+      const created = now - Math.floor(random() * 120) * 86_400_000;
       out.push({
         id,
         sku: `${model.brand.slice(0, 3).toUpperCase()}${String(id).slice(-3)}-${v + 1}`,
         name: `${model.name} ${colorway}`,
         brand: model.brand,
         categories,
+        tags,
         price: Math.round(model.price + (random() - 0.3) * 60) + 0.99,
-        created: new Date(now - Math.floor(random() * 120) * 86_400_000).toISOString(),
+        onSale: categories.includes("saldi-sneakers-outlet"),
+        created: new Date(created).toISOString(),
+        modified: created,
         menuOrder: id % 5 === 0 ? 0 : 1 + Math.floor(random() * 60),
         totalSales: Math.floor(random() * 300),
         inStock: id % 9 !== 0,
