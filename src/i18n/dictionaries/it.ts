@@ -1001,7 +1001,7 @@ export const it = {
     willReimport: (n: number) => `${n} da reimportare`,
     willComplete: (n: number) => `${n} da completare`,
     completeNote: "era sul negozio senza taglie: gli vengono create",
-    sizeless: "senza taglie",
+    sizeless: "sul negozio senza taglie",
     sizelessHint:
       "Il prodotto è sul negozio ma senza nessuna taglia: una pubblicazione si era interrotta a metà (prodotto creato, taglie no). Non è in vendita: pubblicandolo gli vengono create le taglie, senza toccare il resto.",
     wasSkipped: (n: number) => `${n} saltati`,

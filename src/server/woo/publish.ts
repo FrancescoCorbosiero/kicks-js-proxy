@@ -164,6 +164,39 @@ async function createOrAdopt(
   }
 }
 
+/**
+ * How many sizes the product's own record lists (WooCommerce puts the
+ * variation ids on the parent), or null when it does not say.
+ */
+function listedSizes(product: WooRestProduct): number | null {
+  const ids = (product as { variations?: unknown }).variations;
+  return Array.isArray(ids) ? ids.length : null;
+}
+
+/**
+ * Its sizes, read live — or null when the read cannot be trusted. "No sizes"
+ * is only believed when the product's own record agrees: a cache in front of
+ * the shop answering the sizes endpoint from before they existed would
+ * otherwise make the run give a product a second set of sizes.
+ */
+async function readSizes(client: WooClient, product: WooRestProduct): Promise<WooRestVariation[] | null> {
+  let sizes: WooRestVariation[];
+  try {
+    sizes = await client.getAllVariations(product.id);
+  } catch {
+    return null;
+  }
+  if (sizes.length === 0 && (listedSizes(product) ?? 0) > 0) {
+    console.warn(
+      `[publish] product ${product.id} (${product.sku}): its record lists ${listedSizes(product)} sizes but ` +
+        `the sizes endpoint answered none — treated as published, nothing added. A cache in front ` +
+        `of the shop serving /wp-json is the usual cause.`,
+    );
+    return null;
+  }
+  return sizes;
+}
+
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
   const queue = [...items];
   const worker = async () => {
@@ -460,17 +493,10 @@ async function publishClaimed(
       // a SKU the store already has is the one unrecoverable mistake here.
       const existing = await client.findProductsBySku(sku);
       const onStore = existing[0] ?? null;
-      // What it has. Null when unreadable right now: then it counts as
-      // published, and nothing is filed for it — a product recorded with no
-      // sizes would make the sync skip its prices.
-      let onStoreSizes: WooRestVariation[] | null = null;
-      if (onStore) {
-        try {
-          onStoreSizes = await client.getAllVariations(onStore.id);
-        } catch {
-          onStoreSizes = null;
-        }
-      }
+      // What it has. Null when unreadable or untrustworthy right now: then it
+      // counts as published, and nothing is filed for it — a product recorded
+      // with no sizes would make the sync skip its prices.
+      const onStoreSizes = onStore ? await readSizes(client, onStore) : null;
       const sizeless = onStore != null && onStoreSizes != null && onStoreSizes.length === 0;
 
       if (onStore && !sizeless && !options.force) {
@@ -534,14 +560,15 @@ async function publishClaimed(
         productId = parent.id;
         report.permalink = parent.permalink ?? null;
         if (adopted) {
-          // Found after a lost answer. With sizes already, some other run
-          // finished it: published, nothing to add. Without, it gets them now.
-          const sizes = await client.getAllVariations(productId);
-          if (sizes.length > 0) {
+          // Found after a lost answer. With sizes already (or sizes that cannot
+          // be read reliably), some other run finished it: published, nothing
+          // to add. Without, it gets them now.
+          const sizes = await readSizes(client, parent);
+          if (sizes == null || sizes.length > 0) {
             report.action = "skip";
             report.reason = "alreadyOnStore";
             report.storeProductId = productId;
-            reconciled.push(toStoreProduct(parent, sizes));
+            if (sizes) reconciled.push(toStoreProduct(parent, sizes));
             return;
           }
         }

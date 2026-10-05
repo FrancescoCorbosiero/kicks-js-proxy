@@ -131,7 +131,22 @@ export async function advancePull(runId: string, pages = 1): Promise<PullProgres
       const staged = await countStaged(runId);
 
       await forEachLimit(products, VARIATIONS_CONCURRENCY, async (p) => {
-        const variations = await client.getAllVariations(p.id);
+        let variations = await client.getAllVariations(p.id);
+        // The product's own record lists its variation ids. None from the
+        // sizes endpoint while the record lists some is an answer from a
+        // cache, not the shop: asked once more, and said out loud if it
+        // persists — Publish would otherwise take the product for one left
+        // without sizes.
+        const listed = (p as { variations?: unknown }).variations;
+        if (variations.length === 0 && Array.isArray(listed) && listed.length > 0) {
+          variations = await client.getAllVariations(p.id);
+          if (variations.length === 0) {
+            console.warn(
+              `[woo] product ${p.id} (${p.sku}) lists ${listed.length} sizes but its sizes endpoint ` +
+                `answered none twice. Is /wp-json/ cached (page cache, Cloudflare)? Exclude it.`,
+            );
+          }
+        }
         variationsFetched += variations.length;
         const data = toStoreProduct(p, variations);
         await db

@@ -976,7 +976,7 @@ export const en: Dictionary = {
     willReimport: (n: number) => `${n} to reimport`,
     willComplete: (n) => `${n} to complete`,
     completeNote: "was on the store without sizes: they are created now",
-    sizeless: "no sizes",
+    sizeless: "on the store, no sizes",
     sizelessHint:
       "The product is on the store but has no sizes: a publish broke half-way (product created, sizes not). It is not for sale: publishing it creates its sizes, nothing else is touched.",
     wasSkipped: (n: number) => `${n} skipped`,
