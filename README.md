@@ -146,8 +146,11 @@ filters/sorts/paginates in SQL.
   first, and a **live SKU lookup immediately before every create** (never the
   snapshot) so a stale snapshot cannot mint a duplicate parent. "Select all"
   takes every product the filters match (not just the listed rows), and the
-  run goes 25 at a time, can be stopped between batches, and asks before the
-  page is left. **Force reimport** additionally targets products the store
+  run goes 6 at a time — each request well inside the 100 seconds Cloudflare
+  waits — can be stopped between batches, and asks before the page is left.
+  A batch the proxy gives up on (524) is still finished by the server: its
+  products stay selected, the run moves on, and publishing them again is
+  safe — a SKU another request is still creating is refused, not duplicated. **Force reimport** additionally targets products the store
   already has — refreshing name/size list and recreating the variation set —
   and is the one destructive option, so it is opt-in, separately labelled,
   and armed only by a dry run of the exact selection. Products whose feed no longer covers them
