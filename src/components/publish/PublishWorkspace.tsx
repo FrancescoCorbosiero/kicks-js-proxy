@@ -12,6 +12,7 @@ import { listPublishSkus, type PublishActionResult } from "@/server/actions/publ
 import type { PublishOutcome, PublishProductReport, PublishTarget } from "@/server/woo/publish";
 import { hasMixedSources, type PublishCounts, type PublishSourceLens } from "@/lib/publish-page";
 import { mergeQuery, type QueryParams } from "@/lib/qs";
+import { FIRST_BATCH, nextBatchSize, nextPace } from "@/lib/publish-batching";
 import { CardImage } from "@/components/catalog/CardImage";
 import { RepairPanel } from "./RepairPanel";
 
@@ -22,17 +23,12 @@ import { RepairPanel } from "./RepairPanel";
  * the server (PAGE_LIMIT) — the browser is never sent more rows than that.
  *
  * The SELECTION is not bounded: "select all" takes every product the filters
- * match, and the run walks them BATCH_SIZE at a time, so the store sees the
- * same steady trickle of calls for 40 products as for 400 — only for longer.
- * A long run can be stopped between batches, and leaving the page asks first.
+ * match, and the run walks them a batch at a time — each sized from the
+ * shop's measured pace to stay well inside Cloudflare's 100 seconds (see
+ * lib/publish-batching) — so the store sees the same steady trickle of calls
+ * for 40 products as for 400, only for longer. A long run can be stopped
+ * between batches, and leaving the page asks first.
  */
-/**
- * SKUs per publish call. Small because of what sits in front of the Hub:
- * Cloudflare gives up on a request after 100 seconds (HTTP 524), and creating
- * a product makes WooCommerce download its images on the spot — 10-20 s a
- * product on a real shop. Six, three at a time, is two rounds: well inside.
- */
-const BATCH_SIZE = 6;
 /** Answers from the proxy in front, not the app: it stopped waiting. */
 const PROXY_GAVE_UP = new Set([502, 503, 504, 520, 522, 524]);
 /** Such answers in a row before a run stops: the server itself is in trouble. */
@@ -125,7 +121,12 @@ export function PublishWorkspace({
   const running = React.useRef(false);
   const [, startFilter] = React.useTransition();
   const [outcome, setOutcome] = React.useState<PublishOutcome | null>(null);
-  const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
+  const [progress, setProgress] = React.useState<{
+    done: number;
+    total: number;
+    /** Time left at the pace so far; null until the first batch has set one. */
+    msLeft: number | null;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   // Publishing without a dry run: one explicit "yes" first.
   const [confirming, setConfirming] = React.useState(false);
@@ -234,20 +235,26 @@ export function PublishWorkspace({
     setUnanswered(0);
     stopRef.current = false;
     const skus = runnable;
-    setProgress(skus.length > BATCH_SIZE ? { done: 0, total: skus.length } : null);
+    const many = skus.length > FIRST_BATCH;
+    setProgress(many ? { done: 0, total: skus.length, msLeft: null } : null);
     setBusy(true);
     if (!dryRun) setLiveRunning(true);
     let merged: PublishOutcome | null = null;
     let lost = 0;
     let proxyFailures = 0;
+    let size = FIRST_BATCH;
+    let pace: number | null = null; // ms per product, smoothed
     try {
-      for (let i = 0; i < skus.length; i += BATCH_SIZE) {
+      for (let i = 0; i < skus.length; ) {
         if (stopRef.current) {
           setStopped({ done: i, total: skus.length });
           break;
         }
-        const batch = skus.slice(i, i + BATCH_SIZE);
-        if (skus.length > BATCH_SIZE) setProgress({ done: i, total: skus.length });
+        const batch = skus.slice(i, i + size);
+        if (many) {
+          setProgress({ done: i, total: skus.length, msLeft: pace == null ? null : (skus.length - i) * pace });
+        }
+        const started = performance.now();
         let res: PublishActionResult;
         try {
           res = await publishBatch({
@@ -270,9 +277,17 @@ export function PublishWorkspace({
             setError(t.publish.proxyGaveUp(e.status, MAX_PROXY_FAILURES));
             break;
           }
+          // The time the proxy waited counts as this batch's pace: the next
+          // one comes out smaller.
+          pace = nextPace(pace, performance.now() - started, batch.length);
+          size = nextBatchSize(size, pace);
+          i += batch.length;
           continue;
         }
         proxyFailures = 0;
+        pace = nextPace(pace, performance.now() - started, batch.length);
+        size = nextBatchSize(size, pace);
+        i += batch.length;
         if (!res.ok || !res.outcome) {
           setError(res.error ?? t.publish.failed);
           break;
@@ -308,7 +323,9 @@ export function PublishWorkspace({
   }
 
   const runningLabel = progress
-    ? t.publish.progress(progress.done, progress.total)
+    ? progress.msLeft == null
+      ? t.publish.progress(progress.done, progress.total)
+      : `${t.publish.progress(progress.done, progress.total)} · ${t.publish.timeLeft(Math.round(progress.msLeft / 60_000))}`
     : t.publish.running;
 
   // A dry run of exactly what will run: publishing then needs no confirmation

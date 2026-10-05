@@ -987,6 +987,8 @@ export const it = {
       `Risposta inattesa dal server (HTTP ${status}): forse la sessione è scaduta. Ricarica la pagina e riprendi: i prodotti già creati non vengono duplicati.`,
     running: "In corso…",
     progress: (done: number, total: number) => `In corso… ${done}/${total}`,
+    timeLeft: (minutes: number) =>
+      minutes < 1 ? "manca meno di un minuto" : `mancano circa ${minutes} min`,
     failed: "Pubblicazione fallita",
     dryRunTitle: "Prova a vuoto — nulla è stato scritto",
     liveTitle: "Pubblicazione eseguita",
