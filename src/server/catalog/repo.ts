@@ -213,9 +213,12 @@ export async function countUnpublishedCandidates(market: string): Promise<number
   try {
     const res = await db.execute(sql`
       with store_skus as (
+        -- On the store = carried by a product WITH sizes (see listSizelessStoreSkus).
         select distinct upper(trim(p->>'sku')) as sku
         from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
         where ${storeSnapshot.id} = ${SNAPSHOT_ID} and coalesce(trim(p->>'sku'), '') <> ''
+          and case when jsonb_typeof(p->'variations') = 'array'
+                   then jsonb_array_length(p->'variations') else 0 end > 0
       )
       select count(*)::int as n
       from ${catalogProducts} c

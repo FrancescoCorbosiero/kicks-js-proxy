@@ -635,6 +635,11 @@ export function PublishWorkspace({
                     {c.source === "goldensneakers" ? "GS" : "StockX"}
                   </Badge>
                 )}
+                {c.sizeless && (
+                  <Badge variant="warn" title={t.publish.sizelessHint}>
+                    {t.publish.sizeless}
+                  </Badge>
+                )}
                 {c.onStore && <Badge variant="skip">{t.publish.alreadyOnStore}</Badge>}
               </label>
             </li>
@@ -660,6 +665,7 @@ function mergeOutcomes(a: PublishOutcome, b: PublishOutcome): PublishOutcome {
     products: [...a.products, ...b.products],
     created: a.created + b.created,
     reimported: a.reimported + b.reimported,
+    completed: a.completed + b.completed,
     variations: a.variations + b.variations,
     skipped: a.skipped + b.skipped,
     failed: a.failed + b.failed,
@@ -676,6 +682,7 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
   const gtins = outcome.products.reduce((n, p) => n + p.gtins, 0);
   const rejectedGtins = outcome.products.reduce((n, p) => n + p.rejectedGtins.length, 0);
   const reimported = outcome.products.filter((p) => p.action === "reimport");
+  const completed = outcome.products.filter((p) => p.action === "complete");
   const skipped = outcome.products.filter((p) => p.action === "skip");
 
   return (
@@ -687,6 +694,11 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
         {created.length > 0 && <Badge variant="create">{t.publish.willCreate(created.length)}</Badge>}
         {reimported.length > 0 && (
           <Badge variant="update">{t.publish.willReimport(reimported.length)}</Badge>
+        )}
+        {completed.length > 0 && (
+          <Badge variant="warn" title={t.publish.sizelessHint}>
+            {t.publish.willComplete(completed.length)}
+          </Badge>
         )}
         {skipped.length > 0 && <Badge variant="skip">{t.publish.wasSkipped(skipped.length)}</Badge>}
         {!outcome.dryRun && (
@@ -765,6 +777,7 @@ function ReportRow({
           {t.publish.rejectedGtins(report.rejectedGtins.length)}
         </span>
       )}
+      {report.action === "complete" && <span className="text-warn">{t.publish.completeNote}</span>}
       {report.reason && <span className="text-faint">{t.publish.skipReasons[report.reason]}</span>}
       {report.error && <span className="font-medium text-skip">{report.error}</span>}
       {!dryRun && href && (

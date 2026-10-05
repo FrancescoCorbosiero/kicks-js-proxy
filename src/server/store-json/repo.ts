@@ -158,6 +158,30 @@ export async function listStoreSkus(): Promise<Set<string>> {
 }
 
 /**
+ * Store SKUs with no sizes at all — on every product that carries them.
+ *
+ * A publish that broke half-way leaves exactly this: the parent was created,
+ * its sizes never were. Such a product sells nothing, so Publish does not
+ * count it as published (it lists it again, and the run gives it its sizes).
+ */
+export async function listSizelessStoreSkus(): Promise<Set<string>> {
+  try {
+    const res = await db.execute(sql`
+      select upper(trim(p->>'sku')) as sku
+      from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
+      where ${storeSnapshot.id} = ${SINGLETON} and coalesce(trim(p->>'sku'), '') <> ''
+      group by 1
+      having max(case when jsonb_typeof(p->'variations') = 'array'
+                      then jsonb_array_length(p->'variations') else 0 end) = 0
+    `);
+    return new Set(rowsOf<{ sku: string }>(res).map((r) => r.sku));
+  } catch (e) {
+    console.warn("[snapshot] sizeless SKUs skipped:", e instanceof Error ? e.message : e);
+    return new Set();
+  }
+}
+
+/**
  * How many store SKUs appear on MORE than one product — the dashboard's
  * duplicate banner. Computed in SQL over the jsonb so the dashboard never
  * loads the multi-MB snapshot blob. Best-effort: 0 on any error.
