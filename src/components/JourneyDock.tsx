@@ -10,8 +10,6 @@ import { useI18n } from "@/i18n/provider";
 import type { Dictionary } from "@/i18n/dictionary";
 import { hubConfig } from "@/config";
 import { EMPTY_DOCK_STATUS, type DockStatus } from "@/lib/dock";
-import { LanguageSwitcher } from "./LanguageSwitcher";
-import { ThemeToggle } from "./ThemeToggle";
 
 /**
  * The operator area's navigation: a floating dock at the bottom of the
@@ -21,8 +19,8 @@ import { ThemeToggle } from "./ThemeToggle";
  * carries its live number (what's waiting there), polled from /api/dock.
  *
  * Pages that are set up once and rarely touched (hubConfig.ui.setup: margins,
- * taxonomies, feeds) stay off the path, in the menu at the dock's end with
- * the preferences and sign-out.
+ * taxonomies, feeds) stay off the path, in the menu at the dock's end. Who is
+ * signed in, the language and the theme live in the top bar (TopBar.tsx).
  */
 
 type IconName =
@@ -131,12 +129,7 @@ function Here() {
   );
 }
 
-export function JourneyDock({
-  signOut,
-}: {
-  /** Sign-out link and who is signed in; null in local development. */
-  signOut: { href: string; name: string } | null;
-}) {
+export function JourneyDock() {
   const { t, locale } = useI18n();
   const pathname = usePathname();
 
@@ -254,7 +247,7 @@ export function JourneyDock({
 
           <span aria-hidden className="mx-1 h-6 w-px shrink-0 bg-line-strong sm:mx-1.5" />
 
-          <SetupMenu items={setup} pathname={pathname} signOut={signOut} />
+          <SetupMenu items={setup} pathname={pathname} />
         </div>
       </nav>
     </>
@@ -317,11 +310,9 @@ function HoverCard({ eyebrow, title, hint }: { eyebrow?: string; title: string; 
 function SetupMenu({
   items,
   pathname,
-  signOut,
 }: {
   items: { href: string; info: RouteInfo }[];
   pathname: string;
-  signOut: { href: string; name: string } | null;
 }) {
   const { t } = useI18n();
   // Open "on" a page: navigating anywhere closes it, with no effect to sync.
@@ -404,22 +395,6 @@ function SetupMenu({
               </Link>
             );
           })}
-          <div className="mx-2 my-2 h-px bg-line" />
-          <div className="flex items-center gap-2 px-2 pb-1">
-            <span className="mr-auto text-xs font-medium text-faint">{t.dock.preferences}</span>
-            <LanguageSwitcher />
-            <ThemeToggle />
-          </div>
-          {signOut && (
-            <a
-              href={signOut.href}
-              role="menuitem"
-              className="mt-1 flex items-center justify-between rounded-xl px-2 py-2 text-[13px] transition-colors hover:bg-surface-2"
-            >
-              <span className="truncate text-muted">{t.account.signedInAs(signOut.name)}</span>
-              <span className="shrink-0 font-medium text-ink">{t.account.logout}</span>
-            </a>
-          )}
         </div>
       )}
     </div>

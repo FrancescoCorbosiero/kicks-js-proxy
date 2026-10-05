@@ -68,7 +68,15 @@ export const it = {
     marginsHint: "Le regole di prezzo e i ricarichi.",
     taxonomiesHint: "Categorie e campi identità sul negozio.",
     feedsHint: "Le sorgenti che alimentano il catalogo.",
-    preferences: "Preferenze",
+  },
+  topBar: {
+    openShop: "Apri il negozio",
+    notConnected: "WooCommerce non collegato",
+    notConnectedHint:
+      "Mancano le credenziali di WooCommerce (WOO_BASE_URL e chiavi API): chiedi a chi gestisce il server.",
+    account: "Account",
+    language: "Lingua",
+    theme: "Tema",
   },
   dashboard: {
     title: "Panoramica",
@@ -922,7 +930,7 @@ export const it = {
     identitySkipped: (list: string) =>
       `Tassonomie non scrivibili su questo negozio: ${list}. I prodotti sono stati creati lo stesso, ma senza quei campi le vetrine esterne li vedono incompleti.`,
     title: "Pubblica",
-    desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine, giacenze reali del fornitore e immagini. Prima una prova a vuoto, poi la scrittura vera.",
+    desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine, giacenze reali del fornitore e immagini. Con la prova a vuoto vedi prima cosa verrà creato, senza scrivere nulla.",
     notConfigured:
       "WooCommerce non è configurato (WOO_BASE_URL e chiavi API): non è possibile pubblicare.",
     noSnapshot:
@@ -940,6 +948,9 @@ export const it = {
       feedDelisted: "il listino del fornitore non copre più questo SKU — sincronizza prima il feed",
     },
     selectAll: "Seleziona tutti",
+    selectingAll: "Seleziono…",
+    selectedHidden: (n: number) =>
+      n === 1 ? "1 selezionato non è visibile qui sotto" : `${n} selezionati non sono visibili qui sotto`,
     clear: "Deseleziona",
     gallery: "Carica anche le foto aggiuntive",
     galleryHint:
@@ -954,7 +965,21 @@ export const it = {
       "Di default il reimport lascia le immagini che ci sono già sul negozio (ricaricarle ogni volta le duplicherebbe nella libreria media).",
     dryRun: (n: number) => `Prova a vuoto (${n})`,
     publishNow: (n: number) => `Pubblica ${n} sul negozio`,
-    dryRunFirst: "Fai prima una prova a vuoto della selezione attuale.",
+    forceDryRunFirst:
+      "Con «Forza reimport» serve prima una prova a vuoto: elimina e ricrea le taglie di prodotti già online.",
+    confirmNoDryRun: (n: number) =>
+      `Pubblichi ${n === 1 ? "1 prodotto" : `${n} prodotti`} senza prova a vuoto? Vengono creati subito sul negozio. Ogni SKU viene comunque controllato dal vivo: quelli che ci sono già vengono saltati.`,
+    confirmPublish: (n: number) => `Sì, pubblica ${n}`,
+    cancel: "Annulla",
+    stop: "Ferma",
+    stopping: "Mi fermo dopo questo blocco…",
+    stoppedAt: (done: number, total: number) =>
+      `Fermata dopo ${done} di ${total}: gli altri restano selezionati.`,
+    keepOpen: "Tieni aperta questa pagina finché non finisce: la pubblicazione avanza da qui.",
+    leaveWarning:
+      "La pubblicazione è in corso: se esci da questa pagina si ferma dopo il blocco attuale. Uscire comunque?",
+    unexpectedResponse: (status: number) =>
+      `Risposta inattesa dal server (HTTP ${status}): forse la sessione è scaduta. Ricarica la pagina e riprendi: i prodotti già creati non vengono duplicati.`,
     running: "In corso…",
     progress: (done: number, total: number) => `In corso… ${done}/${total}`,
     failed: "Pubblicazione fallita",
@@ -975,8 +1000,6 @@ export const it = {
     noMatches: "Nessun prodotto corrisponde a questi filtri.",
     truncated: (n: number) =>
       `Mostrati i primi 300 di ${n} — restringi con la ricerca: filtra sull'intero catalogo, non solo su questi.`,
-    runCapped: (max: number, held: number) =>
-      `Questa esecuzione ne prende ${max}: pubblicare crea un prodotto e una chiamata per taglia, e il negozio non regge di più in un colpo solo. Gli altri ${held} restano selezionati per il giro successivo.`,
     reportTruncated: (n: number) => `…e altre ${n} righe (i totali qui sopra le comprendono).`,
   },
   account: {

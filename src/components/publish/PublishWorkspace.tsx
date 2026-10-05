@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { mutate } from "swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useI18n } from "@/i18n/provider";
-import { runPublish } from "@/server/actions/publish";
+import { listPublishSkus, type PublishActionResult } from "@/server/actions/publish";
 import type { PublishOutcome, PublishProductReport, PublishTarget } from "@/server/woo/publish";
 import { hasMixedSources, type PublishCounts, type PublishSourceLens } from "@/lib/publish-page";
 import { mergeQuery, type QueryParams } from "@/lib/qs";
@@ -17,33 +18,64 @@ import { RepairPanel } from "./RepairPanel";
 /**
  * Bounds, all for the same reason: everything below is rendered by the browser,
  * and the catalog has no ceiling. A shop with 4000 unpublished products must
- * cost the same in DOM nodes and in requests as a shop with 40. The list's own
- * bound lives on the server (PAGE_LIMIT) — the browser is never sent more.
+ * cost the same in DOM nodes as a shop with 40. The list's own bound lives on
+ * the server (PAGE_LIMIT) — the browser is never sent more rows than that.
+ *
+ * The SELECTION is not bounded: "select all" takes every product the filters
+ * match, and the run walks them BATCH_SIZE at a time, so the store sees the
+ * same steady trickle of calls for 40 products as for 400 — only for longer.
+ * A long run can be stopped between batches, and leaving the page asks first.
  */
-/**
- * SKUs one run may touch — the server action's own per-call cap. Publishing is
- * a create per product plus a call per size plus media, so this is already
- * thousands of writes against the live store; a click must never queue more.
- */
-const RUN_LIMIT = 200;
-/** SKUs per publish call: RUN_LIMIT split into requests the server survives. */
+/** SKUs per publish call: one request the server comfortably survives. */
 const BATCH_SIZE = 25;
 /** Report rows rendered. The counters above them always cover the whole run. */
 const REPORT_LIMIT = 60;
 
 /**
- * The Publisher's workspace: the catalog→store delta, selectable, with a
- * mandatory dry run in front of the real write.
+ * The Publisher's workspace: the catalog→store delta, selectable, with a dry
+ * run to see what would be written before writing it.
  *
- * The posture is deliberately more cautious than the sync tab's. Repricing is
- * reversible — write the old number back. Creating a product is not: an
- * accidental parent has to be hunted down in wp-admin. So nothing is selected
- * by default, the live run is armed only after a dry run has been seen, and
- * force reimport (which DELETES and recreates a live product's sizes) is a
- * separate, explicitly-labelled opt-in.
+ * Creating a product is not reversible the way a price is — an accidental
+ * parent has to be hunted down in wp-admin — so nothing is selected by
+ * default and publishing without a dry run asks for a confirmation first.
+ * The dry run is not what keeps duplicates out: the live run itself checks
+ * every SKU against the store right before creating it. Force reimport is
+ * different — it DELETES and recreates a live product's sizes — so that one
+ * still requires a dry run of exactly the selection before it is armed.
  */
 
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
+
+/** The server answered with something that is not the route's JSON. */
+class UnexpectedResponse extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+  }
+}
+
+/**
+ * One batch through /api/publish rather than the server action itself: an
+ * action in flight holds every page change behind it (see the route), and a
+ * run is batch after batch of them.
+ */
+async function publishBatch(input: {
+  skus: string[];
+  dryRun: boolean;
+  includeGallery: boolean;
+  force: boolean;
+  replaceMedia: boolean;
+}): Promise<PublishActionResult> {
+  const res = await fetch("/api/publish", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  // A sign-in that expired mid-run answers with the sign-in page, not JSON.
+  if (!res.headers.get("content-type")?.includes("application/json")) {
+    throw new UnexpectedResponse(res.status);
+  }
+  return (await res.json()) as PublishActionResult;
+}
 
 /** Keystrokes settle before the server is asked — same as discovery's. */
 const DEBOUNCE_MS = 350;
@@ -76,11 +108,25 @@ export function PublishWorkspace({
   const [includeGallery, setIncludeGallery] = React.useState(false);
   const [force, setForce] = React.useState(false);
   const [replaceMedia, setReplaceMedia] = React.useState(false);
-  const [busy, startRun] = React.useTransition();
+  // Plain state, not a transition: React holds a navigation started while a
+  // transition's async work is pending until that work is done, and a run is
+  // minutes of it — following any link mid-run waited for the whole run.
+  const [busy, setBusy] = React.useState(false);
+  // The same, synchronously: two clicks in one frame must not start two runs.
+  const running = React.useRef(false);
   const [, startFilter] = React.useTransition();
   const [outcome, setOutcome] = React.useState<PublishOutcome | null>(null);
   const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // Publishing without a dry run: one explicit "yes" first.
+  const [confirming, setConfirming] = React.useState(false);
+  const [selectingAll, setSelectingAll] = React.useState(false);
+  // Stop between batches: the batch in flight finishes (its products are
+  // independent of each other), nothing after it starts.
+  const stopRef = React.useRef(false);
+  const [stopping, setStopping] = React.useState(false);
+  const [stopped, setStopped] = React.useState<{ done: number; total: number } | null>(null);
+  const [liveRunning, setLiveRunning] = React.useState(false);
 
   // The URL is the source of truth for the three filters; `term` is a local
   // echo so typing stays responsive between debounced pushes.
@@ -116,6 +162,7 @@ export function PublishWorkspace({
 
   function toggle(sku: string) {
     setOutcome(null);
+    setConfirming(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(sku)) next.delete(sku);
@@ -124,39 +171,68 @@ export function PublishWorkspace({
     });
   }
 
-  function selectAllVisible() {
+  /**
+   * Every product the filters match — not just the rows on screen, which stop
+   * at the server's PAGE_LIMIT. Asked from the server at click time, so the
+   * page never has to carry the whole delta just in case.
+   */
+  async function selectAll() {
     setOutcome(null);
-    // The rows on screen, and no more. Selecting the whole filtered set while
-    // only a page of it was rendered handed a single click a catalog-sized
-    // run: on a 4000-product shop that was 160 back-to-back publish calls,
-    // each one creating products on the live store, and a report the browser
-    // had to keep growing in the DOM until the tab died.
-    setSelected(new Set(visible.slice(0, RUN_LIMIT).map((c) => c.sku)));
+    setConfirming(false);
+    setError(null);
+    setSelectingAll(true);
+    try {
+      // The LIVE URL's filters, like pushFilter: a debounced search may have
+      // moved it since this render.
+      const sp = new URLSearchParams(window.location.search);
+      const src = sp.get("src");
+      const res = await listPublishSkus({
+        q: sp.get("q") ?? undefined,
+        source: src === "goldensneakers" || src === "kicksdb" ? src : "all",
+        showOnStore: sp.get("onStore") === "1",
+      });
+      if (res.ok) setSelected(new Set(res.skus));
+      else setError(res.error);
+    } finally {
+      setSelectingAll(false);
+    }
   }
 
   function clearSelection() {
     setOutcome(null);
+    setConfirming(false);
     setSelected(new Set());
   }
 
-  /**
-   * What a click will actually touch: the selection, bounded. Anything past
-   * RUN_LIMIT stays ticked and goes in the next run — better a second click
-   * than a browser tab issuing unbounded write calls at the store until one
-   * of them times out.
-   */
-  const runnable = React.useMemo(() => [...selected].slice(0, RUN_LIMIT), [selected]);
-  const heldBack = selected.size - runnable.length;
+  const runnable = React.useMemo(() => [...selected], [selected]);
+  // Selected but not on screen: past the list's first rows, or filtered out
+  // by a search typed after selecting. Said, so the count never surprises.
+  const hiddenSelected = React.useMemo(() => {
+    const shown = new Set(visible.map((c) => c.sku));
+    return runnable.filter((sku) => !shown.has(sku)).length;
+  }, [runnable, visible]);
 
-  function run(dryRun: boolean) {
+  async function run(dryRun: boolean) {
+    if (running.current) return;
+    running.current = true;
     setError(null);
+    setConfirming(false);
+    setStopped(null);
+    setStopping(false);
+    stopRef.current = false;
     const skus = runnable;
     setProgress(skus.length > BATCH_SIZE ? { done: 0, total: skus.length } : null);
-    startRun(async () => {
-      let merged: PublishOutcome | null = null;
+    setBusy(true);
+    if (!dryRun) setLiveRunning(true);
+    let merged: PublishOutcome | null = null;
+    try {
       for (let i = 0; i < skus.length; i += BATCH_SIZE) {
+        if (stopRef.current) {
+          setStopped({ done: i, total: skus.length });
+          break;
+        }
         const batch = skus.slice(i, i + BATCH_SIZE);
-        const res = await runPublish({
+        const res = await publishBatch({
           skus: batch,
           dryRun,
           includeGallery,
@@ -173,28 +249,96 @@ export function PublishWorkspace({
           setProgress({ done: Math.min(i + BATCH_SIZE, skus.length), total: skus.length });
         }
       }
+    } catch (e) {
+      setError(
+        e instanceof UnexpectedResponse
+          ? t.publish.unexpectedResponse(e.status)
+          : e instanceof Error
+            ? e.message
+            : t.publish.failed,
+      );
+    } finally {
+      running.current = false;
       setProgress(null);
-      // A live run changed the store: re-read the delta so published products
-      // leave the list instead of lingering as phantom candidates. Only what
-      // actually ran is unticked — a selection held back by RUN_LIMIT is still
-      // waiting, and clearing it would silently drop work the operator asked for.
-      if (!dryRun && merged) {
-        const ran = new Set(merged.products.map((p) => p.sku));
-        setSelected((prev) => new Set([...prev].filter((sku) => !ran.has(sku))));
-        router.refresh();
-      }
-    });
+      setStopping(false);
+      setLiveRunning(false);
+      setBusy(false);
+    }
+    // A live run changed the store: re-read the delta so published products
+    // leave the list instead of lingering as phantom candidates. Only what
+    // actually ran is unticked — a run that was stopped leaves the rest
+    // selected, and clearing it would silently drop work the operator asked for.
+    if (!dryRun && merged && mounted.current) {
+      const ran = new Set(merged.products.map((p) => p.sku));
+      setSelected((prev) => new Set([...prev].filter((sku) => !ran.has(sku))));
+      router.refresh();
+      void mutate("/api/dock"); // the dock's "to publish" count, now
+    }
   }
 
   const runningLabel = progress
     ? t.publish.progress(progress.done, progress.total)
     : t.publish.running;
 
-  // The live button unlocks only after a dry run of exactly what will run.
+  // A dry run of exactly what will run: publishing then needs no confirmation
+  // (it was just reviewed), and force reimport is armed only by it.
   const dryRunSeen =
     outcome?.dryRun === true &&
     outcome.products.length === runnable.length &&
     outcome.products.every((p) => selected.has(p.sku));
+
+  function publish() {
+    if (dryRunSeen) void run(false);
+    else setConfirming(true);
+  }
+
+  // Leaving the page stops the run after the batch in flight (see below), so
+  // a live run warns first: closing the tab…
+  React.useEffect(() => {
+    if (!liveRunning) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [liveRunning]);
+
+  // …and following a link inside the Hub (the dock, a card). Captured on the
+  // document, ahead of the router's own click handling, so "stay" can still
+  // cancel the click. The loop is told to stop right away rather than when
+  // the page unmounts: no batch may start once leaving has been decided.
+  React.useEffect(() => {
+    if (!busy) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = (e.target as Element | null)?.closest?.("a[href]");
+      if (!(link instanceof HTMLAnchorElement) || link.target === "_blank") return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      if (liveRunning && !window.confirm(t.publish.leaveWarning)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      // The batch in flight completes on the server; nothing after it starts.
+      stopRef.current = true;
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [busy, liveRunning, t]);
+
+  // Gone from the page = no one watching the run: it stops after the batch in
+  // flight rather than carry on unseen, where a second run started on coming
+  // back could race it to the same SKUs.
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopRef.current = true;
+    };
+  }, []);
 
   if (!wooConfigured) {
     return (
@@ -260,8 +404,8 @@ export function PublishWorkspace({
           {t.publish.showOnStore}
         </label>
         <div className="ml-auto flex items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={selectAllVisible}>
-            {t.publish.selectAll}
+          <Button type="button" variant="ghost" size="sm" onClick={() => void selectAll()} disabled={selectingAll || busy}>
+            {selectingAll ? t.publish.selectingAll : t.publish.selectAll}
           </Button>
           <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
             {t.publish.clear}
@@ -288,6 +432,7 @@ export function PublishWorkspace({
               checked={force}
               onCheckedChange={(c) => {
                 setOutcome(null);
+                setConfirming(false);
                 setForce(c === true);
                 if (c !== true) setReplaceMedia(false);
               }}
@@ -310,33 +455,80 @@ export function PublishWorkspace({
         {force && <p className="text-[11px] leading-snug text-skip">{t.publish.forceWarning}</p>}
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => run(true)}
-            disabled={busy || runnable.length === 0}
-          >
-            {busy ? runningLabel : t.publish.dryRun(runnable.length)}
-          </Button>
-          <Button
-            type="button"
-            variant="accent"
-            onClick={() => run(false)}
-            disabled={busy || runnable.length === 0 || !dryRunSeen}
-            title={!dryRunSeen ? t.publish.dryRunFirst : undefined}
-          >
-            {busy ? runningLabel : t.publish.publishNow(runnable.length)}
-          </Button>
-          {!dryRunSeen && runnable.length > 0 && (
-            <span className="text-[11px] text-faint">{t.publish.dryRunFirst}</span>
+          {busy ? (
+            <>
+              <span className="inline-flex items-center gap-2 text-sm font-medium tnum">
+                <span
+                  aria-hidden
+                  className="spin h-3.5 w-3.5 rounded-full border-2 border-line-strong border-t-accent-strong"
+                />
+                {runningLabel}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  stopRef.current = true;
+                  setStopping(true);
+                }}
+                disabled={stopping}
+              >
+                {stopping ? t.publish.stopping : t.publish.stop}
+              </Button>
+              {liveRunning && <span className="text-[11px] text-faint">{t.publish.keepOpen}</span>}
+            </>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void run(true)}
+                disabled={runnable.length === 0}
+              >
+                {t.publish.dryRun(runnable.length)}
+              </Button>
+              <Button
+                type="button"
+                variant="accent"
+                onClick={publish}
+                disabled={runnable.length === 0 || (force && !dryRunSeen)}
+                title={force && !dryRunSeen ? t.publish.forceDryRunFirst : undefined}
+              >
+                {t.publish.publishNow(runnable.length)}
+              </Button>
+              {force && !dryRunSeen && runnable.length > 0 && (
+                <span className="text-[11px] text-faint">{t.publish.forceDryRunFirst}</span>
+              )}
+            </>
           )}
-          {heldBack > 0 && (
-            <span className="text-[11px] font-medium text-warn">
-              {t.publish.runCapped(RUN_LIMIT, heldBack)}
-            </span>
+          {hiddenSelected > 0 && (
+            <span className="text-[11px] text-muted">{t.publish.selectedHidden(hiddenSelected)}</span>
           )}
           {error && <span className="text-sm font-medium text-skip">{error}</span>}
         </div>
+
+        {confirming && !busy && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent/8 px-3 py-2.5 animate-pop">
+            <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink">
+              {t.publish.confirmNoDryRun(runnable.length)}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+                {t.publish.cancel}
+              </Button>
+              <Button type="button" variant="accent" size="sm" onClick={() => void run(false)}>
+                {t.publish.confirmPublish(runnable.length)}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {stopped && (
+          <p className="text-[11px] font-medium text-warn">
+            {t.publish.stoppedAt(stopped.done, stopped.total)}
+          </p>
+        )}
       </div>
 
       {outcome && <OutcomePanel outcome={outcome} siteUrl={siteUrl} />}

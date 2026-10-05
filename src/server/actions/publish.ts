@@ -4,6 +4,7 @@ import { z } from "zod";
 import { wooConfigured } from "@/server/woo/client";
 import type { PublishPage, PublishQuery } from "@/lib/publish-page";
 import {
+  listPublishTargetSkus,
   listPublishTargets,
   publishProducts,
   type PublishOutcome,
@@ -42,6 +43,25 @@ export async function getPublishState(query: PublishQuery = {}): Promise<Publish
       matched: 0,
       hasSnapshot: false,
     };
+  }
+}
+
+const SkusQuerySchema = z.object({
+  q: z.string().max(200).optional(),
+  source: z.enum(["all", "goldensneakers", "kicksdb"]).optional(),
+  showOnStore: z.boolean().optional(),
+});
+
+/** Every SKU the tab's filters match, for "select all" — past the rendered page too. */
+export async function listPublishSkus(
+  input: unknown,
+): Promise<{ ok: true; skus: string[] } | { ok: false; error: string }> {
+  const parsed = SkusQuerySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    return { ok: true, skus: await listPublishTargetSkus(parsed.data) };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 

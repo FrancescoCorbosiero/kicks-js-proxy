@@ -61,7 +61,15 @@ export const en: Dictionary = {
     marginsHint: "Pricing rules and markups.",
     taxonomiesHint: "Categories and identity fields on the store.",
     feedsHint: "The sources that feed the catalog.",
-    preferences: "Preferences",
+  },
+  topBar: {
+    openShop: "Open the store",
+    notConnected: "WooCommerce not connected",
+    notConnectedHint:
+      "The WooCommerce credentials are missing (WOO_BASE_URL and API keys): ask whoever manages the server.",
+    account: "Account",
+    language: "Language",
+    theme: "Theme",
   },
   dashboard: {
     title: "Overview",
@@ -905,7 +913,7 @@ export const en: Dictionary = {
     identitySkipped: (list: string) =>
       `Taxonomies this store would not take: ${list}. The products were still created, but external catalogs will see them incomplete without those fields.`,
     title: "Publish",
-    desc: "The products in your catalog that are not on the store yet. Select them and they get created on WooCommerce: product, EU sizes, prices from the margin rules, real supplier stock and images. Dry run first, real write second.",
+    desc: "The products in your catalog that are not on the store yet. Select them and they get created on WooCommerce: product, EU sizes, prices from the margin rules, real supplier stock and images. A dry run shows what would be created first, without writing anything.",
     notConfigured: "WooCommerce is not configured (WOO_BASE_URL and API keys): publishing is unavailable.",
     noSnapshot:
       "No store snapshot: pull one from the Sync tab, otherwise the list below may offer products the store already has. (Every SKU is still verified live before anything is created.)",
@@ -922,6 +930,8 @@ export const en: Dictionary = {
       feedDelisted: "the supplier feed no longer covers this SKU — sync the feed first",
     },
     selectAll: "Select all",
+    selectingAll: "Selecting…",
+    selectedHidden: (n) => (n === 1 ? "1 selected isn't shown below" : `${n} selected aren't shown below`),
     clear: "Clear",
     gallery: "Upload the extra photos too",
     galleryHint:
@@ -936,7 +946,19 @@ export const en: Dictionary = {
       "By default a reimport keeps the images already on the store (re-uploading them every time would duplicate them in the media library).",
     dryRun: (n: number) => `Dry run (${n})`,
     publishNow: (n: number) => `Publish ${n} to the store`,
-    dryRunFirst: "Dry-run the current selection first.",
+    forceDryRunFirst:
+      "Force reimport needs a dry run first: it deletes and recreates the sizes of products already online.",
+    confirmNoDryRun: (n) =>
+      `Publish ${n === 1 ? "1 product" : `${n} products`} without a dry run? They are created on the store right away. Every SKU is still checked live first: the ones already there are skipped.`,
+    confirmPublish: (n) => `Yes, publish ${n}`,
+    cancel: "Cancel",
+    stop: "Stop",
+    stopping: "Stopping after this batch…",
+    stoppedAt: (done, total) => `Stopped after ${done} of ${total}: the rest stay selected.`,
+    keepOpen: "Keep this page open until it finishes: publishing runs from here.",
+    leaveWarning: "Publishing is running: leaving this page stops it after the current batch. Leave anyway?",
+    unexpectedResponse: (status) =>
+      `Unexpected answer from the server (HTTP ${status}): the sign-in may have expired. Reload the page and carry on: products already created are not duplicated.`,
     running: "Running…",
     progress: (done: number, total: number) => `Running… ${done}/${total}`,
     failed: "Publish failed",
@@ -956,8 +978,6 @@ export const en: Dictionary = {
     noMatches: "No product matches these filters.",
     truncated: (n: number) =>
       `Showing the first 300 of ${n} — narrow with search: it filters the whole catalog, not just these.`,
-    runCapped: (max: number, held: number) =>
-      `This run takes ${max}: publishing is a product plus a call per size, and the store cannot take more in one go. The other ${held} stay selected for the next run.`,
     reportTruncated: (n: number) => `…and ${n} more rows (the totals above include them).`,
   },
   account: {
