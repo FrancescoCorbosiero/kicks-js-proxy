@@ -204,19 +204,29 @@ runs three cadences:
 
   A failed step doesn't stop the others and is retried an hour later, twice
   at most. `SCHEDULER_TIMES=04:30,13:30` runs it twice a day.
-- **The feed cycle**, every `SCHEDULER_FEEDS_MINUTES` on the clock (`30` runs
-  at :00 and :30; default `0` = off). It runs the GoldenSneakers sync, then,
-  with `AUTO_SYNC=on`, the store sync of the feed's products. KicksDB-priced
-  products wait for the daily sync, because planning them asks KicksDB about
-  every one of them, every time. A cycle skips its turn while another run is
-  going, and the daily sync waits for a cycle to finish.
+- **The feed cycle**, every `SCHEDULER_FEEDS_MINUTES` on the clock (`15` runs
+  at :00, :15, :30 and :45). It is on by default, every 15 minutes, when the
+  GoldenSneakers API is set (`GS_FEED_URL` and `GS_FEED_TOKEN`); `0` turns it
+  off. It runs the GoldenSneakers sync, then the store sync of the feed's
+  products (unless `AUTO_SYNC=off`), so the store follows the feed within a
+  quarter of an hour. KicksDB-priced products wait for the daily sync,
+  because planning them asks KicksDB about every one of them, every time. A
+  cycle skips its turn while another run is going, and the daily sync waits
+  for a cycle to finish.
 - **The orders pull**, every `SCHEDULER_ORDERS_MINUTES` (default 15; `0` =
   by hand only): the latest orders reach the Orders tab without a click.
 
-**The store sync** (`AUTO_SYNC=on`, off by default) does unattended what the
-Sync tab does with "apply all": it plans the price and stock changes the
-sources call for and writes them to WooCommerce. It is narrower than the tab
-on purpose:
+**The store sync** does unattended what the Sync tab does with "apply all":
+it plans the price and stock changes the sources call for and writes them to
+WooCommerce. `AUTO_SYNC` decides where it runs:
+- unset (the default): in the feed cycle, for the feed's products only. The
+  feed owns them, and keeping the store in step with it is the cycle's job.
+  The daily sync writes nothing;
+- `AUTO_SYNC=on`: in the daily sync too, for the whole store (KicksDB prices
+  included);
+- `AUTO_SYNC=off`: nowhere. Every change is applied by hand in the Sync tab.
+
+It is narrower than the tab on purpose:
 - It writes **prices and stock only**: no size cleanup (which deletes
   variations) and no GTINs.
 - A run that would change more than `AUTO_SYNC_MAX_CHANGES` variations
@@ -240,7 +250,7 @@ dead-man's-switch check (for example a free healthchecks.io check with a
 1-day period and a few hours' grace). Each fully successful daily run calls
 that URL. If the calls stop, because a run failed or the server is down, the
 service alerts you. `SCHEDULER_FEEDS_HEARTBEAT_URL` does the same for the
-feed cycle. Give that check a period matching the cycle, e.g. 30 minutes with
+feed cycle. Give that check a period matching the cycle, e.g. 15 minutes with
 an hour's grace.
 
 `SCHEDULER=on|off` overrides the default (on in production, off in dev). The

@@ -1,6 +1,16 @@
 import { and, desc, eq, isNotNull, lt, max, ne } from "drizzle-orm";
 import { env } from "@/lib/env";
-import { DEFAULT_TIMEZONE, intervalTimes, nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "@/lib/schedule";
+import {
+  DEFAULT_TIMEZONE,
+  feedSchedule,
+  intervalTimes,
+  nextSlot,
+  parseTimes,
+  previousSlot,
+  retryAt,
+  slotMissed,
+  type AutoSync,
+} from "@/lib/schedule";
 import { runKicksdbRefresh } from "@/server/actions/feeds";
 import { kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { db } from "@/server/db/client";
@@ -15,8 +25,8 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  *   1. the store pull — the Hub's copy of every product on WooCommerce;
  *   2. the GoldenSneakers complete sync;
  *   3. a KicksDB re-pricing pass, so whatever the sync registered is priced;
- *   4. with AUTO_SYNC=on, the store sync: every price and stock change the
- *      sources now call for, written to the store (see syncStore);
+ *   4. with AUTO_SYNC=on, the store sync of the whole store: every price and
+ *      stock change the sources now call for, written to it (see syncStore);
  *   5. self-repair (AUTO_REPAIR=on only), metadata backfill, recategorize.
  * A step that fails does not stop the others, and is retried an hour later
  * (twice at most). Every run is recorded in scheduler_runs, so a restarting
@@ -25,10 +35,11 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  * a good run starts nothing. A fully successful run calls
  * SCHEDULER_HEARTBEAT_URL, for a monitor that alerts when the calls stop.
  *
- * The feed cycle, every SCHEDULER_FEEDS_MINUTES on the clock (30 → :00 and
- * :30; off by default), is the short version for a supplier whose stock moves
- * during the day: the GoldenSneakers sync, then — with AUTO_SYNC=on — the
- * store sync of the feed's products only. KicksDB-priced products wait for the
+ * The feed cycle, every SCHEDULER_FEEDS_MINUTES on the clock (15 → :00, :15,
+ * :30, :45; 15 by default when the GoldenSneakers API is set), is the short
+ * version for a supplier whose stock moves during the day: the GoldenSneakers
+ * sync, then the store sync of the feed's products only — unless
+ * AUTO_SYNC=off (see feedSchedule). KicksDB-priced products wait for the
  * daily run: planning them asks KicksDB about every one, every time. A cycle
  * never overlaps another run: it skips its turn while one is going, and the
  * daily run waits for a cycle to finish rather than lose its slot. A fully
@@ -111,7 +122,7 @@ export interface SchedulerStatus {
   lastRepaired: number | null; // products healed in the last pass (null = off)
   lastWritten: number | null; // variations the last store sync wrote (null = not run)
   lastError: string | null;
-  autoSync: boolean; // AUTO_SYNC=on: the runs write to the store
+  autoSync: AutoSync; // what the runs write to the store unattended
   autoSyncMax: number; // …at most this many variations per run
   feedsEveryMinutes: number; // 0 = no feed cycle
   feedsNextAt: number | null;
@@ -143,7 +154,7 @@ function store(): SchedulerState {
     lastRepaired: null,
     lastWritten: null,
     lastError: null,
-    autoSync: false,
+    autoSync: "off",
     autoSyncMax: DEFAULT_MAX_CHANGES,
     feedsEveryMinutes: 0,
     feedsNextAt: null,
@@ -199,7 +210,8 @@ async function refreshCatalog(): Promise<{ refreshed: number; error: string | nu
  * The run's plans are dropped afterwards (see deleteRunPlans).
  */
 async function syncStore(scope: "store" | "feed"): Promise<StepOutcome | null> {
-  if (env.AUTO_SYNC !== "on") return null;
+  const writes = store().autoSync;
+  if (writes === "off" || (scope === "store" && writes !== "all")) return null;
   const { wooConfigured } = await import("@/server/woo/client");
   if (!wooConfigured()) return null;
 
@@ -618,8 +630,14 @@ export function startScheduler(): void {
   s.times = parseTimes(env.SCHEDULER_TIMES ?? DEFAULT_TIMES);
   s.timeZone = env.SCHEDULER_TIMEZONE ?? DEFAULT_TIMEZONE;
   s.ordersEveryMinutes = env.SCHEDULER_ORDERS_MINUTES ?? DEFAULT_ORDERS_MINUTES;
-  s.feedsEveryMinutes = env.SCHEDULER_FEEDS_MINUTES ?? 0;
-  s.autoSync = env.AUTO_SYNC === "on";
+  const feeds = feedSchedule({
+    feedsMinutes: env.SCHEDULER_FEEDS_MINUTES,
+    autoSync: env.AUTO_SYNC,
+    // gsConfigured()'s test: its module loads only once a run needs it.
+    gsConfigured: !!(env.GS_FEED_URL && env.GS_FEED_TOKEN),
+  });
+  s.feedsEveryMinutes = feeds.feedsEveryMinutes;
+  s.autoSync = feeds.autoSync;
   s.autoSyncMax = env.AUTO_SYNC_MAX_CHANGES ?? DEFAULT_MAX_CHANGES;
 
   const enabled =
@@ -631,10 +649,11 @@ export function startScheduler(): void {
   s.started = true;
   s.enabled = true;
 
-  const sync = s.autoSync ? `, store sync (up to ${s.autoSyncMax} changes)` : "";
+  const sync = s.autoSync === "all" ? `, store sync (up to ${s.autoSyncMax} changes)` : "";
+  const feedSync = s.autoSync === "off" ? "" : ` + store sync of the feed's products (up to ${s.autoSyncMax} changes)`;
   console.log(
     `[scheduler] on — daily sync at ${s.times.join(", ")} (${s.timeZone}): store pull, GS sync, KicksDB re-pricing${sync}; ` +
-      (s.feedsEveryMinutes > 0 ? `feeds every ${s.feedsEveryMinutes} min${s.autoSync ? " + store sync" : ""}; ` : "") +
+      (s.feedsEveryMinutes > 0 ? `feeds every ${s.feedsEveryMinutes} min${feedSync}; ` : "") +
       (s.ordersEveryMinutes > 0 ? `orders every ${s.ordersEveryMinutes} min` : "orders by hand only"),
   );
   void boot(s);

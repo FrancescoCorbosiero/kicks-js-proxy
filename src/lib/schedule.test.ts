@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { intervalTimes, isTimeZone, nextSlot, parseTimes, previousSlot, retryAt, slotMissed } from "./schedule";
+import {
+  feedSchedule,
+  intervalTimes,
+  isTimeZone,
+  nextSlot,
+  parseTimes,
+  previousSlot,
+  retryAt,
+  slotMissed,
+} from "./schedule";
 
 const ROME = "Europe/Rome";
 const at = (iso: string) => new Date(iso);
@@ -104,5 +113,38 @@ describe("an interval on the clock", () => {
       expect(Math.max(...gaps)).toBeLessThanOrEqual(90);
       expect(runs.length).toBeGreaterThanOrEqual(18); // ~20 half hours in 10 hours
     }
+  });
+});
+
+describe("the feed cycle and the automatic store sync", () => {
+  const unset = { feedsMinutes: undefined, autoSync: undefined };
+
+  it("keeps a GoldenSneakers shop's store in step every 15 minutes, out of the box", () => {
+    expect(feedSchedule({ ...unset, gsConfigured: true })).toEqual({ feedsEveryMinutes: 15, autoSync: "feed" });
+  });
+
+  it("leaves a shop without the feed API alone", () => {
+    expect(feedSchedule({ ...unset, gsConfigured: false })).toEqual({ feedsEveryMinutes: 0, autoSync: "off" });
+  });
+
+  it("takes the operator's interval, and 0 stops the cycle and its writes", () => {
+    expect(feedSchedule({ ...unset, feedsMinutes: 30, gsConfigured: true })).toEqual({
+      feedsEveryMinutes: 30,
+      autoSync: "feed",
+    });
+    expect(feedSchedule({ ...unset, feedsMinutes: 0, gsConfigured: true })).toEqual({
+      feedsEveryMinutes: 0,
+      autoSync: "off",
+    });
+  });
+
+  it("writes nothing with AUTO_SYNC=off, and the whole store too with AUTO_SYNC=on", () => {
+    expect(feedSchedule({ feedsMinutes: undefined, autoSync: "off", gsConfigured: true })).toEqual({
+      feedsEveryMinutes: 15,
+      autoSync: "off",
+    });
+    expect(feedSchedule({ feedsMinutes: undefined, autoSync: "on", gsConfigured: true }).autoSync).toBe("all");
+    // The daily sync writes the whole store even with no feed cycle at all.
+    expect(feedSchedule({ feedsMinutes: 0, autoSync: "on", gsConfigured: false }).autoSync).toBe("all");
   });
 });

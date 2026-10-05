@@ -74,9 +74,10 @@ const EnvSchema = z.object({
   // switch at it (healthchecks.io, Uptime Kuma push, ...) to hear about a sync
   // that failed or never ran.
   SCHEDULER_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
-  // The feed cycle: every N minutes on the clock (30 → :00 and :30), the
-  // supplier feed is refreshed and, with AUTO_SYNC=on, its products' changes
-  // are written to the store. Default 0 = off (the feeds refresh daily only).
+  // The feed cycle: every N minutes on the clock (15 → :00, :15, :30, :45),
+  // the supplier feed is refreshed and its products' changes are written to
+  // the store (unless AUTO_SYNC=off). Default 15 when GS_FEED_URL and
+  // GS_FEED_TOKEN are set, else 0 = off (the feeds refresh daily only).
   SCHEDULER_FEEDS_MINUTES: blankIsUnset(
     z.coerce
       .number()
@@ -88,10 +89,12 @@ const EnvSchema = z.object({
   SCHEDULER_FEEDS_HEARTBEAT_URL: blankIsUnset(z.url().optional()),
 
   // Automatic store sync: after the feeds refresh, write the planned price and
-  // stock changes to the LIVE store — the feed's products every feed cycle,
-  // the whole store in the daily sync. Prices and stock only: no size cleanup,
-  // no deletions. OFF by default: arming unattended writes to the shop is the
-  // operator's decision, as with AUTO_REPAIR.
+  // stock changes to the LIVE store. Prices and stock only: no size cleanup,
+  // no deletions. Unset, the feed cycle writes the feed's products — the feed
+  // owns them, and keeping the store in step with it is the cycle's job — and
+  // the daily sync writes nothing. On, the daily sync also writes the whole
+  // store's (KicksDB prices included): that one is the operator's decision, as
+  // with AUTO_REPAIR. Off, nothing is written unattended.
   AUTO_SYNC: z.enum(["on", "off"]).optional(),
   // An automatic run that would change more variations than this writes
   // nothing and says so on the Feeds tab: a change that large is reviewed in

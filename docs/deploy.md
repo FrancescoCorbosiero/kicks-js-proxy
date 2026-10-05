@@ -216,20 +216,24 @@ below). To get an email when a daily sync fails or never runs:
    **1 day**, grace **3 hours**.
 2. Put its ping URL in `deploy/.env` as `SCHEDULER_HEARTBEAT_URL=…`, then run
    `docker compose up -d` (no rebuild needed: settings are read at start).
-3. With the feed cycle on (below), add a second check with a period of
-   **30 minutes** and a grace of **1 hour**, as `SCHEDULER_FEEDS_HEARTBEAT_URL=…`.
+3. With the GoldenSneakers feed set, the feed cycle runs every 15 minutes
+   (below): add a second check with a period of **15 minutes** and a grace of
+   **1 hour**, as `SCHEDULER_FEEDS_HEARTBEAT_URL=…`.
 
 ## Scheduled syncs
 
 | What | When | Setting |
 | --- | --- | --- |
 | Store pull, GS sync, KicksDB re-pricing, store sync of the whole store, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
-| GS sync, then store sync of the feed's products | every 30 minutes, if set (off by default) | `SCHEDULER_FEEDS_MINUTES=30` |
+| GS sync, then store sync of the feed's products | every 15 minutes, with `GS_FEED_URL` and `GS_FEED_TOKEN` set | `SCHEDULER_FEEDS_MINUTES` (`0` = off) |
 | Recent orders | every 15 minutes | `SCHEDULER_ORDERS_MINUTES` |
 
-**The store sync** writes to WooCommerce only with **`AUTO_SYNC=on`**.
-Without it, the runs refresh the Hub and you apply the changes yourself in
-the Sync tab. When on:
+**The store sync** writes to WooCommerce on its own. By default it writes
+the feed's products' changes every feed cycle, and the daily sync writes
+nothing. **`AUTO_SYNC=on`** has the daily sync write the whole store's changes
+too, KicksDB prices included. **`AUTO_SYNC=off`** writes nothing: the runs
+refresh the Hub and you apply the changes yourself in the Sync tab. When it
+writes:
 - **What it writes:** the price and stock changes the Sync tab would apply,
   manual price locks honored. Only prices and stock: no size cleanup, never
   a deletion.

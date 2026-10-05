@@ -654,8 +654,13 @@ export const it = {
     scheduler: {
       name: "Sincronizzazione automatica",
       tag: (perDay: number) => `${perDay}×/giorno`,
+      tagEvery: (minutes: number) => `ogni ${minutes} min`,
       desc: (times: string, zone: string) =>
         `Ogni giorno alle ${times} (${zone}) il server aggiorna da solo la copia del negozio, sincronizza i listini configurati e ri-prezza le fonti che lo prevedono. Un passaggio fallito viene ritentato dopo un'ora.`,
+      descFeeds: (minutes: number, writes: boolean) =>
+        writes
+          ? `Ogni ${minutes} minuti scarica il feed GoldenSneakers e scrive nel negozio i prezzi e le disponibilità cambiati.`
+          : `Ogni ${minutes} minuti scarica il feed GoldenSneakers.`,
       on: "Attiva",
       off: "Spenta",
       offHint:
@@ -673,6 +678,8 @@ export const it = {
       feedsLast: (when: string) => `ultimo ${when}`,
       feedsErrorPrefix: "Aggiornamento dei listini:",
       autoSyncOn: (max: number) => `Negozio: aggiornato in automatico (fino a ${max} modifiche per volta)`,
+      autoSyncFeed: (max: number) =>
+        `Negozio: prodotti del feed aggiornati in automatico (fino a ${max} modifiche per volta), gli altri dalla scheda Sync`,
       autoSyncOff: "Negozio: aggiornato a mano, dalla scheda Sync",
       orders: (minutes: number) => `Ordini: aggiornati ogni ${minutes} min`,
       ordersOff: "Ordini: aggiornati solo a mano",

@@ -639,8 +639,13 @@ export const en: Dictionary = {
     scheduler: {
       name: "Automatic sync",
       tag: (perDay) => `${perDay}×/day`,
+      tagEvery: (minutes) => `every ${minutes} min`,
       desc: (times, zone) =>
         `Every day at ${times} (${zone}) the server refreshes its copy of the store, syncs every configured feed and re-prices the sources that have one. A failed step is retried an hour later.`,
+      descFeeds: (minutes, writes) =>
+        writes
+          ? `Every ${minutes} minutes it downloads the GoldenSneakers feed and writes the changed prices and stock to the store.`
+          : `Every ${minutes} minutes it downloads the GoldenSneakers feed.`,
       on: "On",
       off: "Off",
       offHint: "Turns on in production with the server; SCHEDULER=on forces it in dev too.",
@@ -657,6 +662,8 @@ export const en: Dictionary = {
       feedsLast: (when) => `last ${when}`,
       feedsErrorPrefix: "Feed refresh:",
       autoSyncOn: (max) => `Store: updated automatically (up to ${max} changes at a time)`,
+      autoSyncFeed: (max) =>
+        `Store: feed products updated automatically (up to ${max} changes at a time), the rest from the Sync tab`,
       autoSyncOff: "Store: updated by hand, from the Sync tab",
       orders: (minutes) => `Orders: refreshed every ${minutes} min`,
       ordersOff: "Orders: refreshed by hand only",
