@@ -966,6 +966,7 @@ export const en: Dictionary = {
       `Unexpected answer from the server (HTTP ${status}): the sign-in may have expired. Reload the page and carry on: products already created are not duplicated.`,
     running: "Running…",
     progress: (done: number, total: number) => `Running… ${done}/${total}`,
+    timeLeft: (minutes) => (minutes < 1 ? "less than a minute left" : `about ${minutes} min left`),
     failed: "Publish failed",
     dryRunTitle: "Dry run — nothing was written",
     liveTitle: "Published",

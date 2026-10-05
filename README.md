@@ -146,8 +146,10 @@ filters/sorts/paginates in SQL.
   first, and a **live SKU lookup immediately before every create** (never the
   snapshot) so a stale snapshot cannot mint a duplicate parent. "Select all"
   takes every product the filters match (not just the listed rows), and the
-  run goes 6 at a time — each request well inside the 100 seconds Cloudflare
-  waits — can be stopped between batches, and asks before the page is left.
+  run goes a batch at a time — the first of 6, each next one sized from the
+  shop's measured pace to take ~45 s, well inside the 100 seconds Cloudflare
+  waits (`src/lib/publish-batching.ts`) — shows the time left, can be stopped
+  between batches, and asks before the page is left.
   A batch the proxy gives up on (524) is still finished by the server: its
   products stay selected, the run moves on, and publishing them again is
   safe — a SKU another request is still creating is refused, not duplicated. **Force reimport** additionally targets products the store
