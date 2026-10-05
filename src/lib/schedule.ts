@@ -150,3 +150,32 @@ export function intervalTimes(minutes: number): string[] {
   }
   return times;
 }
+
+/** The feed cycle's step when the GoldenSneakers API is set and SCHEDULER_FEEDS_MINUTES is not. */
+export const DEFAULT_FEEDS_MINUTES = 15;
+
+/**
+ * What the scheduled runs write to the store unattended: the whole store's
+ * changes (the daily sync too), the feed's products' only (the feed cycle),
+ * or nothing.
+ */
+export type AutoSync = "all" | "feed" | "off";
+
+/**
+ * The feed cycle and the automatic store sync, from the settings. A shop with
+ * the GoldenSneakers API set keeps its store in step with the feed out of the
+ * box: a cycle every DEFAULT_FEEDS_MINUTES that writes the feed's products'
+ * price and stock changes — the feed is their source of truth. AUTO_SYNC=on
+ * adds the whole store to the daily sync; AUTO_SYNC=off writes nothing, and
+ * SCHEDULER_FEEDS_MINUTES=0 stops the cycle.
+ */
+export function feedSchedule(settings: {
+  feedsMinutes: number | undefined;
+  autoSync: "on" | "off" | undefined;
+  gsConfigured: boolean;
+}): { feedsEveryMinutes: number; autoSync: AutoSync } {
+  const feedsEveryMinutes = settings.feedsMinutes ?? (settings.gsConfigured ? DEFAULT_FEEDS_MINUTES : 0);
+  if (settings.autoSync === "on") return { feedsEveryMinutes, autoSync: "all" };
+  if (settings.autoSync === "off" || feedsEveryMinutes === 0) return { feedsEveryMinutes, autoSync: "off" };
+  return { feedsEveryMinutes, autoSync: "feed" };
+}

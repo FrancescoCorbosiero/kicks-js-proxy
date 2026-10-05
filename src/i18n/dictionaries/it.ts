@@ -654,8 +654,13 @@ export const it = {
     scheduler: {
       name: "Sincronizzazione automatica",
       tag: (perDay: number) => `${perDay}×/giorno`,
+      tagEvery: (minutes: number) => `ogni ${minutes} min`,
       desc: (times: string, zone: string) =>
         `Ogni giorno alle ${times} (${zone}) il server aggiorna da solo la copia del negozio, sincronizza i listini configurati e ri-prezza le fonti che lo prevedono. Un passaggio fallito viene ritentato dopo un'ora.`,
+      descFeeds: (minutes: number, writes: boolean) =>
+        writes
+          ? `Ogni ${minutes} minuti scarica il feed GoldenSneakers e scrive nel negozio i prezzi e le disponibilità cambiati.`
+          : `Ogni ${minutes} minuti scarica il feed GoldenSneakers.`,
       on: "Attiva",
       off: "Spenta",
       offHint:
@@ -673,10 +678,15 @@ export const it = {
       feedsLast: (when: string) => `ultimo ${when}`,
       feedsErrorPrefix: "Aggiornamento dei listini:",
       autoSyncOn: (max: number) => `Negozio: aggiornato in automatico (fino a ${max} modifiche per volta)`,
+      autoSyncFeed: (max: number) =>
+        `Negozio: prodotti del feed aggiornati in automatico (fino a ${max} modifiche per volta), gli altri dalla scheda Sync`,
       autoSyncOff: "Negozio: aggiornato a mano, dalla scheda Sync",
       orders: (minutes: number) => `Ordini: aggiornati ogni ${minutes} min`,
       ordersOff: "Ordini: aggiornati solo a mano",
       ordersLast: (when: string) => `ultimo ${when}`,
+      media: "Foto: aggiunte in background ai prodotti pubblicati",
+      mediaLast: (when: string) => `ultima ${when}`,
+      mediaErrorPrefix: "Coda foto:",
     },
     kicksdb: {
       name: "Aggiornamento KicksDB",
@@ -927,7 +937,7 @@ export const it = {
   publish: {
     noImage: (n: number) => `${n} senza foto`,
     noImageHint:
-      "Prodotti creati senza nessuna immagine, perché la fonte non ne aveva una utilizzabile. Sistemali con «Ripara i prodotti sul negozio» qui sotto dopo la prossima sincronizzazione del feed.",
+      "Prodotti senza nessuna immagine utilizzabile dalla fonte: restano nascosti (in bozza) finché non aggiungi una foto in WooCommerce. Li trovi in «Foto in arrivo», dove puoi riprovarli.",
     gtins: (n: number) => `${n} codici a barre scritti`,
     rejectedGtins: (n: number) => `${n} codici scartati`,
     rejectedGtinsHint:
@@ -935,7 +945,7 @@ export const it = {
     identitySkipped: (list: string) =>
       `Tassonomie non scrivibili su questo negozio: ${list}. I prodotti sono stati creati lo stesso, ma senza quei campi le vetrine esterne li vedono incompleti.`,
     title: "Pubblica",
-    desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine, giacenze reali del fornitore e immagini. Con la prova a vuoto vedi prima cosa verrà creato, senza scrivere nulla.",
+    desc: "I prodotti che hai a catalogo ma non ancora sul negozio. Selezionali e li crei su WooCommerce: prodotto, taglie EU, prezzi dalle regole di margine e giacenze reali del fornitore. Le foto arrivano subito dopo, in background: ogni prodotto resta nascosto finché non ha la sua prima foto. Con la prova a vuoto vedi prima cosa verrà creato, senza scrivere nulla.",
     notConfigured:
       "WooCommerce non è configurato (WOO_BASE_URL e chiavi API): non è possibile pubblicare.",
     noSnapshot:
@@ -948,6 +958,9 @@ export const it = {
     showOnStoreHint:
       "Serve per il reimport forzato: i prodotti su cui agisce sono, per definizione, quelli che sul negozio ci sono già.",
     alreadyOnStore: "sul negozio",
+    awaitingPhotos: "in attesa della foto",
+    awaitingPhotosHint:
+      "Creato sul negozio e ancora nascosto: va in vendita da solo appena arriva la sua prima foto.",
     skipReasons: {
       alreadyOnStore: "già sul negozio — spunta «Forza reimport» per ricostruirlo",
       feedDelisted: "il listino del fornitore non copre più questo SKU — sincronizza prima il feed",
@@ -960,7 +973,7 @@ export const it = {
     clear: "Deseleziona",
     gallery: "Carica anche le foto aggiuntive",
     galleryHint:
-      "WooCommerce scarica ogni immagine durante la creazione: più foto significa prodotti più lenti da creare. Il massimo è 6 per prodotto.",
+      "Le foto si aggiungono in background dopo la creazione, una alla volta: più foto non rallentano la pubblicazione, allungano solo la coda. Il massimo è 6 per prodotto.",
     force: "Forza reimport",
     forceHint:
       "Agisce anche sugli SKU che sul negozio ci sono già: aggiorna nome e taglie del prodotto e ricrea da zero l'elenco delle varianti.",
@@ -968,7 +981,7 @@ export const it = {
       "Attenzione: con il reimport forzato le varianti esistenti vengono ELIMINATE e ricreate dal catalogo. Prezzi manuali e giacenze vengono riscritti; eventuali modifiche fatte a mano sulle singole taglie si perdono.",
     replaceMedia: "Sostituisci anche le immagini",
     replaceMediaHint:
-      "Di default il reimport lascia le immagini che ci sono già sul negozio (ricaricarle ogni volta le duplicherebbe nella libreria media).",
+      "Le nuove immagini arrivano in background e prendono il posto di quelle attuali. Di default il reimport lascia quelle che ci sono già (ricaricarle ogni volta le duplicherebbe nella libreria media).",
     dryRun: (n: number) => `Prova a vuoto (${n})`,
     publishNow: (n: number) => `Pubblica ${n} sul negozio`,
     forceDryRunFirst:
@@ -1018,6 +1031,27 @@ export const it = {
     truncated: (n: number) =>
       `Mostrati i primi 300 di ${n} — restringi con la ricerca: filtra sull'intero catalogo, non solo su questi.`,
     reportTruncated: (n: number) => `…e altre ${n} righe (i totali qui sopra le comprendono).`,
+    hiddenUntilPhoto:
+      "I prodotti creati restano nascosti finché non arriva la loro prima foto: la coda «Foto in arrivo» li mette in vendita uno alla volta, in background. Puoi chiudere questa pagina.",
+    media: {
+      title: "Foto in arrivo",
+      desc: "Il server aggiunge le foto in background, una alla volta: prima la foto principale dei prodotti ancora nascosti, che vanno in vendita con lei, poi le altre foto.",
+      hidden: (n: number) =>
+        n === 1 ? "1 prodotto nascosto in attesa della foto" : `${n} prodotti nascosti in attesa della foto`,
+      hiddenHint: "Creati in bozza: nessuno li vede finché non arriva la loro prima foto.",
+      photos: (n: number) => (n === 1 ? "1 con altre foto in arrivo" : `${n} con altre foto in arrivo`),
+      failed: (n: number) => (n === 1 ? "1 non riuscito" : `${n} non riusciti`),
+      noWorker:
+        "La sincronizzazione automatica è spenta (SCHEDULER=off): la coda avanza solo se uno scheduler esterno chiama /api/cron/media.",
+      progress: (attached: number, total: number) => `${attached}/${total} foto`,
+      open: "Apri in WooCommerce",
+      more: (n: number) => `…e altri ${n}`,
+      retry: "Riprova",
+      retrying: "Riprovo…",
+      dismiss: "Togli dall'elenco",
+      retryHint:
+        "«Riprova» rimette in coda tutte le foto; se nel frattempo hai aggiunto una foto a mano, il prodotto va in vendita con quella.",
+    },
   },
   account: {
     logout: "Esci",

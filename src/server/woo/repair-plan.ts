@@ -32,6 +32,12 @@ export interface LiveProduct {
 /** What the source can supply for a product. */
 export interface RepairSource {
   images: string[];
+  /**
+   * The photo queue is bringing this product's photos (see media.ts): a
+   * product with none is not missing them, and sending them here as well
+   * would put them on it twice.
+   */
+  imagesQueued?: boolean;
   identity: ResolvedIdentity | undefined;
   /**
    * What the taxonomy configuration says this product SHOULD carry. A field
@@ -93,7 +99,7 @@ export function planRepair(live: LiveProduct, source: RepairSource): RepairPatch
 
   // ---- media ----
   const liveImages = asArray(live.images);
-  if (liveImages.length === 0) {
+  if (liveImages.length === 0 && !source.imagesQueued) {
     if (source.images.length > 0) {
       body.images = source.images.map((src) => ({ src }));
       fills.push("image");

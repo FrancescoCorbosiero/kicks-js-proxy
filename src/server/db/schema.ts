@@ -9,11 +9,14 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { AppConfig } from "@core/config";
 import type { Plan, PlanItem, ApplyResult, SourceProduct } from "@core/core-spine";
 import type { StoreOverrides } from "@/server/overrides/model";
+import type { MediaImage } from "@/server/woo/media-plan";
 
 /**
  * The persisted AppConfig. Secrets (in ConnectionConfig) are injected from env at
@@ -403,6 +406,56 @@ export const schedulerRuns = pgTable(
 );
 
 export type SchedulerRunRow = typeof schedulerRuns.$inferSelect;
+
+/**
+ * The photo queue (src/server/woo/media.ts): the photos a product is still
+ * owed, attached in the background one request at a time. The Publisher
+ * creates products hidden and files one row each; the product goes on sale
+ * with its first photo. One open ("pending") row per SKU — filing again
+ * replaces it.
+ */
+export const mediaJobs = pgTable(
+  "media_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sku: text("sku").notNull(), // canonical (skuKey)
+    // Null until the product exists: the row is filed BEFORE the create, so a
+    // create that outlives the process still gets its photos (found by SKU).
+    storeProductId: integer("store_product_id"),
+    // Alt text for every photo, and the queue's label in the Publish tab.
+    title: text("title").notNull(),
+    // Main photo first; each with the name it is filed under on the store,
+    // which is how the queue recognizes it there (see media-plan).
+    images: jsonb("images").$type<MediaImage[]>().notNull(),
+    // Times the store refused each photo, by position (a dead link, not an
+    // image): one is tried again, the second refusal leaves it out.
+    refusals: jsonb("refusals").$type<Record<string, number>>().notNull().default({}),
+    // Put the product on sale once it has a photo: the Publisher's hidden
+    // creates. False only adds photos.
+    publish: boolean("publish").notNull(),
+    // Replace the photos the product has (a force reimport with new media)
+    // instead of only filling a product that has none.
+    replace: boolean("replace").notNull().default(false),
+    status: text("status", { enum: ["pending", "done", "failed", "cancelled"] }).notNull().default("pending"),
+    // This job's photos on the product, as last seen: the tab's progress, and
+    // the queue's order (products still without a photo go first).
+    attached: integer("attached").notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    // Claimed by a worker until then: a worker that died lets it go.
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("media_jobs_open_sku_idx").on(t.sku).where(sql`status = 'pending'`),
+    index("media_jobs_due_idx").on(t.status, t.nextAttemptAt),
+  ],
+);
+
+export type MediaJobRow = typeof mediaJobs.$inferSelect;
 
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;

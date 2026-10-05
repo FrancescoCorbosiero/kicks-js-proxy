@@ -163,7 +163,9 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
           <div className="flex items-center gap-2 text-sm font-semibold">
             {s.name}
             <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
-              {s.tag(Math.max(status.times.length, 1))}
+              {status.feedsEveryMinutes > 0
+                ? s.tagEvery(status.feedsEveryMinutes)
+                : s.tag(Math.max(status.times.length, 1))}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
@@ -173,7 +175,10 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
               {status.enabled ? s.on : s.off}
             </span>
           </div>
-          <div className="text-xs text-muted">{s.desc(status.times.join(", "), status.timeZone)}</div>
+          <div className="text-xs text-muted">
+            {status.feedsEveryMinutes > 0 && `${s.descFeeds(status.feedsEveryMinutes, status.autoSync !== "off")} `}
+            {s.desc(status.times.join(", "), status.timeZone)}
+          </div>
         </div>
         <div className="ml-auto text-right text-xs text-muted tnum">
           {status.enabled ? (
@@ -204,10 +209,20 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                   status.feedsLastWritten != null &&
                   ` · ${s.written(status.feedsLastWritten)}`}
               </div>
-              <div className="text-faint">{status.autoSync ? s.autoSyncOn(status.autoSyncMax) : s.autoSyncOff}</div>
+              <div className="text-faint">
+                {status.autoSync === "all"
+                  ? s.autoSyncOn(status.autoSyncMax)
+                  : status.autoSync === "feed"
+                    ? s.autoSyncFeed(status.autoSyncMax)
+                    : s.autoSyncOff}
+              </div>
               <div className="text-faint">
                 {status.ordersEveryMinutes > 0 ? s.orders(status.ordersEveryMinutes) : s.ordersOff}
                 {status.ordersLastAt && ` · ${s.ordersLast(when.time(status.ordersLastAt))}`}
+              </div>
+              <div className="text-faint">
+                {s.media}
+                {status.mediaLastAt && ` · ${s.mediaLast(when.time(status.mediaLastAt))}`}
               </div>
             </>
           ) : (
@@ -222,6 +237,11 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
         </p>
       )}
       {status.ordersError && <p className="mt-2 text-sm text-skip">{status.ordersError}</p>}
+      {status.mediaError && (
+        <p className="mt-2 text-sm text-skip">
+          {s.mediaErrorPrefix} {status.mediaError}
+        </p>
+      )}
     </section>
   );
 }

@@ -639,8 +639,13 @@ export const en: Dictionary = {
     scheduler: {
       name: "Automatic sync",
       tag: (perDay) => `${perDay}×/day`,
+      tagEvery: (minutes) => `every ${minutes} min`,
       desc: (times, zone) =>
         `Every day at ${times} (${zone}) the server refreshes its copy of the store, syncs every configured feed and re-prices the sources that have one. A failed step is retried an hour later.`,
+      descFeeds: (minutes, writes) =>
+        writes
+          ? `Every ${minutes} minutes it downloads the GoldenSneakers feed and writes the changed prices and stock to the store.`
+          : `Every ${minutes} minutes it downloads the GoldenSneakers feed.`,
       on: "On",
       off: "Off",
       offHint: "Turns on in production with the server; SCHEDULER=on forces it in dev too.",
@@ -657,10 +662,15 @@ export const en: Dictionary = {
       feedsLast: (when) => `last ${when}`,
       feedsErrorPrefix: "Feed refresh:",
       autoSyncOn: (max) => `Store: updated automatically (up to ${max} changes at a time)`,
+      autoSyncFeed: (max) =>
+        `Store: feed products updated automatically (up to ${max} changes at a time), the rest from the Sync tab`,
       autoSyncOff: "Store: updated by hand, from the Sync tab",
       orders: (minutes) => `Orders: refreshed every ${minutes} min`,
       ordersOff: "Orders: refreshed by hand only",
       ordersLast: (when) => `last ${when}`,
+      media: "Photos: added in the background to published products",
+      mediaLast: (when) => `last ${when}`,
+      mediaErrorPrefix: "Photo queue:",
     },
     kicksdb: {
       name: "KicksDB refresh",
@@ -907,7 +917,7 @@ export const en: Dictionary = {
   publish: {
     noImage: (n: number) => `${n} with no photo`,
     noImageHint:
-      "Products created with no image at all, because the source had none usable. Fix them with \"Repair products on the store\" below after the next feed sync.",
+      "Products with no usable image from the source: they stay hidden (as drafts) until you add a photo in WooCommerce. They are listed under \"Photos on their way\", where you can retry them.",
     gtins: (n: number) => `${n} barcodes written`,
     rejectedGtins: (n: number) => `${n} barcodes dropped`,
     rejectedGtinsHint:
@@ -915,7 +925,7 @@ export const en: Dictionary = {
     identitySkipped: (list: string) =>
       `Taxonomies this store would not take: ${list}. The products were still created, but external catalogs will see them incomplete without those fields.`,
     title: "Publish",
-    desc: "The products in your catalog that are not on the store yet. Select them and they get created on WooCommerce: product, EU sizes, prices from the margin rules, real supplier stock and images. A dry run shows what would be created first, without writing anything.",
+    desc: "The products in your catalog that are not on the store yet. Select them and they get created on WooCommerce: product, EU sizes, prices from the margin rules and real supplier stock. The photos follow right after, in the background: each product stays hidden until it has its first photo. A dry run shows what would be created first, without writing anything.",
     notConfigured: "WooCommerce is not configured (WOO_BASE_URL and API keys): publishing is unavailable.",
     noSnapshot:
       "No store snapshot: pull one from the Sync tab, otherwise the list below may offer products the store already has. (Every SKU is still verified live before anything is created.)",
@@ -927,6 +937,8 @@ export const en: Dictionary = {
     showOnStoreHint:
       "Needed for force reimport: the products it acts on are, by definition, the ones the store already has.",
     alreadyOnStore: "on the store",
+    awaitingPhotos: "awaiting its photo",
+    awaitingPhotosHint: "Created on the store and still hidden: it goes on sale by itself as soon as its first photo lands.",
     skipReasons: {
       alreadyOnStore: "already on the store — tick “Force reimport” to rebuild it",
       feedDelisted: "the supplier feed no longer covers this SKU — sync the feed first",
@@ -938,7 +950,7 @@ export const en: Dictionary = {
     clear: "Clear",
     gallery: "Upload the extra photos too",
     galleryHint:
-      "WooCommerce downloads every image while creating the product: more photos means slower creates. Capped at 6 per product.",
+      "Photos are added in the background after the create, one at a time: more photos do not slow publishing down, they only lengthen the queue. Capped at 6 per product.",
     force: "Force reimport",
     forceHint:
       "Also act on SKUs the store already has: refresh the product's name and size list, and recreate its variations from scratch.",
@@ -946,7 +958,7 @@ export const en: Dictionary = {
       "Careful: a force reimport DELETES the existing variations and recreates them from the catalog. Prices and stock are rewritten; any per-size edits made by hand are lost.",
     replaceMedia: "Replace the images too",
     replaceMediaHint:
-      "By default a reimport keeps the images already on the store (re-uploading them every time would duplicate them in the media library).",
+      "The new images arrive in the background and take the place of the current ones. By default a reimport keeps the images already on the store (re-uploading them every time would duplicate them in the media library).",
     dryRun: (n: number) => `Dry run (${n})`,
     publishNow: (n: number) => `Publish ${n} to the store`,
     forceDryRunFirst:
@@ -992,6 +1004,26 @@ export const en: Dictionary = {
     truncated: (n: number) =>
       `Showing the first 300 of ${n} — narrow with search: it filters the whole catalog, not just these.`,
     reportTruncated: (n: number) => `…and ${n} more rows (the totals above include them).`,
+    hiddenUntilPhoto:
+      "The products created stay hidden until their first photo lands: the \"Photos on their way\" queue puts them on sale one by one, in the background. You can close this page.",
+    media: {
+      title: "Photos on their way",
+      desc: "The server adds the photos in the background, one at a time: first the main photo of the products still hidden, which go on sale with it, then the other photos.",
+      hidden: (n) => (n === 1 ? "1 hidden product awaiting its photo" : `${n} hidden products awaiting their photo`),
+      hiddenHint: "Created as drafts: nobody sees them until their first photo lands.",
+      photos: (n) => (n === 1 ? "1 with more photos on the way" : `${n} with more photos on the way`),
+      failed: (n) => (n === 1 ? "1 stopped" : `${n} stopped`),
+      noWorker:
+        "The automatic sync is off (SCHEDULER=off): the queue moves only when an external scheduler calls /api/cron/media.",
+      progress: (attached, total) => `${attached}/${total} photos`,
+      open: "Open in WooCommerce",
+      more: (n) => `…and ${n} more`,
+      retry: "Retry",
+      retrying: "Retrying…",
+      dismiss: "Take off the list",
+      retryHint:
+        "\"Retry\" queues every photo again; if you added a photo by hand meanwhile, the product goes on sale with that one.",
+    },
   },
   account: {
     logout: "Log out",

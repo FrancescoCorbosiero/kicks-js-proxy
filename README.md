@@ -138,8 +138,21 @@ filters/sorts/paginates in SQL.
   products reached the catalog and stopped there — visible to the operator,
   invisible to customers. This lists exactly that delta and creates the
   selected products on WooCommerce: parent, canonical EU `pa_taglia` sizes,
-  prices from the margin rules (manual locks winning), real feed stock, and
-  media sideloaded from the source. Variations are planned by the **rebuild
+  prices from the margin rules (manual locks winning) and real feed stock.
+  **Photos go through a queue** (`src/server/woo/media.ts`, table
+  `media_jobs`): WordPress downloads and resizes every photo inside the request
+  that attaches it, which made it the slow half of a first import. A product
+  is created **hidden (draft) and without photos**, and the queue attaches
+  them in the background, one request per photo — main photo first, which
+  puts the product on sale with it, then the gallery. Products still hidden go
+  before galleries. A photo is never sent twice: each is filed under a name of
+  its own, and after a lost answer the product is looked at before anything
+  is resent. A photo the store refuses is tried once more, then left out (the
+  next one becomes the main photo); a product with no usable photo stays
+  hidden, listed under "Photos on their way" on the tab with a Retry. The
+  queue is worked by the scheduler (below) or `/api/cron/media`, pauses while
+  a store pull runs, and an unreachable store makes it wait without spending
+  any product's tries. Variations are planned by the **rebuild
   planner** run against an empty "before", so a published product is the same
   canonical shape a rebuild produces. Safety: nothing selected by default, a
   live run without a dry run of that exact selection asks for a confirmation
@@ -153,7 +166,8 @@ filters/sorts/paginates in SQL.
   A batch the proxy gives up on (524) is still finished by the server: its
   products stay selected, the run moves on, and publishing them again is
   safe — a SKU another request is still creating is refused, not duplicated. **Force reimport** additionally targets products the store
-  already has — refreshing name/size list and recreating the variation set —
+  already has — refreshing name/size list and recreating the variation set,
+  and with "replace the images" queueing new photos in place of the old —
   and is the one destructive option, so it is opt-in, separately labelled,
   and armed only by a dry run of the exact selection. Products whose feed no longer covers them
   are refused: listing a delisted supplier product as sell-on-demand at a
@@ -191,7 +205,7 @@ filters/sorts/paginates in SQL.
 
 **The app schedules itself.** In production (`next start`, Docker) an in-app
 scheduler (`src/server/scheduler.ts`, started from `src/instrumentation.ts`)
-runs three cadences:
+runs four cadences:
 
 - **The daily sync**, every day at `SCHEDULER_TIMES` (default `04:30`) in
   `SCHEDULER_TIMEZONE` (default `Europe/Rome`). In order:
@@ -204,19 +218,34 @@ runs three cadences:
 
   A failed step doesn't stop the others and is retried an hour later, twice
   at most. `SCHEDULER_TIMES=04:30,13:30` runs it twice a day.
-- **The feed cycle**, every `SCHEDULER_FEEDS_MINUTES` on the clock (`30` runs
-  at :00 and :30; default `0` = off). It runs the GoldenSneakers sync, then,
-  with `AUTO_SYNC=on`, the store sync of the feed's products. KicksDB-priced
-  products wait for the daily sync, because planning them asks KicksDB about
-  every one of them, every time. A cycle skips its turn while another run is
-  going, and the daily sync waits for a cycle to finish.
+- **The feed cycle**, every `SCHEDULER_FEEDS_MINUTES` on the clock (`15` runs
+  at :00, :15, :30 and :45). It is on by default, every 15 minutes, when the
+  GoldenSneakers API is set (`GS_FEED_URL` and `GS_FEED_TOKEN`); `0` turns it
+  off. It runs the GoldenSneakers sync, then the store sync of the feed's
+  products (unless `AUTO_SYNC=off`), so the store follows the feed within a
+  quarter of an hour. KicksDB-priced products wait for the daily sync,
+  because planning them asks KicksDB about every one of them, every time. A
+  cycle skips its turn while another run is going, and the daily sync waits
+  for a cycle to finish.
 - **The orders pull**, every `SCHEDULER_ORDERS_MINUTES` (default 15; `0` =
   by hand only): the latest orders reach the Orders tab without a click.
+- **The photo queue**, whenever something is due (looked at every minute,
+  two products at a time): the photos of the products the Publisher created
+  hidden (see Publish above). It pauses while a store pull runs, because a
+  product put on sale as the pull assembles its copy of the store would be
+  left out of it.
 
-**The store sync** (`AUTO_SYNC=on`, off by default) does unattended what the
-Sync tab does with "apply all": it plans the price and stock changes the
-sources call for and writes them to WooCommerce. It is narrower than the tab
-on purpose:
+**The store sync** does unattended what the Sync tab does with "apply all":
+it plans the price and stock changes the sources call for and writes them to
+WooCommerce. `AUTO_SYNC` decides where it runs:
+- unset (the default): in the feed cycle, for the feed's products only. The
+  feed owns them, and keeping the store in step with it is the cycle's job.
+  The daily sync writes nothing;
+- `AUTO_SYNC=on`: in the daily sync too, for the whole store (KicksDB prices
+  included);
+- `AUTO_SYNC=off`: nowhere. Every change is applied by hand in the Sync tab.
+
+It is narrower than the tab on purpose:
 - It writes **prices and stock only**: no size cleanup (which deletes
   variations) and no GTINs.
 - A run that would change more than `AUTO_SYNC_MAX_CHANGES` variations
@@ -240,7 +269,7 @@ dead-man's-switch check (for example a free healthchecks.io check with a
 1-day period and a few hours' grace). Each fully successful daily run calls
 that URL. If the calls stop, because a run failed or the server is down, the
 service alerts you. `SCHEDULER_FEEDS_HEARTBEAT_URL` does the same for the
-feed cycle. Give that check a period matching the cycle, e.g. 30 minutes with
+feed cycle. Give that check a period matching the cycle, e.g. 15 minutes with
 an hour's grace.
 
 `SCHEDULER=on|off` overrides the default (on in production, off in dev). The
@@ -256,6 +285,7 @@ the authenticated endpoints:
 curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/pull-store           # full Woo pull
 curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/refresh-catalog      # re-price stale entries (KicksDB)
 curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/sync-goldensneakers  # GS complete sync
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://host/api/cron/media                # photo queue, up to 4 min
 ```
 
 `scripts/trigger-cron.sh` wraps the curl with retries and timeouts, e.g. a

@@ -15,6 +15,8 @@ import { mergeQuery, type QueryParams } from "@/lib/qs";
 import { FIRST_BATCH, nextBatchSize, nextPace } from "@/lib/publish-batching";
 import { CardImage } from "@/components/catalog/CardImage";
 import { RepairPanel } from "./RepairPanel";
+import { MediaQueuePanel } from "./MediaQueuePanel";
+import type { MediaQueueState } from "@/server/woo/media";
 
 /**
  * Bounds, all for the same reason: everything below is rendered by the browser,
@@ -93,6 +95,8 @@ export function PublishWorkspace({
   hasSnapshot,
   wooConfigured,
   siteUrl,
+  media,
+  mediaWorker,
 }: {
   /** ONE PAGE of the delta. The filters below are answered by the server. */
   candidates: PublishTarget[];
@@ -105,6 +109,9 @@ export function PublishWorkspace({
   hasSnapshot: boolean;
   wooConfigured: boolean;
   siteUrl: string;
+  /** The photo queue: products created hidden, going on sale with their first photo. */
+  media: MediaQueueState | null;
+  mediaWorker: boolean;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -582,6 +589,8 @@ export function PublishWorkspace({
         )}
       </div>
 
+      {media && <MediaQueuePanel initial={media} worker={mediaWorker} siteUrl={siteUrl} />}
+
       {outcome && <OutcomePanel outcome={outcome} siteUrl={siteUrl} />}
 
       {/* The non-destructive repair: for products the store already carries. */}
@@ -640,7 +649,13 @@ export function PublishWorkspace({
                     {t.publish.sizeless}
                   </Badge>
                 )}
-                {c.onStore && <Badge variant="skip">{t.publish.alreadyOnStore}</Badge>}
+                {c.awaitingPhotos ? (
+                  <Badge variant="warn" title={t.publish.awaitingPhotosHint}>
+                    {t.publish.awaitingPhotos}
+                  </Badge>
+                ) : (
+                  c.onStore && <Badge variant="skip">{t.publish.alreadyOnStore}</Badge>
+                )}
               </label>
             </li>
           ))}
@@ -719,6 +734,9 @@ function OutcomePanel({ outcome, siteUrl }: { outcome: PublishOutcome; siteUrl: 
           </span>
         )}
       </div>
+      {!outcome.dryRun && created.length > 0 && (
+        <p className="text-[11px] leading-snug text-muted">{t.publish.hiddenUntilPhoto}</p>
+      )}
       {outcome.identitySkipped.length > 0 && (
         <p className="text-[11px] leading-snug text-warn">
           {t.publish.identitySkipped(outcome.identitySkipped.join(", "))}

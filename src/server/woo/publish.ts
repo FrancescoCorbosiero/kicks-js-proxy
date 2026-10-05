@@ -32,6 +32,9 @@ import { toStoreProduct } from "./store-product";
 import { getWooClient, type WooClient, type WooRestProduct, type WooRestVariation } from "./client";
 import { withTaxonomyCache } from "./taxonomy-cache";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
+import { publishing } from "./publishing";
+import { dropMedia, openMediaSkus, queueMedia, setMediaProduct } from "./media";
+import { isHidden } from "./media-plan";
 
 /**
  * The Publisher — the app's first WRITE path that creates store data instead
@@ -229,6 +232,8 @@ export type PublishTarget = Pick<
   onStore: boolean;
   /** On the store, but without a single size: listed again, completed by the run. */
   sizeless: boolean;
+  /** Created, hidden until the photo queue puts it on sale with its first photo. */
+  awaitingPhotos: boolean;
 };
 
 /**
@@ -251,11 +256,12 @@ export async function listPublishTargets(
   // this runs on every render of the tab, including the one that follows each
   // publish call, and deserializing the whole store to ask "does it have X"
   // is how the dev server ran out of heap.
-  const [info, storeSkus, sizeless, rows] = await Promise.all([
+  const [info, storeSkus, sizeless, rows, photosQueued] = await Promise.all([
     getSnapshotInfo().catch(() => null),
     listStoreSkus(),
     listSizelessStoreSkus(),
     listPublishCandidates(config.source.market),
+    openMediaSkus().catch(() => new Set<string>()),
   ]);
   // Filtered and sliced HERE: the whole delta stays on the server, and only a
   // page of it is serialized into the page the browser has to parse.
@@ -270,9 +276,13 @@ export async function listPublishTargets(
       secondaryCategory: r.secondaryCategory,
       minAsk: r.minAsk,
       variantCount: r.variantCount,
-      // A product with no sizes sells nothing: not published yet.
-      onStore: storeSkus.has(skuKey(r.sku)) && !sizeless.has(skuKey(r.sku)),
+      // A product with no sizes sells nothing: not published yet. One whose
+      // photos are on their way is: it went out of the Hub's copy of the
+      // store at the last pull (which reads published products only), and
+      // offering it again would only find it there.
+      onStore: (storeSkus.has(skuKey(r.sku)) || photosQueued.has(skuKey(r.sku))) && !sizeless.has(skuKey(r.sku)),
       sizeless: sizeless.has(skuKey(r.sku)),
+      awaitingPhotos: photosQueued.has(skuKey(r.sku)),
     })),
     query,
     limit,
@@ -290,21 +300,6 @@ export async function listPublishTargetSkus(query: PublishQuery = {}): Promise<s
   const page = await listPublishTargets(query, Number.MAX_SAFE_INTEGER);
   return page.candidates.map((c) => c.sku);
 }
-
-/**
- * SKUs a live publish is working on right now, in this process.
- *
- * A request the proxy in front gave up on (Cloudflare answers 524 after 100
- * seconds) keeps running here, and the operator's natural next move is to
- * publish the same SKUs again. Two calls creating one SKU both pass the live
- * lookup before either creates — exactly the duplicate parent that lookup
- * exists to prevent. So a SKU already in flight is skipped instead. One app
- * container per shop (docs/deploy.md): this process is the whole picture.
- * On globalThis because route and action bundles each get their own copy of
- * this module.
- */
-const publishing = ((globalThis as { __storeHubPublishing?: Set<string> }).__storeHubPublishing ??=
-  new Set<string>());
 
 /**
  * Publish a set of catalog SKUs to the store. Each product is independent:
@@ -344,6 +339,8 @@ async function publishClaimed(
   const overrides = await getOverrides().catch(() => null);
 
   const catalogEntries = await getAnyBySkus(market, uniqueSkus);
+  // SKUs whose photos are already on their way (see media.ts).
+  const photosQueued = dryRun ? new Set<string>() : await openMediaSkus();
   // Product-level ownership: a GS-owned SKU publishes the FEED's variant set
   // (real sizes, real stock, presented prices), exactly like the rebuild.
   const gsOwned = await gsOwnedProducts(uniqueSkus, market, overrides);
@@ -481,6 +478,12 @@ async function publishClaimed(
         // the store actually has and record THAT. Not the plan — the plan is
         // what we would have written, not what is there.
         if (!dryRun && onStoreSizes) reconciled.push(toStoreProduct(onStore, onStoreSizes));
+        // Hidden, without a photo, and nothing on its way: a create whose
+        // photos were lost (a restart at the wrong moment) or given up on.
+        // Publishing it again files them again.
+        if (!dryRun && isHidden(onStore.status) && !onStore.images?.length && !photosQueued.has(sku)) {
+          await queueMedia({ sku, storeProductId: onStore.id, title: plan.title, urls: plan.images, publish: true });
+        }
         return;
       }
 
@@ -498,10 +501,7 @@ async function publishClaimed(
         // Refresh identity + option list, then replace the variation set (a
         // product being completed has none to replace).
         productId = onStore.id;
-        const reimportBody = planReimportParent(plan, {
-          replaceMedia: options.replaceMedia ?? false,
-          identity: resolvedIdentity,
-        });
+        const reimportBody = planReimportParent(plan, { identity: resolvedIdentity });
         try {
           await client.updateProduct(productId, reimportBody);
         } catch (e) {
@@ -523,16 +523,36 @@ async function publishClaimed(
         }
         if (report.action === "complete") completed += 1;
         else reimported += 1;
+        // Photos, through the queue: new ones when a reimport asked for them,
+        // and the missing ones of a product that has none — which, if it is
+        // hidden, goes on sale with the first.
+        const replace = report.action === "reimport" && (options.replaceMedia ?? false);
+        const noPhotos = !onStore.images?.length;
+        const hidden = noPhotos && isHidden(onStore.status);
+        if ((replace && plan.images.length > 0) || (noPhotos && (plan.images.length > 0 || hidden))) {
+          await queueMedia({ sku, storeProductId: productId, title: plan.title, urls: plan.images, publish: hidden, replace });
+        }
       } else {
-        const { product: parent, adopted } = await createOrAdopt(
-          client,
-          sku,
-          plan.parentBody,
-          resolvedIdentity,
-          identityRejected,
-        );
+        // Filed BEFORE the create: a create that outlives this process (a
+        // deploy mid-run) still gets its photos, found by SKU, and goes on
+        // sale. The product is created hidden; the queue publishes it.
+        await queueMedia({ sku, storeProductId: null, title: plan.title, urls: plan.images, publish: true });
+        let made: Awaited<ReturnType<typeof createOrAdopt>>;
+        try {
+          made = await createOrAdopt(client, sku, plan.parentBody, resolvedIdentity, identityRejected);
+        } catch (e) {
+          // Certainly not created: its photos have nothing to go to. After a
+          // lost answer they stay filed — the product may yet appear.
+          if (!answerLost(e)) await dropMedia(sku).catch(() => undefined);
+          throw e;
+        }
+        const { product: parent, adopted } = made;
         productId = parent.id;
-        report.permalink = parent.permalink ?? null;
+        // Best-effort: the queue finds the product by SKU when this is missing.
+        await setMediaProduct(sku, productId).catch(() => undefined);
+        // A draft's permalink answers 404 to everyone but wp-admin: the report
+        // links to the product's edit page instead.
+        report.permalink = parent.status === "publish" ? (parent.permalink ?? null) : null;
         if (adopted) {
           // Found after a lost answer. With sizes already, some other run
           // finished it: published, nothing to add. Without, it gets them now.
@@ -566,6 +586,7 @@ async function publishClaimed(
           id: productId,
           sku,
           name: plan.title,
+          status: onStore?.status ?? "draft",
           attributes: (plan.parentBody as { attributes: unknown[] }).attributes,
           variations: publishedVariations(plan, createdRows),
         } as StoreProductModel,
