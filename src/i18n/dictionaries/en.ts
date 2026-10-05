@@ -383,6 +383,7 @@ export const en: Dictionary = {
     close: "Close",
     copySku: "Copy SKU",
     notFoundTitle: "Product not found",
+    loadFailed: "Couldn't load the product",
     notFoundBody:
       "This product is not in the catalog for the active market. The link may be stale, or the product was removed.",
     audit: "Audit prices (API)",

@@ -5,6 +5,7 @@ import { getActiveConfig } from "@/server/config/repo";
 import { getSource, kicksdbConfigured } from "@/server/adapters/kicksdb";
 import { listCatalogEntries, upsertCatalog } from "@/server/catalog/repo";
 import type { CatalogItem } from "@/lib/catalog";
+import { loadDrawerData, type DrawerData } from "@/components/catalog/drawer-data";
 
 export interface CatalogListResult {
   ok: boolean;
@@ -66,6 +67,31 @@ export async function refreshCatalogProduct(
     if (!product) return { ok: false, error: `No exact KicksDB match for ${sku}` };
     await upsertCatalog(market, [product]);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+const DrawerSchema = z.object({
+  market: z.string().trim().min(1).max(8),
+  sku: z.string().trim().min(1).max(80),
+});
+
+/**
+ * The product drawer's data, fetched by the drawer itself. Opening a product
+ * used to be a navigation: the whole catalog page — grid, counts, sidebar —
+ * re-rendered on the server just to add the drawer, again on close, and again
+ * after every lock or price edit. Now only this runs.
+ */
+export async function loadCatalogDrawer(
+  input: z.infer<typeof DrawerSchema>,
+): Promise<{ ok: true; data: DrawerData | null } | { ok: false; error: string }> {
+  const parsed = DrawerSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const config = await getActiveConfig();
+    const { market, sku } = parsed.data;
+    return { ok: true, data: await loadDrawerData(market.toUpperCase(), sku, config) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

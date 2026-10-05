@@ -392,6 +392,7 @@ export const it = {
     close: "Chiudi",
     copySku: "Copia SKU",
     notFoundTitle: "Prodotto non trovato",
+    loadFailed: "Impossibile caricare il prodotto",
     notFoundBody:
       "Questo prodotto non è nel catalogo per il mercato attivo. Il link potrebbe essere vecchio, oppure il prodotto è stato rimosso.",
     audit: "Verifica prezzi (API)",

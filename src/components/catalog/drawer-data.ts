@@ -12,7 +12,7 @@ import {
 } from "@/server/overrides/model";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { kicksdbConfigured } from "@/server/adapters/kicksdb";
-import { getActiveSnapshot } from "@/server/store-json/repo";
+import { getSnapshotProductsBySkus } from "@/server/store-json/repo";
 import {
   hasActiveSale,
   managedStock,
@@ -202,8 +202,9 @@ export async function loadDrawerData(
   const storeOnly = entry.source === "woo" && gs == null;
   let store: DrawerData["store"] = null;
   if (storeOnly) {
-    const snapshot = await getActiveSnapshot().catch(() => null);
-    const prod = snapshot?.products.find((p) => skuKey(p.sku) === entry.sku);
+    // Only this product, unrolled in SQL: deserializing the whole snapshot
+    // (megabytes of JSON) on every drawer open is what made the catalog crawl.
+    const prod = (await getSnapshotProductsBySkus([entry.sku])).get(skuKey(entry.sku));
     if (prod) {
       store = {
         productId: prod.id,
