@@ -189,12 +189,6 @@ export async function readIndex(): Promise<IndexRow[]> {
   return rows.map(rowToProduct);
 }
 
-export async function readIndexRows(ids: number[]): Promise<IndexRow[]> {
-  if (ids.length === 0) return [];
-  const rows = await db.select().from(storeIndex).where(inArray(storeIndex.productId, ids));
-  return rows.map(rowToProduct);
-}
-
 export interface IndexInfo {
   products: number;
   /** The newest modification the index holds: where the next check starts. */

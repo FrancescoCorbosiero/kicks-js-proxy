@@ -101,7 +101,7 @@ export function CategoryField({
     );
   }
   return (
-    <div className="space-y-2">
+    <div className="@container space-y-2">
       <div className="flex flex-wrap items-center gap-3">
         <span className={look.label}>{e.category}</span>
         {!state.id && (
@@ -137,7 +137,7 @@ export function CategoryField({
           })}
         </select>
       ) : (
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 @md:grid-cols-2">
           <label className="block">
             <span className={look.hint}>{e.newName}</span>
             <input
@@ -220,7 +220,8 @@ export function ConditionsField({
   const e = t.collections.editor;
   const set = (key: string, next: EditorCondition) => onChange(conditions.map((c) => (c.key === key ? next : c)));
   return (
-    <div className="space-y-2">
+    // Laid out by the room it gets, not the screen's: the Vetrina is a phone-wide column on a desktop too.
+    <div className="@container space-y-2">
       {conditions.map((c, i) => {
         const problem = conditionProblem(problems, i);
         return (
@@ -274,7 +275,7 @@ function ConditionRow({
   const e = t.collections.editor;
   const kind = FIELD_VALUE[c.field];
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,9rem)_minmax(0,1fr)]">
+    <div className="grid grid-cols-2 gap-2 @xl:grid-cols-[minmax(0,11rem)_minmax(0,9rem)_minmax(0,1fr)]">
       <select
         aria-label={e.fields[c.field]}
         className={look.select}
@@ -300,7 +301,7 @@ function ConditionRow({
         ))}
       </select>
       {kind !== "none" && (
-        <div className="col-span-2 sm:col-span-1">
+        <div className="col-span-2 @xl:col-span-1">
           <ValueInput condition={c} options={options} look={look} onChange={onChange} />
         </div>
       )}

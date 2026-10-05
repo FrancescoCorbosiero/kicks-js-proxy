@@ -50,7 +50,12 @@ const WRITE_CHUNK = 25;
 const REFUSED_PAUSE_MS = 60 * 60_000;
 const DEFAULT_MAX_CHANGES = 200;
 
-export type RunKind = "full" | "check" | "apply";
+/**
+ * What a run is: a full read, a check for changes, a change confirmed by
+ * hand ("apply" — the one requests for a confirmation ride along with), or
+ * the decision about one product whose tags were just edited.
+ */
+export type RunKind = "full" | "check" | "apply" | "product";
 
 export interface RunnerStatus {
   /** What is running now. */
@@ -191,15 +196,26 @@ async function readAll(woo: WooClient): Promise<number> {
 }
 
 /**
- * What changed since the newest change the index holds. An empty index is
- * read whole instead. A store that ignores "modified after" answers with
- * everything, oldest first — seen at once, said once, and from then on the
- * full reads alone keep the index fresh.
+ * What changed since the newest change the index holds.
+ *
+ * The store is read whole instead until a full read has gone through in this
+ * process: the first check after a deploy or a crash, an empty index, a full
+ * read that failed half-way. A check only ever adds what changed, so an index
+ * left incomplete would otherwise stay so until the daily read.
+ *
+ * A store that ignores "modified after" answers with everything, oldest
+ * first — seen at once, said once, and from then on the full reads alone keep
+ * the index fresh.
+ *
+ * More changes than a check reads in one go (a CSV import, a bulk edit of
+ * thousands) also mean a full read: the check starts a little before the
+ * newest change it holds, and with thousands changed in that window it would
+ * read the same first pages every time and never reach the rest.
  */
 async function readChanges(woo: WooClient): Promise<number> {
   const s = state();
   const info = await repo.indexInfo();
-  if (info.products === 0 || !info.newestModified) return readAll(woo);
+  if (s.lastFullAt == null || info.products === 0 || !info.newestModified) return readAll(woo);
   if (s.incremental === false) return 0;
   const since = new Date(Math.min(info.newestModified.getTime(), Date.now()) - OVERLAP_MS);
   const seen = new Set<number>();
@@ -222,6 +238,10 @@ async function readChanges(woo: WooClient): Promise<number> {
     for (const p of fresh) seen.add(p.id);
     await repo.upsertIndexRows(fresh.map(toIndexRow));
     const verdict = pageVerdict({ page, rows: products.length, fresh: fresh.length, perPage: PER_PAGE, maxPages: MAX_CHECK_PAGES });
+    if (verdict === "capped") {
+      console.log(`[collections] more than ${seen.size} products changed: reading the whole store`);
+      return readAll(woo);
+    }
     if (verdict !== "continue") break;
   }
   return seen.size;
@@ -501,12 +521,6 @@ export function requestApply(collectionId?: string): void {
   );
 }
 
-/** True when nothing is running or queued — for a page waiting on a run it started. */
-export function idle(): boolean {
-  const s = state();
-  return s.running == null && s.queued.length === 0;
-}
-
 /* ---------------------------------------------------------------- *
  * One product's tags, edited from the Hub
  * ---------------------------------------------------------------- */
@@ -564,7 +578,7 @@ export async function setProductTags(
   const result: TagEdit = { tags: row.tags, joined: [], left: [], pending: false, error: null };
   if (!(await anyEnabled())) return result;
 
-  const decision = exclusive("apply", async () => {
+  const decision = exclusive("product", async () => {
     const rows = await repo.listCollectionRows();
     const all = rows.map(repo.toCollection);
     const { ctx, categoryIds } = await context(woo);

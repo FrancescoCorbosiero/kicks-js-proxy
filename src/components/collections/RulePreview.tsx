@@ -39,7 +39,7 @@ export function RulePreview({
   const { t } = useI18n();
   const e = t.collections.editor;
   return (
-    <section className={look.frame} aria-live="polite">
+    <section className={`@container ${look.frame}`} aria-live="polite">
       <div className="flex items-center gap-2">
         <span className={look.title}>{e.preview}</span>
         {checking && <span className={look.note}>{e.working}</span>}
@@ -82,7 +82,7 @@ function PreviewBody({ preview: p, isNew, look }: { preview: CollectionPreview; 
       {p.after === 0 && p.before > 0 && <p className={look.warn}>{e.emptyAfter}</p>}
       {p.orphaned > 0 && <p className={look.warn}>{e.orphaned(p.orphaned)}</p>}
       {isNew && p.leavingCount > 0 && <p className={look.note}>{e.handPicked}</p>}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 @2xl:grid-cols-3">
         {p.joiningCount > 0 && <Names title={e.joiningList} items={p.joining} total={p.joiningCount} look={look} />}
         {p.leavingCount > 0 && <Names title={e.leavingList} items={p.leaving} total={p.leavingCount} look={look} />}
         {p.after > 0 && <Names title={e.membersList} items={p.members} total={p.after} look={look} />}

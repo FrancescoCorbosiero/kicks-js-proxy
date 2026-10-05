@@ -34,16 +34,20 @@ import {
   type EditorRow,
 } from "@/lib/vetrina/order";
 import type { BlockConfig } from "@/config";
+import { describeRule } from "@/lib/collections/describe";
+import { railCategory } from "@/lib/collections/rail";
+import type { RailCollection } from "@/lib/collections/types";
 import { changedFields, editableFields } from "@/lib/vetrina/fields";
 import type { HiddenReason, ProductCard, RailDetail, RailFallback, SectionDraft } from "@/lib/vetrina/types";
 import type { VetrinaRail, VetrinaResult } from "@/server/vetrina/service";
 import { loadVetrinaCards, loadVetrinaRail, publishVetrinaRail } from "@/server/actions/vetrina";
+import { CollectionSheet } from "./CollectionSheet";
 import { ErrorState } from "./ErrorState";
 import { FieldsSheet } from "./FieldsSheet";
 import { HistorySheet } from "./HistorySheet";
 import { ProductSheet } from "./ProductSheet";
 import { formatFromPrice } from "./format";
-import { ChevronLeft, ChevronRight, EyeOff, Grip, Lock, More, Pin } from "./icons";
+import { ChevronLeft, ChevronRight, EyeOff, Funnel, Grip, Lock, More, Pin } from "./icons";
 import { SEGMENTED_COLORS } from "./segmented";
 
 export interface EditorOptions {
@@ -141,6 +145,8 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
     () => new Map<number, ProductCard>([...initial.rail.items, ...initial.rail.hidden].map((c) => [c.id, c])),
   );
   const [locks, setLocks] = React.useState<Record<string, number>>(initial.locks);
+  // The rule filling the rail's category, when it is automatic.
+  const [collection, setCollection] = React.useState<RailCollection | null>(initial.collection);
   const [reasons, setReasons] = React.useState(
     () => new Map<number, HiddenReason>(initial.rail.hidden.map((h) => [h.id, h.reason])),
   );
@@ -159,10 +165,26 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
       setBase(data.rail);
       setVisibleByFallback((prev) => ({ ...prev, [data.rail.previewFallback]: data.rail.visible }));
       setReasons(new Map(data.rail.hidden.map((h) => [h.id, h.reason])));
+      setCollection(data.collection);
       absorb([...data.rail.items, ...data.rail.hidden], data.locks);
     },
     [absorb],
   );
+
+  /**
+   * The category's members moved (its rule changed, a product's tags did):
+   * read the rail again. The draft stays — pins and hides are the
+   * customer's — but every automatic order cached so far is stale.
+   */
+  const reloadMembers = React.useCallback(async () => {
+    const fresh = await loadVetrinaRail({ key: railKey, fallback: draft.fallback });
+    if (!fresh.ok) {
+      toast.error(t.vetrina.errors[fresh.code] ?? fresh.error);
+      return;
+    }
+    setVisibleByFallback({ [fresh.data.rail.previewFallback]: fresh.data.rail.visible });
+    adoptRail(fresh.data);
+  }, [railKey, draft.fallback, adoptRail, t]);
 
   // A fallback we have no automatic order for yet: ask the site (nothing is saved).
   React.useEffect(() => {
@@ -270,6 +292,7 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [looksOpen, setLooksOpen] = React.useState(false);
   const [productFor, setProductFor] = React.useState<number | null>(null);
+  const [ruleOpen, setRuleOpen] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [stale, setStale] = React.useState(false);
 
@@ -337,6 +360,9 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
 
   const hiddenIds = draft.exclude;
   const termName = base.terms.map((term) => term.name).join(", ");
+  // Only a rail showing exactly one category can be filled by a rule.
+  const categoryId = railCategory(base);
+  const auto = t.vetrina.auto;
   const termLabel = base.taxonomy === "product_cat" ? v.termCategory : v.termBrand;
   const fallbackChoices = options.fallbacks.includes(draft.fallback) ? options.fallbacks : [...options.fallbacks, draft.fallback];
 
@@ -364,6 +390,44 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
         </p>
         {!base.editable && <p className="mt-2 text-[15px]">{v.readOnly}</p>}
       </div>
+
+      {categoryId != null && (
+        <div className="px-4 pb-3">
+          <button
+            type="button"
+            onClick={() => setRuleOpen(true)}
+            className="flex w-full items-center gap-3 rounded-2xl bg-white px-4 py-3 text-left shadow-sm transition-opacity active:opacity-60 dark:bg-[#1c1c1e]"
+          >
+            <Funnel className={`h-5 w-5 shrink-0 ${collection?.enabled ? "text-[#b8860b]" : "opacity-40"}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12px] font-semibold uppercase tracking-wide opacity-50">
+                {collection ? (collection.enabled ? auto.card : auto.paused) : auto.make}
+              </span>
+              <span className="block text-[15px] font-medium leading-snug">
+                {collection ? describeRule(collection, t.collections.words) : auto.makeHint}
+              </span>
+              {collection && (
+                <span
+                  className={`mt-0.5 block text-[13px] leading-snug ${
+                    collection.enabled && (collection.held || collection.lastError) ? "text-amber-700 dark:text-amber-400" : "opacity-60"
+                  }`}
+                >
+                  {!collection.enabled
+                    ? auto.cardPaused
+                    : collection.held
+                      ? auto.heldHint
+                      : collection.lastError
+                        ? auto.problem
+                        : collection.members != null
+                          ? `${auto.members(collection.members)} · ${auto.cardHint}`
+                          : auto.cardHint}
+                </span>
+              )}
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 opacity-30" />
+          </button>
+        </div>
+      )}
 
       {canEditLooks && (
         <div className="px-4 pb-3">
@@ -593,6 +657,16 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
               {s.open}
             </ActionsButton>
           )}
+          {categoryId != null && (
+            <ActionsButton
+              onClick={() => {
+                setSectionMenu(false);
+                setRuleOpen(true);
+              }}
+            >
+              {auto.menu}
+            </ActionsButton>
+          )}
           <ActionsButton
             onClick={() => {
               setSectionMenu(false);
@@ -737,7 +811,15 @@ function Editor({ railKey, initial, options }: { railKey: string; initial: Vetri
             if (res.ok) absorb(res.data.cards, res.data.locks);
           });
         }}
+        onTagsChanged={() => void reloadMembers()}
         demo={demo}
+      />
+
+      <CollectionSheet
+        termId={ruleOpen ? categoryId : null}
+        termName={termName}
+        onClose={() => setRuleOpen(false)}
+        onChanged={() => void reloadMembers()}
       />
     </Page>
   );

@@ -13,6 +13,7 @@ import { updateStoreVariation } from "@/server/actions/store-edit";
 import { formatCardPrice, formatEuro, parsePrice } from "./format";
 import { External, Lock } from "./icons";
 import { useSheetMount, useStandalone } from "./sheet-mount";
+import { TagsSection } from "./TagsSection";
 
 const toInput = (n: number | null | undefined) => (n == null ? "" : n.toFixed(2).replace(".", ","));
 
@@ -22,12 +23,16 @@ const toInput = (n: number | null | undefined) => (n == null ? "" : n.toFixed(2)
  * unlocks. "Salva e pubblica" saves the locks in the Hub and pushes this one
  * product's prices to the site. Store-only products have no source price:
  * their shelf price is edited directly.
+ *
+ * Below the prices, the product's tags: what the automatic categories read,
+ * so changing them here moves the product in or out of those sections.
  */
 export function ProductSheet({
   card,
   onClose,
   onLocksChanged,
   onPricesChanged,
+  onTagsChanged,
   demo,
 }: {
   card: ProductCard | null;
@@ -35,6 +40,8 @@ export function ProductSheet({
   onLocksChanged: (sku: string, count: number) => void;
   /** Prices reached the site: the list re-reads this product's card. */
   onPricesChanged: (id: number) => void;
+  /** Its tags moved it in or out of an automatic category: the section reloads. */
+  onTagsChanged?: () => void;
   demo: boolean;
 }) {
   const { t } = useI18n();
@@ -281,6 +288,12 @@ export function ProductSheet({
                   </>
                 )}
               </div>
+
+              {!card.missing && (
+                <div className="mt-5">
+                  <TagsSection key={card.id} productId={card.id} onChanged={() => onTagsChanged?.()} />
+                </div>
+              )}
 
               <div className="mt-5 flex flex-col gap-2 text-[15px]">
                 {card.permalink && (

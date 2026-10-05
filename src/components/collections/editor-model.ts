@@ -2,8 +2,14 @@
 
 import * as React from "react";
 import { FIELD_OPS, type CollectionCondition, type ConditionField } from "@core/collections";
-import type { CollectionDraft, CollectionView, DraftCheck, DraftProblem } from "@/lib/collections/types";
-import { checkCollectionDraft } from "@/server/actions/collections";
+import type {
+  CollectionDraft,
+  CollectionsStatus,
+  CollectionView,
+  DraftCheck,
+  DraftProblem,
+} from "@/lib/collections/types";
+import { checkCollectionDraft, pollCollections } from "@/server/actions/collections";
 
 /**
  * The rule editor's state, shared by the Hub's page and the Vetrina's sheet:
@@ -84,9 +90,13 @@ export function conditionProblem(problems: DraftProblem[], index: number): Draft
 /**
  * Check the draft against the store index shortly after the last edit: the
  * problems to point at, and what saving would do. Answers that arrive late
- * for an older draft are dropped.
+ * for an older draft are dropped. `indexProducts` checks again when the
+ * index grows — the first read of the store lands while the editor is open.
  */
-export function useDraftCheck(draft: CollectionDraft | null): {
+export function useDraftCheck(
+  draft: CollectionDraft | null,
+  indexProducts = 0,
+): {
   check: DraftCheck | null;
   checking: boolean;
   error: string | null;
@@ -113,7 +123,26 @@ export function useDraftCheck(draft: CollectionDraft | null): {
       }
     }, 350);
     return () => clearTimeout(timer);
-  }, [key]);
+  }, [key, indexProducts]);
 
   return { check, checking, error };
+}
+
+/**
+ * Follow the runs a save started until they are done (or `timeoutMs` passes):
+ * the last status seen — what the run moved, or why it failed — or null when
+ * the server could not be asked.
+ */
+export async function waitForRuns(timeoutMs = 60_000): Promise<{ status: CollectionsStatus | null; done: boolean }> {
+  const deadline = Date.now() + timeoutMs;
+  let status: CollectionsStatus | null = null;
+  for (;;) {
+    const res = await pollCollections();
+    if (res.ok) {
+      status = res.data;
+      if (status.runner.running == null && status.runner.queued === 0) return { status, done: true };
+    }
+    if (Date.now() > deadline) return { status, done: false };
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
 }

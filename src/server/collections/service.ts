@@ -211,10 +211,6 @@ export async function loadForTerm(termId: number): Promise<TermEditor> {
   };
 }
 
-export async function loadChanges(opts: { collectionId?: string; productId?: number; limit?: number }): Promise<ChangeView[]> {
-  return (await repo.listChanges(opts)).map(changeView);
-}
-
 /* ---------------------------------------------------------------- *
  * Checking and saving a draft
  * ---------------------------------------------------------------- */
@@ -252,11 +248,10 @@ const unbornTag = (c: CollectionCondition) => c.field === "tag" && !c.value.trim
  * name the store gives it now (the rule's words read right after a rename).
  */
 function settle(conditions: CollectionCondition[], terms: { tags: Term[]; brands: Term[]; categories: Term[] }): CollectionCondition[] {
-  const lists = { tag: terms.tags, brand: terms.brands, category: terms.categories } as const;
   const named = { tag: paths(terms.tags), brand: paths(terms.brands), category: paths(terms.categories) };
   return conditions.map((c) => {
     if (FIELD_VALUE[c.field] !== "term") return { ...c, value: c.value.trim(), label: c.label?.trim() || undefined };
-    const field = c.field as keyof typeof lists;
+    const field = c.field as keyof typeof named;
     if (unbornTag(c)) {
       const found = terms.tags.find((t) => sameName(t.name, c.label!));
       return found ? { ...c, value: String(found.id), label: decodeEntities(found.name) } : c;

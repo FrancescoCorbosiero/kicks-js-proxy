@@ -3,8 +3,6 @@
 import { z } from "zod";
 import { CONDITION_FIELDS, CONDITION_OPS } from "@core/collections";
 import type {
-  ChangeView,
-  CollectionOptions,
   CollectionsState,
   CollectionsStatus,
   DraftCheck,
@@ -62,10 +60,6 @@ export async function getCollectionsState(): Promise<CollectionsResult<Collectio
 /** The light half of the state, polled while a run is going. */
 export async function pollCollections(): Promise<CollectionsResult<CollectionsStatus>> {
   return attempt(() => service.loadStatus());
-}
-
-export async function loadCollectionOptions(): Promise<CollectionsResult<CollectionOptions>> {
-  return attempt(() => service.loadOptions());
 }
 
 /** The rule editor opened on one category — the Vetrina's sheet, from a rail. */
@@ -129,17 +123,6 @@ export async function readStoreAgain(): Promise<CollectionsResult<null>> {
     await service.readAgain();
     return null;
   });
-}
-
-export async function loadCollectionChanges(input: {
-  collectionId?: string;
-  productId?: number;
-}): Promise<CollectionsResult<ChangeView[]>> {
-  const parsed = z
-    .object({ collectionId: z.uuid().optional(), productId: z.number().int().positive().optional() })
-    .safeParse(input);
-  if (!parsed.success) return invalid();
-  return attempt(() => service.loadChanges({ ...parsed.data, limit: 50 }));
 }
 
 const ProductId = z.number().int().positive();

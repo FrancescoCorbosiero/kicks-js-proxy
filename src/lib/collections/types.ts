@@ -64,7 +64,7 @@ export interface IndexView {
 }
 
 export interface RunnerView {
-  running: "full" | "check" | "apply" | null;
+  running: "full" | "check" | "apply" | "product" | null;
   progress: { done: number; total: number | null } | null;
   queued: number;
   lastCheckAt: string | null;

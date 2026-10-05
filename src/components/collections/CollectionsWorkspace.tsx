@@ -264,7 +264,7 @@ function StatusPanel({
         ? progress
           ? s.applying(progress.done, progress.total)
           : s.checking
-        : runner.running === "apply"
+        : runner.running === "apply" || runner.running === "product"
           ? s.applying(progress?.done ?? 0, progress?.total ?? null)
           : null;
   const cadence = !runner.scheduled ? s.off : runner.everyMinutes > 0 ? s.every(runner.everyMinutes) : s.daily;
@@ -394,7 +394,7 @@ function Editor({
   const e = t.collections.editor;
   const [draftState, setDraftState] = React.useState<EditorState>(initial);
   const draft = React.useMemo(() => toDraft(draftState), [draftState]);
-  const { check, checking, error } = useDraftCheck(draft);
+  const { check, checking, error } = useDraftCheck(draft, state.index.products);
   const problems = check?.problems ?? [];
   const saved = initial.id ? state.collections.find((x) => x.id === initial.id) : undefined;
   const dirty = JSON.stringify(draft) !== JSON.stringify(toDraft(initial));

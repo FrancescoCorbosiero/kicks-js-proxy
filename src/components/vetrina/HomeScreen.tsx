@@ -7,6 +7,9 @@ import { Navbar, Page, Link as KLink } from "konsta/react";
 import { toast } from "sonner";
 import { useI18n } from "@/i18n/provider";
 import { blockConfig } from "@/config";
+import { describeRule } from "@/lib/collections/describe";
+import { railCategory } from "@/lib/collections/rail";
+import type { RailCollection } from "@/lib/collections/types";
 import { editableFields } from "@/lib/vetrina/fields";
 import { railKeyToParam } from "@/lib/vetrina/order";
 import { skuKey } from "@/lib/skus";
@@ -16,7 +19,7 @@ import { publishVetrinaBlock } from "@/server/actions/vetrina";
 import { ErrorState } from "./ErrorState";
 import { FieldsSheet } from "./FieldsSheet";
 import { useStandalone } from "./sheet-mount";
-import { ChevronLeft, ChevronRight, External, Lock, Pin, Refresh } from "./icons";
+import { ChevronLeft, ChevronRight, External, Funnel, Lock, Pin, Refresh } from "./icons";
 
 type StaticBlock = Extract<HomeBlock, { kind: "static" }>;
 
@@ -108,6 +111,7 @@ export function HomeScreen({ result }: { result: VetrinaResult<VetrinaHome> }) {
               block={block}
               label={blockLabel(block)}
               locks={result.data.locks}
+              collections={result.data.collections}
               onEdit={() => setEditingPath(block.path)}
             />
           ))}
@@ -133,11 +137,13 @@ function HomeRow({
   block,
   label,
   locks,
+  collections,
   onEdit,
 }: {
   block: HomeBlock;
   label: string;
   locks: Record<string, number>;
+  collections: Record<number, RailCollection>;
   onEdit: () => void;
 }) {
   const { t } = useI18n();
@@ -145,7 +151,8 @@ function HomeRow({
   if (config.show === "hidden") return null;
 
   if (block.kind === "rail" && config.show === "rail") {
-    return <RailCard rail={block.rail} locks={locks} />;
+    const category = railCategory(block.rail);
+    return <RailCard rail={block.rail} locks={locks} collection={category != null ? (collections[category] ?? null) : null} />;
   }
 
   const summary = block.kind === "static" ? block.summary : null;
@@ -181,9 +188,19 @@ function HomeRow({
   );
 }
 
-function RailCard({ rail, locks }: { rail: RailSummary; locks: Record<string, number> }) {
+function RailCard({
+  rail,
+  locks,
+  collection,
+}: {
+  rail: RailSummary;
+  locks: Record<string, number>;
+  /** The rule filling the rail's category, when it is automatic. */
+  collection: RailCollection | null;
+}) {
   const { t } = useI18n();
   const v = t.vetrina.home;
+  const auto = t.vetrina.auto;
   const pinned = rail.pin.length;
   const hidden = rail.exclude.length;
 
@@ -195,6 +212,29 @@ function RailCard({ rail, locks }: { rail: RailSummary; locks: Record<string, nu
             <div className="truncate text-[12px] font-semibold uppercase tracking-wide opacity-50">{rail.eyebrow}</div>
           )}
           <div className="truncate text-[19px] font-bold leading-tight">{rail.title || rail.key}</div>
+          {collection && (
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px]">
+              <span
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  !collection.enabled
+                    ? "bg-black/5 opacity-60 dark:bg-white/10"
+                    : collection.held || collection.lastError
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                      : "bg-[#d4a017]/15 text-[#8a6b00] dark:text-[#e8c35a]"
+                }`}
+              >
+                <Funnel className="h-3 w-3" />
+                {!collection.enabled
+                  ? auto.paused
+                  : collection.held
+                    ? auto.held
+                    : collection.lastError
+                      ? auto.problem
+                      : auto.badge}
+              </span>
+              <span className="truncate opacity-60">{describeRule(collection, t.collections.words)}</span>
+            </div>
+          )}
         </div>
         {rail.editable && <ChevronRight className="h-5 w-5 shrink-0 opacity-30" />}
       </div>

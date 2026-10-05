@@ -64,6 +64,8 @@ class FakeStore {
   reads: { page: number; modifiedAfter?: string; include?: number[] }[] = [];
   batches: ({ id: number } & Record<string, unknown>)[][] = [];
   ignoreModifiedAfter = false;
+  /** The store stops answering at this page of a listing (once). */
+  failOnPage: number | null = null;
   refuse = new Set<number>();
   clock = Date.parse("2026-10-05T10:00:00Z");
   private nextTerm = 500;
@@ -121,6 +123,10 @@ class FakeStore {
 
   getProductIndexPage = async (opts: { page: number; perPage: number; modifiedAfter?: Date; include?: number[] }) => {
     this.reads.push({ page: opts.page, modifiedAfter: opts.modifiedAfter?.toISOString(), include: opts.include });
+    if (this.failOnPage === opts.page && !opts.include) {
+      this.failOnPage = null;
+      throw new Error("Request to https://shop/wp-json/wc/v3/products failed: no answer within 20s");
+    }
     let list = [...this.products.values()].filter((p) => p.status !== "trash");
     if (opts.include) list = list.filter((p) => opts.include!.includes(p.id));
     else if (opts.modifiedAfter && !this.ignoreModifiedAfter) {
@@ -370,6 +376,47 @@ describe.skipIf(!enabled)("the automatic categories' runs (real SQL)", () => {
     await runCheck({ client: store.client });
     // No listing at all any more: the daily full read takes over.
     expect(store.reads.filter((r) => !r.include)).toEqual([]);
+  });
+
+  it("reads the whole store when more products changed than a check reads", async () => {
+    const { runCheck, readIndex } = await load();
+    const store = new FakeStore();
+    for (let id = 1; id <= 2101; id++) store.add({ id });
+    await saldi();
+    await runCheck({ client: store.client });
+
+    // A CSV import touches every product within a minute.
+    store.clock += 60_000;
+    for (const p of store.products.values()) p.modified = store.clock;
+    store.products.get(2101)!.tags = [7];
+    store.reads = [];
+    await runCheck({ client: store.client });
+    // The check stopped at its 20 pages and read the store whole instead…
+    expect(store.reads.filter((r) => r.modifiedAfter)).toHaveLength(20);
+    expect(store.reads.some((r) => !r.modifiedAfter && !r.include)).toBe(true);
+    // …so the last product changed was seen and decided.
+    expect(store.membersOf(10)).toEqual([2101]);
+    expect((await readIndex()).length).toBe(2101);
+  });
+
+  it("reads the whole store again until a full read gets through", async () => {
+    const { runCheck, readIndex, getRunnerStatus } = await load();
+    const store = new FakeStore();
+    for (let id = 1; id <= 150; id++) store.add({ id, tags: id === 150 ? [7] : [] });
+    await saldi();
+    // The store stops answering half-way through the first read.
+    store.failOnPage = 2;
+    await expect(runCheck({ client: store.client })).rejects.toThrow(/no answer/);
+    expect(getRunnerStatus().lastError).toMatch(/no answer/);
+    expect((await readIndex()).length).toBe(100);
+
+    // The next check does not settle for what changed: it reads it all.
+    store.reads = [];
+    await runCheck({ client: store.client });
+    expect(store.reads.some((r) => r.page === 2 && !r.modifiedAfter && !r.include)).toBe(true);
+    expect((await readIndex()).length).toBe(150);
+    expect(store.membersOf(10)).toEqual([150]);
+    expect(getRunnerStatus().lastError).toBeNull();
   });
 
   it("drops from the index what a full read no longer finds", async () => {
