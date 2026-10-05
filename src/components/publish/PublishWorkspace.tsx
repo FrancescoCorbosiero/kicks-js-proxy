@@ -26,8 +26,17 @@ import { RepairPanel } from "./RepairPanel";
  * same steady trickle of calls for 40 products as for 400 — only for longer.
  * A long run can be stopped between batches, and leaving the page asks first.
  */
-/** SKUs per publish call: one request the server comfortably survives. */
-const BATCH_SIZE = 25;
+/**
+ * SKUs per publish call. Small because of what sits in front of the Hub:
+ * Cloudflare gives up on a request after 100 seconds (HTTP 524), and creating
+ * a product makes WooCommerce download its images on the spot — 10-20 s a
+ * product on a real shop. Six, three at a time, is two rounds: well inside.
+ */
+const BATCH_SIZE = 6;
+/** Answers from the proxy in front, not the app: it stopped waiting. */
+const PROXY_GAVE_UP = new Set([502, 503, 504, 520, 522, 524]);
+/** Such answers in a row before a run stops: the server itself is in trouble. */
+const MAX_PROXY_FAILURES = 3;
 /** Report rows rendered. The counters above them always cover the whole run. */
 const REPORT_LIMIT = 60;
 
@@ -127,6 +136,9 @@ export function PublishWorkspace({
   const [stopping, setStopping] = React.useState(false);
   const [stopped, setStopped] = React.useState<{ done: number; total: number } | null>(null);
   const [liveRunning, setLiveRunning] = React.useState(false);
+  // Products of batches the proxy gave up on: most likely finished by the
+  // server anyway, but unconfirmed — they stay selected for a later run.
+  const [unanswered, setUnanswered] = React.useState(0);
 
   // The URL is the source of truth for the three filters; `term` is a local
   // echo so typing stays responsive between debounced pushes.
@@ -219,12 +231,15 @@ export function PublishWorkspace({
     setConfirming(false);
     setStopped(null);
     setStopping(false);
+    setUnanswered(0);
     stopRef.current = false;
     const skus = runnable;
     setProgress(skus.length > BATCH_SIZE ? { done: 0, total: skus.length } : null);
     setBusy(true);
     if (!dryRun) setLiveRunning(true);
     let merged: PublishOutcome | null = null;
+    let lost = 0;
+    let proxyFailures = 0;
     try {
       for (let i = 0; i < skus.length; i += BATCH_SIZE) {
         if (stopRef.current) {
@@ -232,22 +247,38 @@ export function PublishWorkspace({
           break;
         }
         const batch = skus.slice(i, i + BATCH_SIZE);
-        const res = await publishBatch({
-          skus: batch,
-          dryRun,
-          includeGallery,
-          force,
-          replaceMedia,
-        });
+        if (skus.length > BATCH_SIZE) setProgress({ done: i, total: skus.length });
+        let res: PublishActionResult;
+        try {
+          res = await publishBatch({
+            skus: batch,
+            dryRun,
+            includeGallery,
+            force,
+            replaceMedia,
+          });
+        } catch (e) {
+          if (!(e instanceof UnexpectedResponse) || !PROXY_GAVE_UP.has(e.status)) throw e;
+          // The proxy stopped waiting, not the server: this batch is most
+          // likely being finished there right now. Its products stay selected
+          // — publishing them again later is safe: the ones created by then
+          // are skipped, and the server refuses any it is still creating — and
+          // the run moves on to the next batch.
+          lost += batch.length;
+          setUnanswered(lost);
+          if (++proxyFailures >= MAX_PROXY_FAILURES) {
+            setError(t.publish.proxyGaveUp(e.status, MAX_PROXY_FAILURES));
+            break;
+          }
+          continue;
+        }
+        proxyFailures = 0;
         if (!res.ok || !res.outcome) {
           setError(res.error ?? t.publish.failed);
           break;
         }
         merged = merged ? mergeOutcomes(merged, res.outcome) : res.outcome;
         setOutcome(merged);
-        if (skus.length > BATCH_SIZE) {
-          setProgress({ done: Math.min(i + BATCH_SIZE, skus.length), total: skus.length });
-        }
       }
     } catch (e) {
       setError(
@@ -528,6 +559,9 @@ export function PublishWorkspace({
           <p className="text-[11px] font-medium text-warn">
             {t.publish.stoppedAt(stopped.done, stopped.total)}
           </p>
+        )}
+        {unanswered > 0 && (
+          <p className="text-[11px] leading-snug font-medium text-warn">{t.publish.unanswered(unanswered)}</p>
         )}
       </div>
 

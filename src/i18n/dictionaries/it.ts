@@ -946,6 +946,7 @@ export const it = {
     skipReasons: {
       alreadyOnStore: "già sul negozio — spunta «Forza reimport» per ricostruirlo",
       feedDelisted: "il listino del fornitore non copre più questo SKU — sincronizza prima il feed",
+      inProgress: "lo sta già creando una richiesta precedente, ancora in corso — riprova tra qualche minuto",
     },
     selectAll: "Seleziona tutti",
     selectingAll: "Seleziono…",
@@ -978,6 +979,10 @@ export const it = {
     keepOpen: "Tieni aperta questa pagina finché non finisce: la pubblicazione avanza da qui.",
     leaveWarning:
       "La pubblicazione è in corso: se esci da questa pagina si ferma dopo il blocco attuale. Uscire comunque?",
+    unanswered: (n: number) =>
+      `${n === 1 ? "1 prodotto è rimasto" : `${n} prodotti sono rimasti`} senza risposta: Cloudflare ha smesso di aspettare, ma di solito il server li completa lo stesso. Restano selezionati: tra qualche minuto pubblicali di nuovo, quelli già creati vengono saltati.`,
+    proxyGaveUp: (status: number, times: number) =>
+      `Il server non ha risposto (HTTP ${status}) per ${times} blocchi di fila: pubblicazione fermata. Controlla che il server sia attivo e riprova tra qualche minuto.`,
     unexpectedResponse: (status: number) =>
       `Risposta inattesa dal server (HTTP ${status}): forse la sessione è scaduta. Ricarica la pagina e riprendi: i prodotti già creati non vengono duplicati.`,
     running: "In corso…",

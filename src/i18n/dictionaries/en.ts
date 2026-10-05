@@ -928,6 +928,7 @@ export const en: Dictionary = {
     skipReasons: {
       alreadyOnStore: "already on the store — tick “Force reimport” to rebuild it",
       feedDelisted: "the supplier feed no longer covers this SKU — sync the feed first",
+      inProgress: "an earlier request is still creating it — try again in a few minutes",
     },
     selectAll: "Select all",
     selectingAll: "Selecting…",
@@ -957,6 +958,10 @@ export const en: Dictionary = {
     stoppedAt: (done, total) => `Stopped after ${done} of ${total}: the rest stay selected.`,
     keepOpen: "Keep this page open until it finishes: publishing runs from here.",
     leaveWarning: "Publishing is running: leaving this page stops it after the current batch. Leave anyway?",
+    unanswered: (n) =>
+      `${n === 1 ? "1 product got" : `${n} products got`} no answer: Cloudflare stopped waiting, but the server usually finishes them anyway. They stay selected: publish them again in a few minutes, the ones already created are skipped.`,
+    proxyGaveUp: (status, times) =>
+      `The server did not answer (HTTP ${status}) for ${times} batches in a row: publishing stopped. Check the server is up and try again in a few minutes.`,
     unexpectedResponse: (status) =>
       `Unexpected answer from the server (HTTP ${status}): the sign-in may have expired. Reload the page and carry on: products already created are not duplicated.`,
     running: "Running…",

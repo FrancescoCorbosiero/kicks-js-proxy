@@ -29,6 +29,7 @@ import {
 import { buildIdentityResolver } from "./identity";
 import { toStoreProduct } from "./store-product";
 import { getWooClient, type WooClient } from "./client";
+import { withTaxonomyCache } from "./taxonomy-cache";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
@@ -55,7 +56,7 @@ export type PublishAction = "create" | "reimport" | "skip";
  * non-technical operator in their own language, so the wording belongs in the
  * dictionaries, not in the executor.
  */
-export type PublishSkipReason = "alreadyOnStore" | "feedDelisted";
+export type PublishSkipReason = "alreadyOnStore" | "feedDelisted" | "inProgress";
 
 export interface PublishProductReport {
   sku: string;
@@ -231,6 +232,21 @@ export async function listPublishTargetSkus(query: PublishQuery = {}): Promise<s
 }
 
 /**
+ * SKUs a live publish is working on right now, in this process.
+ *
+ * A request the proxy in front gave up on (Cloudflare answers 524 after 100
+ * seconds) keeps running here, and the operator's natural next move is to
+ * publish the same SKUs again. Two calls creating one SKU both pass the live
+ * lookup before either creates — exactly the duplicate parent that lookup
+ * exists to prevent. So a SKU already in flight is skipped instead. One app
+ * container per shop (docs/deploy.md): this process is the whole picture.
+ * On globalThis because route and action bundles each get their own copy of
+ * this module.
+ */
+const publishing = ((globalThis as { __storeHubPublishing?: Set<string> }).__storeHubPublishing ??=
+  new Set<string>());
+
+/**
  * Publish a set of catalog SKUs to the store. Each product is independent:
  * one failure never blocks the rest, and a product that fails mid-way is
  * reported with its parent id so it can be finished or removed by hand.
@@ -239,14 +255,34 @@ export async function publishProducts(
   skus: string[],
   options: PublishOptions,
 ): Promise<PublishOutcome> {
+  const uniqueSkus = [...new Set(skus.map(skuKey))];
+  if (options.dryRun) return publishClaimed(uniqueSkus, options, new Set());
+  // Claimed before the first await, so two concurrent calls cannot both see
+  // a SKU as free: the check and the claim happen in one synchronous step.
+  const inFlight = new Set(uniqueSkus.filter((sku) => publishing.has(sku)));
+  const claimed = uniqueSkus.filter((sku) => !inFlight.has(sku));
+  for (const sku of claimed) publishing.add(sku);
+  try {
+    return await publishClaimed(uniqueSkus, options, inFlight);
+  } finally {
+    for (const sku of claimed) publishing.delete(sku);
+  }
+}
+
+async function publishClaimed(
+  uniqueSkus: string[],
+  options: PublishOptions,
+  inFlight: Set<string>,
+): Promise<PublishOutcome> {
   const { dryRun } = options;
   await assertSnapshotIsThisStore();
   const config = await getActiveConfig();
   const market = config.source.market;
-  const client = getWooClient();
+  // Small batches each need the store's brand/category/attribute lists:
+  // remembered between them instead of read again every time.
+  const client = withTaxonomyCache(getWooClient());
   const overrides = await getOverrides().catch(() => null);
 
-  const uniqueSkus = [...new Set(skus.map(skuKey))];
   const catalogEntries = await getAnyBySkus(market, uniqueSkus);
   // Product-level ownership: a GS-owned SKU publishes the FEED's variant set
   // (real sizes, real stock, presented prices), exactly like the rebuild.
@@ -301,6 +337,12 @@ export async function publishProducts(
       error: null,
     };
     reports.push(report);
+
+    // Another request is creating this very SKU right now (see `publishing`).
+    if (inFlight.has(sku)) {
+      report.reason = "inProgress";
+      return;
+    }
 
     try {
       const gs = gsOwned.get(sku);
