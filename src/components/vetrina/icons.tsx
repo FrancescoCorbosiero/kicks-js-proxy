@@ -89,3 +89,20 @@ export function EyeOff({ className }: IconProps) {
     </svg>
   );
 }
+
+/** An automatic category: what passes the rule falls through. */
+export function Funnel({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...stroke}>
+      <path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5Z" />
+    </svg>
+  );
+}
+
+export function Close({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...stroke}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}

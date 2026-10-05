@@ -178,6 +178,18 @@ filters/sorts/paginates in SQL.
   own tree), name, SKU or size range; each card reports how many products it
   really prices and what the engine charges at three sample asks. See
   [Scoped rules](#scoped-rules-a-family-with-its-own-margin).
+- **Automatic categories** (`/collections`) — Shopify's automated collections,
+  on WooCommerce: a category gets a rule on the products' tags, brands,
+  attributes, name, price, sale, stock or age, and holds exactly the products
+  that meet it — they join when they start meeting it and leave when they stop,
+  whoever put them there. The membership is written to the store as real
+  categories, so the category page, the menus and the Vetrina rail that shows
+  it all follow. A live preview names who joins and who leaves before saving;
+  an automatic run never empties a category nor moves more than
+  `COLLECTIONS_MAX_CHANGES` products at once without a confirmation; every
+  product moved is logged. In the Vetrina, a rail's category can be made
+  automatic from the phone, and a product's tags edited from its sheet move it
+  at once. See [docs/smart-collections.md](docs/smart-collections.md).
 - **Import** (`/import`) — manual textarea or CSV/TXT/TSV upload. SKUs are
   extracted, chunked, GET-verified and upserted through the same pipeline;
   each operator action is one `ingestion_runs` row (added / known / rejected).
@@ -213,7 +225,8 @@ runs four cadences:
   2. the GoldenSneakers complete sync;
   3. a KicksDB re-pricing pass;
   4. with `AUTO_SYNC=on`, the **store sync** of the whole store (below);
-  5. self-repair (with `AUTO_REPAIR=on`), metadata backfill and
+  5. the **automatic categories**, against a full read of the store;
+  6. self-repair (with `AUTO_REPAIR=on`), metadata backfill and
      recategorization.
 
   A failed step doesn't stop the others and is retried an hour later, twice
@@ -234,6 +247,11 @@ runs four cadences:
   hidden (see Publish above). It pauses while a store pull runs, because a
   product put on sale as the pull assembles its copy of the store would be
   left out of it.
+- **The automatic categories' check**, every `SCHEDULER_COLLECTIONS_MINUTES`
+  (default 5; `0` = only in the daily sync): one light request asks the store
+  what changed, then every automatic category takes in or lets go of the
+  products its rule now says. The daily sync re-reads the whole store for
+  them. Nothing reaches the store while no category is automatic.
 
 **The store sync** does unattended what the Sync tab does with "apply all":
 it plans the price and stock changes the sources call for and writes them to

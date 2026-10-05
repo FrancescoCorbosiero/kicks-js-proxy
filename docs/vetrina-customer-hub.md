@@ -438,7 +438,7 @@ export default defineHubConfig({
     theme: "ios",                         // "ios" | "material"
     // The dock: the guided path, in order, and the set-up-once pages.
     journey: ["/import", "/catalog", "/publish", "/sync", "/vetrina", "/orders"],
-    setup: ["/pricing", "/taxonomies", "/feeds"],
+    setup: ["/pricing", "/taxonomies", "/collections", "/feeds"],
   },
   vetrina: {
     page: "front",                        // or { id: 123 }
@@ -561,6 +561,14 @@ Terms without a homepage rail keep today's order.
 ---
 
 ## 7. Membership (curated rails)
+
+> **Automatic categories** ([smart-collections.md](smart-collections.md)) now answer
+> most of this section: a rail's category can be given a rule ("tag saldi",
+> "on sale", "added in the last 30 days") and fills and empties itself, so the
+> customer tags products — in WP admin, or from the product sheet here — instead of
+> adding and removing them rail by rail. The rail card offers "Rendi automatica";
+> pins and hides keep deciding the order on top. The manual "+ Aggiungi" below
+> remains for categories without a rule.
 
 - **Curated rails** (Tendenza, Saldi, Offerte, Nuovi arrivi) stay category-driven.
   - This keeps one concept, "the product is in Saldi", behind the rail, the category page

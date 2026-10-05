@@ -19,7 +19,7 @@ import { EMPTY_DOCK_STATUS, type DockStatus } from "@/lib/dock";
  * carries its live number (what's waiting there), polled from /api/dock.
  *
  * Pages that are set up once and rarely touched (hubConfig.ui.setup: margins,
- * taxonomies, feeds) stay off the path, in the menu at the dock's end. Who is
+ * taxonomies, automatic categories, feeds) stay off the path, in the menu at the dock's end. Who is
  * signed in, the language and the theme live in the top bar (TopBar.tsx).
  */
 
@@ -33,6 +33,7 @@ type IconName =
   | "orders"
   | "margins"
   | "taxonomies"
+  | "collections"
   | "feeds"
   | "setup";
 
@@ -101,6 +102,8 @@ function describe(
       return { icon: "margins", label: t.header.navMargins, hint: t.dock.marginsHint };
     case "/taxonomies":
       return { icon: "taxonomies", label: t.header.navTaxonomies, hint: t.dock.taxonomiesHint };
+    case "/collections":
+      return { icon: "collections", label: t.header.navCollections, hint: t.dock.collectionsHint };
     case "/feeds":
       return { icon: "feeds", label: t.header.navFeeds, hint: t.dock.feedsHint };
     default:
@@ -474,6 +477,11 @@ const ICONS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M3.5 12.5V4.5a1 1 0 0 1 1-1h8l8 8-9 9-8-8Z" />
       <circle cx="8" cy="8" r="1.5" />
+    </>
+  ),
+  collections: (
+    <>
+      <path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5Z" />
     </>
   ),
   feeds: (

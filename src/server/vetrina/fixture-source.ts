@@ -16,7 +16,15 @@ import type {
   RailWrite,
   RailWriteResult,
 } from "@/lib/vetrina/types";
-import { DEMO_BLOCKS, DEMO_BRAND_PARENT, DEMO_TERM_NAMES, demoProducts, type DemoBlock, type DemoProduct } from "./fixture-data";
+import {
+  DEMO_BLOCKS,
+  DEMO_BRAND_PARENT,
+  DEMO_TERM_IDS,
+  DEMO_TERM_NAMES,
+  demoProducts,
+  type DemoBlock,
+  type DemoProduct,
+} from "./fixture-data";
 import { VetrinaError, type VetrinaSource } from "./source";
 
 /**
@@ -28,7 +36,7 @@ import { VetrinaError, type VetrinaSource } from "./source";
 
 type RailBlock = Extract<DemoBlock, { kind: "rail" }>;
 
-interface DemoState {
+export interface DemoState {
   products: DemoProduct[];
   byId: Map<number, DemoProduct>;
   rails: Map<string, RailState>;
@@ -42,6 +50,11 @@ interface DemoState {
 
 // Shared across hot reloads and server bundles, like the scheduler's state.
 const g = globalThis as { __vetrinaDemo?: DemoState };
+
+/** The demo shop itself — the automatic categories act on it in demo mode. */
+export function demoShop(): DemoState {
+  return state();
+}
 
 function state(): DemoState {
   if (!g.__vetrinaDemo) {
@@ -165,7 +178,7 @@ function card(p: DemoProduct): ProductCard {
     stockStatus: p.inStock ? "instock" : "outofstock",
     price: p.price,
     priceMax: p.price + 40,
-    onSale: p.categories.includes("saldi-sneakers-outlet"),
+    onSale: p.onSale,
     image: p.image,
     permalink: `https://demo.shop/prodotto/${p.id}`,
     editLink: `https://demo.shop/wp-admin/post.php?post=${p.id}&action=edit`,
@@ -207,7 +220,7 @@ function summary(block: RailBlock, key: string, withProducts: boolean): RailSumm
     button: { text: fields.buttonText ?? block.button.text, url: fields.buttonUrl ?? block.button.url },
     limit,
     taxonomy: block.atts.category ? "product_cat" : "product_brand",
-    terms: [{ id: 1, slug, name: DEMO_TERM_NAMES[slug] ?? slug, count: members(block).length, link: null }],
+    terms: [{ id: DEMO_TERM_IDS[slug] ?? 1, slug, name: DEMO_TERM_NAMES[slug] ?? slug, count: members(block).length, link: null }],
     pin: s.pin,
     exclude: s.exclude,
     fallback: s.fallback,

@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { AppConfig } from "@core/config";
+import type { CollectionCondition, HoldReason, IndexedAttribute, IndexedTerm } from "@core/collections";
 import type { Plan, PlanItem, ApplyResult, SourceProduct } from "@core/core-spine";
 import type { StoreOverrides } from "@/server/overrides/model";
 import type { MediaImage } from "@/server/woo/media-plan";
@@ -456,6 +457,102 @@ export const mediaJobs = pgTable(
 );
 
 export type MediaJobRow = typeof mediaJobs.$inferSelect;
+
+/**
+ * Automatic categories (core/collections.ts, src/server/collections): a
+ * WooCommerce category plus the rule that decides its members — one per
+ * category. The rule is data, edited in the Hub and in the Vetrina; the
+ * columns after it are the runs' report.
+ */
+export const smartCollections = pgTable(
+  "smart_collections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    termId: integer("term_id").notNull(), // product_cat term id
+    name: text("name").notNull().default(""), // the category's name, for display
+    match: text("match", { enum: ["all", "any"] }).notNull().default("all"),
+    conditions: jsonb("conditions").$type<CollectionCondition[]>().notNull(),
+    // Off = paused: nothing joins, nothing leaves.
+    enabled: boolean("enabled").notNull().default(true),
+    // Members after the last run that decided it (null = never run).
+    members: integer("members"),
+    // Set while automatic runs leave it alone, waiting for a confirmation:
+    // why, and what they would have changed.
+    held: jsonb("held").$type<{ reason: HoldReason; joining: number; leaving: number } | null>(),
+    lastError: text("last_error"),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("smart_collections_term_idx").on(t.termId)],
+);
+
+export type SmartCollectionRow = typeof smartCollections.$inferSelect;
+
+/**
+ * The store's products as the automatic categories read them: taxonomies and
+ * a few facts, one row per product, every status but the bin. Kept fresh by a
+ * light read of what changed (every few minutes) and a full one daily; every
+ * write the collections make updates it from the store's own answer.
+ */
+export const storeIndex = pgTable(
+  "store_index",
+  {
+    productId: integer("product_id").primaryKey(),
+    sku: text("sku").notNull().default(""),
+    name: text("name").notNull().default(""),
+    type: text("type").notNull().default(""),
+    status: text("status").notNull().default(""),
+    permalink: text("permalink").notNull().default(""),
+    categories: jsonb("categories").$type<IndexedTerm[]>().notNull(),
+    tags: jsonb("tags").$type<IndexedTerm[]>().notNull(),
+    brands: jsonb("brands").$type<IndexedTerm[]>().notNull(),
+    attributes: jsonb("attributes").$type<IndexedAttribute[]>().notNull(),
+    price: numeric("price", { mode: "number" }),
+    onSale: boolean("on_sale").notNull().default(false),
+    stockStatus: text("stock_status").notNull().default(""),
+    dateCreated: timestamp("date_created", { withTimezone: true }),
+    // The store's own last-modified time: the frequent check asks for what
+    // changed after the newest one held here.
+    dateModified: timestamp("date_modified", { withTimezone: true }),
+    // When a read last saw it: a full read drops what it no longer sees.
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("store_index_modified_idx").on(t.dateModified), index("store_index_seen_idx").on(t.seenAt)],
+);
+
+export type StoreIndexRow = typeof storeIndex.$inferSelect;
+
+/**
+ * Every product the automatic categories moved in or out, and what moved it:
+ * the answer to "who took this out of Saldi?". No foreign key on purpose — the
+ * log outlives a collection deleted later. Kept 60 days.
+ */
+export const collectionChanges = pgTable(
+  "collection_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    collectionId: uuid("collection_id"),
+    termId: integer("term_id").notNull(),
+    categoryName: text("category_name").notNull().default(""),
+    productId: integer("product_id").notNull(),
+    sku: text("sku").notNull().default(""),
+    productName: text("product_name").notNull().default(""),
+    action: text("action", { enum: ["add", "remove"] }).notNull(),
+    // "auto": the automatic check; "manual": a rule saved or confirmed by
+    // hand; "product": a product's tags edited from the Hub.
+    trigger: text("trigger", { enum: ["auto", "manual", "product"] }).notNull(),
+    // Null = written; else the store's reason for refusing it.
+    error: text("error"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("collection_changes_at_idx").on(t.at),
+    index("collection_changes_collection_idx").on(t.collectionId, t.at),
+  ],
+);
+
+export type CollectionChangeRow = typeof collectionChanges.$inferSelect;
 
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;

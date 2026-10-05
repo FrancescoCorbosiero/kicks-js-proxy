@@ -224,6 +224,11 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                 {s.media}
                 {status.mediaLastAt && ` · ${s.mediaLast(when.time(status.mediaLastAt))}`}
               </div>
+              <div className="text-faint">
+                {status.collectionsEveryMinutes > 0 ? s.collections(status.collectionsEveryMinutes) : s.collectionsDaily}
+                {status.collectionsLastAt &&
+                  ` · ${s.collectionsLast(when.time(status.collectionsLastAt), status.collectionsLastMoved ?? 0)}`}
+              </div>
             </>
           ) : (
             <div className="max-w-64 text-faint">{s.offHint}</div>
@@ -240,6 +245,11 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
       {status.mediaError && (
         <p className="mt-2 text-sm text-skip">
           {s.mediaErrorPrefix} {status.mediaError}
+        </p>
+      )}
+      {status.collectionsError && (
+        <p className="mt-2 text-sm text-skip">
+          {s.collectionsErrorPrefix} {status.collectionsError}
         </p>
       )}
     </section>
