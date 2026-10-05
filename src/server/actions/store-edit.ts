@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getWooClient } from "@/server/woo/client";
-import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import { patchSnapshotProduct } from "@/server/store-json/repo";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
@@ -48,21 +48,19 @@ export async function updateStoreVariation(
       return { ok: false, error: row.error.message ?? row.error.code ?? "update failed" };
     }
 
-    // Mirror the write into the snapshot (same pattern as the sync apply).
-    const snapshot = await getActiveSnapshot();
-    const vrt = snapshot?.products
-      .find((p) => p.id === storeProductId)
-      ?.variations.find((v) => v.id === variationId);
-    if (snapshot && vrt) {
+    // Mirror the write into the snapshot: this one product, under the
+    // snapshot's write lock — never the whole snapshot loaded and saved back,
+    // which put back everything as it was at the load.
+    await patchSnapshotProduct(storeProductId, (product) => {
+      const vrt = product.variations.find((v) => v.id === variationId);
+      if (!vrt) return;
       if (price != null) vrt.regular_price = price.toFixed(2);
       if (stock != null) {
         vrt.manage_stock = true;
         vrt.stock_quantity = stock;
         vrt.stock_status = stock > 0 ? "instock" : "outofstock";
       }
-      const info = await getSnapshotInfo();
-      await saveSnapshot(snapshot, info?.source ?? "rest");
-    }
+    });
 
     return { ok: true };
   } catch (e) {

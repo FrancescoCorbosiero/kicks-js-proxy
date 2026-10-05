@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { getWooClient } from "@/server/woo/client";
-import { getActiveSnapshot, getSnapshotInfo, saveSnapshot } from "@/server/store-json/repo";
+import { getActiveSnapshot, removeSnapshotProducts } from "@/server/store-json/repo";
 import { isSafeDuplicate } from "@/server/store-json/duplicates";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
@@ -36,13 +36,9 @@ export async function trashDuplicateStoreProduct(
 
     await getWooClient().deleteProduct(productId); // trash, NOT force-delete
 
-    // Mirror the removal into the snapshot so the report updates immediately.
-    snapshot.products = snapshot.products.filter((p) => p.id !== productId);
-    if (typeof snapshot.product_count === "number") {
-      snapshot.product_count = snapshot.products.length;
-    }
-    const info = await getSnapshotInfo();
-    await saveSnapshot(snapshot, info?.source ?? "rest");
+    // Mirror the removal into the snapshot so the report updates immediately:
+    // just this product, under the snapshot's write lock.
+    await removeSnapshotProducts([productId]);
 
     return { ok: true };
   } catch (e) {
