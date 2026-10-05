@@ -46,7 +46,11 @@ import { schedulerRuns, type SchedulerRunRow } from "@/server/db/schema";
  * successful cycle calls SCHEDULER_FEEDS_HEARTBEAT_URL.
  *
  * Alongside, the recent orders are pulled every SCHEDULER_ORDERS_MINUTES
- * (default 15), so new orders reach the Orders tab without a click.
+ * (default 15), so new orders reach the Orders tab without a click, and the
+ * photo queue is worked whenever something is due (see woo/media.ts): the
+ * Publisher creates products hidden, and they go on sale with their first
+ * photo. It pauses while a store pull runs — a product put on sale as the pull
+ * assembles its copy of the store would be left out of it.
  *
  * On by default in production, off in dev; SCHEDULER=on|off overrides.
  * Needs a long-running server (`next start`, Docker) — a serverless
@@ -73,6 +77,12 @@ const DEFAULT_MAX_CHANGES = 500;
 const WAIT_FOR_IDLE_MS = 60 * 60 * 1000;
 /** Feed cycles kept in scheduler_runs. */
 const FEED_HISTORY_DAYS = 7;
+/** The photo queue: looked at this often when nothing is due… */
+const MEDIA_IDLE_MS = 60 * 1000;
+/** …worked this long at a time when something is… */
+const MEDIA_BUDGET_MS = 4 * 60 * 1000;
+/** …this many products at once: every photo is a download and a round of thumbnails on the shop's server. */
+const MEDIA_CONCURRENCY = 2;
 
 const DAILY_STEPS = ["pull", "gs", "kicksdb", "storeSync", "repair", "backfill", "recategorize"] as const;
 const FEED_STEPS = ["gs", "feedSync"] as const;
@@ -132,6 +142,8 @@ export interface SchedulerStatus {
   ordersEveryMinutes: number; // 0 = orders are pulled by hand only
   ordersLastAt: number | null;
   ordersError: string | null;
+  mediaLastAt: number | null; // the photo queue last worked on something
+  mediaError: string | null;
 }
 
 // Instrumentation and the server-action bundle each get their own copy of
@@ -164,6 +176,8 @@ function store(): SchedulerState {
     ordersEveryMinutes: 0,
     ordersLastAt: null,
     ordersError: null,
+    mediaLastAt: null,
+    mediaError: null,
   });
 }
 
@@ -624,6 +638,43 @@ async function pullOrders(): Promise<void> {
   }
 }
 
+/**
+ * Work the photo queue while something is due, then look again in a minute.
+ * Paused while a store pull runs (see the header).
+ */
+async function workMedia(): Promise<void> {
+  const s = store();
+  let wait = MEDIA_IDLE_MS;
+  try {
+    const { wooConfigured } = await import("@/server/woo/client");
+    if (wooConfigured()) {
+      const { getLatestPullRun, pullInFlight } = await import("@/server/woo/pull");
+      const { drainMedia } = await import("@/server/woo/media");
+      const drain = await drainMedia({
+        budgetMs: MEDIA_BUDGET_MS,
+        concurrency: MEDIA_CONCURRENCY,
+        paused: async () => pullInFlight(await getLatestPullRun()),
+      });
+      if (drain.unreachable) {
+        const error = `the store did not answer (${drain.unreachable}): the photos wait, without spending their tries`;
+        if (s.mediaError !== error) console.error(`[scheduler] photo queue: ${error}`);
+        s.mediaError = error;
+      } else {
+        if (drain.steps > 0) s.mediaLastAt = Date.now();
+        if (s.mediaError) console.log("[scheduler] photo queue is working again");
+        s.mediaError = null;
+      }
+      if (drain.more) wait = 1_000;
+    }
+  } catch (e) {
+    // Looked at every minute: said once, not every minute.
+    if (s.mediaError !== messageOf(e)) console.error(`[scheduler] photo queue: ${messageOf(e)}`);
+    s.mediaError = messageOf(e);
+  } finally {
+    setTimeout(() => void workMedia(), wait).unref();
+  }
+}
+
 export function startScheduler(): void {
   // The schedule, shown on /feeds even while the scheduler is off.
   const s = store();
@@ -654,9 +705,11 @@ export function startScheduler(): void {
   console.log(
     `[scheduler] on — daily sync at ${s.times.join(", ")} (${s.timeZone}): store pull, GS sync, KicksDB re-pricing${sync}; ` +
       (s.feedsEveryMinutes > 0 ? `feeds every ${s.feedsEveryMinutes} min${feedSync}; ` : "") +
-      (s.ordersEveryMinutes > 0 ? `orders every ${s.ordersEveryMinutes} min` : "orders by hand only"),
+      (s.ordersEveryMinutes > 0 ? `orders every ${s.ordersEveryMinutes} min` : "orders by hand only") +
+      "; photo queue in the background",
   );
   void boot(s);
   if (s.feedsEveryMinutes > 0) armFeeds(new Date());
   if (s.ordersEveryMinutes > 0) setTimeout(() => void pullOrders(), CATCH_UP_DELAY_MS).unref();
+  setTimeout(() => void workMedia(), CATCH_UP_DELAY_MS).unref();
 }

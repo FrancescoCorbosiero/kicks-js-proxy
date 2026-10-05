@@ -10,6 +10,12 @@ import {
   type PublishOutcome,
   type PublishTarget,
 } from "@/server/woo/publish";
+import {
+  dismissFailedMedia,
+  getMediaQueueState,
+  retryFailedMedia,
+  type MediaQueueState,
+} from "@/server/woo/media";
 
 function errMessage(e: unknown): string {
   const cause = (e as { cause?: { message?: string } })?.cause;
@@ -20,6 +26,10 @@ export interface PublishPageState extends PublishPage<PublishTarget> {
   wooConfigured: boolean;
   /** False when no store snapshot exists — the delta cannot be trusted yet. */
   hasSnapshot: boolean;
+  /** The photo queue (null when it cannot be read). */
+  media: MediaQueueState | null;
+  /** The in-app scheduler is on, so something works the queue. */
+  mediaWorker: boolean;
 }
 
 const EMPTY_COUNTS = { all: 0, goldensneakers: 0, kicksdb: 0, missing: 0, total: 0 };
@@ -32,9 +42,12 @@ const EMPTY_COUNTS = { all: 0, goldensneakers: 0, kicksdb: 0, missing: 0, total:
  */
 export async function getPublishState(query: PublishQuery = {}): Promise<PublishPageState> {
   const configured = wooConfigured();
+  const { getSchedulerStatus } = await import("@/server/scheduler");
+  const media = await getMediaQueueState().catch(() => null);
+  const mediaWorker = getSchedulerStatus().enabled;
   try {
     const page = await listPublishTargets(query);
-    return { wooConfigured: configured, ...page };
+    return { wooConfigured: configured, ...page, media, mediaWorker };
   } catch {
     return {
       wooConfigured: configured,
@@ -42,7 +55,32 @@ export async function getPublishState(query: PublishQuery = {}): Promise<Publish
       counts: EMPTY_COUNTS,
       matched: 0,
       hasSnapshot: false,
+      media,
+      mediaWorker,
     };
+  }
+}
+
+/** The photo queue, for the Publish tab's panel while photos are on their way. */
+export async function getPhotoQueue(): Promise<{ ok: true; media: MediaQueueState } | { ok: false; error: string }> {
+  try {
+    return { ok: true, media: await getMediaQueueState() };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
+  }
+}
+
+/** Put the failed photo jobs back in the queue (or, with dismiss, off the list). */
+export async function resolveFailedPhotos(
+  input: unknown,
+): Promise<{ ok: true; count: number; media: MediaQueueState } | { ok: false; error: string }> {
+  const parsed = z.object({ action: z.enum(["retry", "dismiss"]) }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "invalid input" };
+  try {
+    const count = parsed.data.action === "retry" ? await retryFailedMedia() : await dismissFailedMedia();
+    return { ok: true, count, media: await getMediaQueueState() };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 

@@ -8,9 +8,10 @@ import type { PublishSourceLens } from "@/lib/publish-page";
 import type { QueryParams } from "@/lib/qs";
 
 export const dynamic = "force-dynamic";
-// Publishing is slow work (a parent create + one call per size + media
-// sideload, per product), and the client sends it in batches through a server
-// action hosted by this page — which inherits this page's limit.
+// Publishing is slow work (a parent create and a call for its sizes, per
+// product; the photos follow in the background), and the client sends it in
+// batches through a server action hosted by this page — which inherits this
+// page's limit.
 export const maxDuration = 300;
 
 /** Filter state lives in the URL, so the server can answer it. */
@@ -73,6 +74,8 @@ export default async function PublishPage({
         hasSnapshot={state.hasSnapshot}
         wooConfigured={state.wooConfigured}
         siteUrl={wooSiteUrl()}
+        media={state.media}
+        mediaWorker={state.mediaWorker}
       />
     </main>
   );

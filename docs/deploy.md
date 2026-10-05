@@ -227,6 +227,7 @@ below). To get an email when a daily sync fails or never runs:
 | Store pull, GS sync, KicksDB re-pricing, store sync of the whole store, housekeeping | every day at 04:30, Italian time | `SCHEDULER_TIMES` (e.g. `04:30,13:30`), `SCHEDULER_TIMEZONE` |
 | GS sync, then store sync of the feed's products | every 15 minutes, with `GS_FEED_URL` and `GS_FEED_TOKEN` set | `SCHEDULER_FEEDS_MINUTES` (`0` = off) |
 | Recent orders | every 15 minutes | `SCHEDULER_ORDERS_MINUTES` |
+| Photos of newly published products (they stay hidden until the first lands) | whenever something is due, looked at every minute | — |
 
 **The store sync** writes to WooCommerce on its own. By default it writes
 the feed's products' changes every feed cycle, and the daily sync writes

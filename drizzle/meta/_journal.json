@@ -120,6 +120,13 @@
       "when": 1790848814107,
       "tag": "0016_silly_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791218034682,
+      "tag": "0017_yummy_stingray",
+      "breakpoints": true
     }
   ]
 }

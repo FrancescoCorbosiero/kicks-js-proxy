@@ -5,10 +5,10 @@
 # Usage:
 #   APP_BASE_URL=https://host CRON_SECRET=... scripts/trigger-cron.sh <endpoint> [max-time-seconds]
 #
-# Endpoints: refresh-catalog | sync-goldensneakers | pull-store
+# Endpoints: refresh-catalog | sync-goldensneakers | pull-store | media
 set -euo pipefail
 
-endpoint="${1:?usage: trigger-cron.sh <refresh-catalog|sync-goldensneakers|pull-store> [max-time-seconds]}"
+endpoint="${1:?usage: trigger-cron.sh <refresh-catalog|sync-goldensneakers|pull-store|media> [max-time-seconds]}"
 max_time="${2:-900}"
 
 : "${APP_BASE_URL:?APP_BASE_URL is required (e.g. https://store-hub.example.com)}"

@@ -12,6 +12,7 @@ import { planRepair, type RepairField, type LiveProduct } from "./repair-plan";
 import { getWooClient, type WooClient } from "./client";
 import type { SourceProduct } from "@core/core-spine";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
+import { openMediaSkus } from "./media";
 
 /**
  * Self-repair: put back what a product on the store is missing, from the
@@ -84,12 +85,13 @@ export async function scanRepairCandidates(): Promise<{
   const products = snapshot?.products ?? [];
   const skus = [...new Set(products.map((p) => (p.sku ? skuKey(p.sku) : "")).filter(Boolean))];
 
-  const [catalogEntries, owned] = await Promise.all([
+  const [catalogEntries, owned, photosQueued] = await Promise.all([
     getAnyBySkus(market, skus).catch(() => new Map<string, SourceProduct>()),
     getOverrides()
       .catch(() => null)
       .then((o) => gsOwnedProducts(skus, market, o))
       .catch(() => new Map()),
+    openMediaSkus().catch(() => new Set<string>()),
   ]);
   const known = (sku: string) => owned.has(sku) || catalogEntries.has(sku);
 
@@ -100,7 +102,8 @@ export async function scanRepairCandidates(): Promise<{
   for (const p of products as StoreProductModel[]) {
     const sku = p.sku ? skuKey(p.sku) : "";
     if (!sku || !known(sku)) continue;
-    if (!Array.isArray(p.images) || p.images.length === 0) incomplete.push(sku);
+    // Photos on their way are not missing (see media.ts).
+    if ((!Array.isArray(p.images) || p.images.length === 0) && !photosQueued.has(sku)) incomplete.push(sku);
   }
   return {
     incomplete: [...new Set(incomplete)],
@@ -131,6 +134,7 @@ export async function repairProducts(
     owned.get(sku)?.product ?? catalogEntries.get(sku);
 
   const tagliaAttributeId = await resolveTagliaId(client);
+  const photosQueued = await openMediaSkus().catch(() => new Set<string>());
   const identity = await buildIdentityResolver(
     client,
     uniqueSkus.map(catalogFor).filter((c): c is SourceProduct => c != null),
@@ -184,6 +188,7 @@ export async function repairProducts(
       const resolved = identity?.for(catalog);
       const patch = planRepair(live, {
         images: plan.images,
+        imagesQueued: photosQueued.has(sku),
         identity: resolved,
         wants: {
           brandTaxonomy: config.taxonomy.write.brandTaxonomy && !!(catalog.brand ?? "").trim(),

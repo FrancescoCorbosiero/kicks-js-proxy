@@ -36,10 +36,15 @@ const WooProductSchema = z.looseObject({
   status: z.string().nullish(),
   permalink: z.string().nullish(),
   date_modified: z.string().nullish(),
-  // First entry's src feeds the catalog card of store-only products.
-  images: z.array(z.looseObject({ src: z.string().nullish() })).nullish(),
+  // First entry's src feeds the catalog card of store-only products; the
+  // photo queue restates them by id and recognizes its own by name.
+  images: z
+    .array(z.looseObject({ id: z.number().nullish(), src: z.string().nullish(), name: z.string().nullish() }))
+    .nullish(),
   // Needed by the cleanup: the parent pa_taglia option list lives here.
   attributes: z.array(z.unknown()).nullish(),
+  // Variation ids: the photo queue puts no product on sale without sizes.
+  variations: z.array(z.number()).nullish(),
 });
 
 export type WooRestProduct = z.infer<typeof WooProductSchema>;
@@ -418,6 +423,35 @@ export class WooClient {
       { method: "PUT", headers: this.headers(), body: JSON.stringify(body) },
       IDEMPOTENT_WRITE,
     );
+  }
+
+  /** One product, in any status. Null when the store has no product with this id. */
+  async getProduct(productId: number): Promise<WooRestProduct | null> {
+    try {
+      const raw = await requestJson(
+        this.apiUrl(`products/${productId}`),
+        { method: "GET", headers: this.headers() },
+        this.retry,
+      );
+      return WooProductSchema.parse(raw);
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * Update a product with a body that is not safe to repeat — a photo, which
+   * WordPress downloads into a new media item every time it is sent. One
+   * attempt, as for creates (see WRITE_ONCE); returns the product as saved.
+   */
+  async updateProductOnce(productId: number, body: Record<string, unknown>): Promise<WooRestProduct> {
+    const raw = await requestJson(
+      this.apiUrl(`products/${productId}`),
+      { method: "PUT", headers: this.headers(), body: JSON.stringify(body) },
+      WRITE_ONCE,
+    );
+    return WooProductSchema.parse(raw);
   }
 }
 

@@ -48,10 +48,10 @@ function product(over: Partial<SourceProduct> = {}): SourceProduct {
 }
 
 describe("planPublish — the parent WooCommerce create body", () => {
-  it("builds a published variable product keyed by the canonical SKU", () => {
+  it("builds a hidden variable product keyed by the canonical SKU: it goes on sale with its photo", () => {
     const plan = planPublish({ catalog: product(), config });
     expect(plan.parentBody.type).toBe("variable");
-    expect(plan.parentBody.status).toBe("publish");
+    expect(plan.parentBody.status).toBe("draft");
     expect(plan.parentBody.sku).toBe("IE4931");
     expect(plan.parentBody.name).toBe("adidas Yeezy Foam RNNR Sulfur");
   });
@@ -118,13 +118,13 @@ describe("planPublish — the parent WooCommerce create body", () => {
 });
 
 describe("planPublish — media", () => {
-  it("sends the main image only by default", () => {
+  it("queues the main image only by default, and never sends it with the create", () => {
     const plan = planPublish({
       catalog: product({ gallery: ["https://cdn.example.com/alt1.jpg"] }),
       config,
     });
     expect(plan.images).toEqual(["https://cdn.example.com/foam.jpg"]);
-    expect(plan.parentBody.images).toEqual([{ src: "https://cdn.example.com/foam.jpg" }]);
+    expect(plan.parentBody.images).toBeUndefined();
   });
 
   it("includes the gallery when asked, main shot first and deduped", () => {
@@ -141,13 +141,13 @@ describe("planPublish — media", () => {
     ]);
   });
 
-  it("caps how many images Woo is asked to sideload", () => {
+  it("caps how many photos are queued for one product", () => {
     const gallery = Array.from({ length: 20 }, (_, i) => `https://cdn.example.com/g${i}.jpg`);
     const plan = planPublish({ catalog: product({ gallery }), config, includeGallery: true });
     expect(plan.images).toHaveLength(6);
   });
 
-  it("drops unusable image URLs instead of making Woo reject the create", () => {
+  it("drops unusable image URLs instead of queueing photos Woo would refuse", () => {
     const plan = planPublish({
       catalog: product({ image: "", gallery: ["not-a-url", "  ", "ftp://x/y.jpg"] }),
       config,
@@ -201,7 +201,7 @@ describe("planPublish — sizes that cannot be published", () => {
 describe("planReimportParent — what a force reimport is allowed to touch", () => {
   it("refreshes identity and the size list, never the store's own fields", () => {
     const plan = planPublish({ catalog: product(), config });
-    const body = planReimportParent(plan, { replaceMedia: false });
+    const body = planReimportParent(plan, {});
     expect(Object.keys(body).sort()).toEqual(["attributes", "name"]);
     // Explicitly absent: anything the shop owns and the catalog must not win.
     expect(body.status).toBeUndefined();
@@ -209,12 +209,9 @@ describe("planReimportParent — what a force reimport is allowed to touch", () 
     expect(body.description).toBeUndefined();
   });
 
-  it("replaces media only when explicitly asked", () => {
+  it("never carries media: replacing it goes through the photo queue", () => {
     const plan = planPublish({ catalog: product(), config });
-    expect(planReimportParent(plan, { replaceMedia: false }).images).toBeUndefined();
-    expect(planReimportParent(plan, { replaceMedia: true }).images).toEqual([
-      { src: "https://cdn.example.com/foam.jpg" },
-    ]);
+    expect(planReimportParent(plan, {}).images).toBeUndefined();
   });
 });
 
@@ -362,7 +359,7 @@ describe("planReimportParent", () => {
   it("restates the identity so a force reimport back-fills an existing product", () => {
     const identity = { brandId: 7, categoryIds: [11], attributes: [{ id: 2, option: "adidas", field: "brand" as const }] };
     const plan = planPublish({ catalog: product(), config, identity });
-    const body = planReimportParent(plan, { replaceMedia: false, identity });
+    const body = planReimportParent(plan, { identity });
     expect(body.brands).toEqual([{ id: 7 }]);
     expect(body.categories).toEqual([{ id: 11 }]);
     // The identity attributes ride along in the attribute list planPublish built.

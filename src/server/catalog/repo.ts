@@ -3,7 +3,7 @@ import { and, desc, eq, gte, ilike, inArray, lt, lte, ne, notInArray, or, sql, t
 import type { ProductScopeAxes } from "@core/config";
 import type { SourceProduct } from "@core/core-spine";
 import { db } from "@/server/db/client";
-import { catalogProducts, storeSnapshot } from "@/server/db/schema";
+import { catalogProducts, mediaJobs, storeSnapshot } from "@/server/db/schema";
 import { countOf } from "@/server/db/rows";
 import { SNAPSHOT_ID } from "@/server/store-json/repo";
 import { skuKey } from "@/lib/skus";
@@ -214,11 +214,12 @@ export async function countUnpublishedCandidates(market: string): Promise<number
     const res = await db.execute(sql`
       with store_skus as (
         -- On the store = carried by a product WITH sizes (see listSizelessStoreSkus).
-        select distinct upper(trim(p->>'sku')) as sku
+        select upper(trim(p->>'sku')) as sku,
+               max(case when jsonb_typeof(p->'variations') = 'array'
+                        then jsonb_array_length(p->'variations') else 0 end) as sizes
         from ${storeSnapshot}, jsonb_array_elements(${storeSnapshot.data}->'products') as p
         where ${storeSnapshot.id} = ${SNAPSHOT_ID} and coalesce(trim(p->>'sku'), '') <> ''
-          and case when jsonb_typeof(p->'variations') = 'array'
-                   then jsonb_array_length(p->'variations') else 0 end > 0
+        group by 1
       )
       select count(*)::int as n
       from ${catalogProducts} c
@@ -226,7 +227,14 @@ export async function countUnpublishedCandidates(market: string): Promise<number
         and c.source <> 'woo'
         and c.variant_count >= 1
         and not exists (
-          select 1 from store_skus ss where ss.sku = upper(trim(c.sku))
+          select 1 from store_skus ss where ss.sku = upper(trim(c.sku)) and ss.sizes > 0
+        )
+        -- Created and hidden until its photos land: published, as the Publish
+        -- tab counts it — unless it is the copy's product without sizes.
+        and not exists (
+          select 1 from ${mediaJobs} m
+          where m.sku = upper(trim(c.sku)) and m.status = 'pending'
+            and not exists (select 1 from store_skus ss where ss.sku = m.sku and ss.sizes = 0)
         )
     `);
     return countOf(res);

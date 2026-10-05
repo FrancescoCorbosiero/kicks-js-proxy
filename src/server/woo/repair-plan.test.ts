@@ -25,6 +25,13 @@ const BROKEN: LiveProduct = {
 };
 
 describe("planRepair", () => {
+  it("leaves the photos to the queue when they are on their way, and fills the rest", () => {
+    const patch = planRepair(BROKEN, { ...SOURCE, imagesQueued: true });
+    expect(patch.body.images).toBeUndefined();
+    expect(patch.fills.sort()).toEqual(["brand", "category", "gender"]);
+    expect(patch.unavailable).toEqual([]);
+  });
+
   it("fills every gap of a product that landed incomplete", () => {
     const patch = planRepair(BROKEN, SOURCE);
     expect(patch.fills.sort()).toEqual(["brand", "category", "gender", "image"]);

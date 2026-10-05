@@ -43,7 +43,7 @@ export interface PublishPlan {
   skippedNoEu: number;
   /** Barcodes the planner refused to write, with the reason. */
   rejectedGtins: { sizeLabel: string; value: string; reason: string }[];
-  /** Image URLs the parent will sideload, main image first. */
+  /** Photo URLs for the queue, main image first: never part of the create body. */
   images: string[];
 }
 
@@ -107,16 +107,15 @@ export interface PublishPlanInput {
   tagliaAttributeId?: number;
   /** Real per-size stock (euNorm → quantity) for feed-owned products. */
   stockBySize?: Record<string, number>;
-  /** Send the extra product shots too, not just the main image. */
+  /** Queue the extra product shots too, not just the main image. */
   includeGallery?: boolean;
-  /** Hard cap on sideloaded images — Woo fetches each one synchronously. */
+  /** Cap on the photos queued for one product. */
   maxImages?: number;
 }
 
 /**
- * Woo sideloads every `images[].src` by downloading it during the create call,
- * so a long gallery turns one product into a multi-second request (and a
- * timeout risks a half-made product). Keep the main shot plus a few.
+ * Every photo costs the shop a download and a round of thumbnails on its own
+ * server, in the background (see media.ts). Keep the main shot plus a few.
  */
 const DEFAULT_MAX_IMAGES = 6;
 
@@ -215,17 +214,17 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
   const parentBody: Record<string, unknown> = {
     name: catalog.title || sku,
     type: "variable",
-    // Published straight to the storefront: the operator publishes a product
-    // because they intend to sell it. Nothing is created without an explicit
-    // selection, and the dry run shows the exact payloads first.
-    status: "publish",
+    // Hidden until its main photo is on: the photos are no longer sent with
+    // the create (WordPress downloading and resizing them was the slow part)
+    // but queued, and the queue puts the product on sale with the first one —
+    // no product sits in the shop or a channel feed without a picture.
+    status: "draft",
     sku,
     // The parent's option list must exist BEFORE the variations that bind to
     // it — same ordering constraint the rebuild works under.
     attributes: rebuildParentAttributes(null, rebuilt.parentSizeOptions, input.tagliaAttributeId),
   };
   if (catalog.description) parentBody.description = catalog.description;
-  if (images.length > 0) parentBody.images = images.map((src) => ({ src }));
 
   // Identity for the external catalogs. The brand is written BOTH ways on
   // purpose: channel plugins disagree on where to read it — some only know the
@@ -249,15 +248,14 @@ export function planPublish(input: PublishPlanInput): PublishPlan {
 
 /**
  * The parent fields a FORCE REIMPORT refreshes on a product that already
- * exists. Deliberately narrow: identity and media only. Everything the store
- * owns — slug, SEO, taxonomies, menu order, meta — is never in this body, so
- * a reimport can restore a product's shape without undoing shop work.
- * Media is replaced only when asked: re-sideloading images on every reimport
- * would duplicate them in the media library.
+ * exists. Deliberately narrow: identity only. Everything the store owns —
+ * slug, SEO, taxonomies, menu order, meta — is never in this body, so a
+ * reimport can restore a product's shape without undoing shop work. Media is
+ * never in it either: replacing it, when asked, goes through the photo queue.
  */
 export function planReimportParent(
   plan: PublishPlan,
-  opts: { replaceMedia: boolean; identity?: ResolvedIdentity },
+  opts: { identity?: ResolvedIdentity },
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     name: plan.title,
@@ -265,9 +263,6 @@ export function planReimportParent(
     // the same list. Only the taxonomy fields have to be re-stated.
     attributes: (plan.parentBody as { attributes: unknown }).attributes,
   };
-  if (opts.replaceMedia && plan.images.length > 0) {
-    body.images = plan.images.map((src) => ({ src }));
-  }
   if (opts.identity?.brandId != null) body.brands = [{ id: opts.identity.brandId }];
   if (opts.identity?.categoryIds?.length) {
     body.categories = opts.identity.categoryIds.map((id) => ({ id }));

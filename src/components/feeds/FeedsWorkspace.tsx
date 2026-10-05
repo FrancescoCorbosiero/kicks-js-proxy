@@ -220,6 +220,10 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
                 {status.ordersEveryMinutes > 0 ? s.orders(status.ordersEveryMinutes) : s.ordersOff}
                 {status.ordersLastAt && ` · ${s.ordersLast(when.time(status.ordersLastAt))}`}
               </div>
+              <div className="text-faint">
+                {s.media}
+                {status.mediaLastAt && ` · ${s.mediaLast(when.time(status.mediaLastAt))}`}
+              </div>
             </>
           ) : (
             <div className="max-w-64 text-faint">{s.offHint}</div>
@@ -233,6 +237,11 @@ function SchedulerCard({ status }: { status: FeedsState["scheduler"] }) {
         </p>
       )}
       {status.ordersError && <p className="mt-2 text-sm text-skip">{status.ordersError}</p>}
+      {status.mediaError && (
+        <p className="mt-2 text-sm text-skip">
+          {s.mediaErrorPrefix} {status.mediaError}
+        </p>
+      )}
     </section>
   );
 }
