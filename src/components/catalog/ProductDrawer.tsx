@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/provider";
@@ -23,14 +22,23 @@ const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" 
 
 /**
  * The product detail drawer: a slide-over on desktop, a full-screen sheet on
- * mobile. Opened via the ?product= query param (deep-linkable; back closes it).
+ * mobile. Opened via the ?product= query param (deep-linkable; back closes it)
+ * — CatalogDrawerHost fetches its data and owns opening and closing.
  * CRUD lives here: re-sync from KicksDB, per-size manual price locks, and the
  * product's sale-rule choice — all through the existing snapshot-independent
  * override actions, so the Woo sync honors them automatically.
  */
-export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref: string }) {
+export function ProductDrawer({
+  data,
+  onClose,
+  onChanged,
+}: {
+  data: DrawerData;
+  onClose: () => void;
+  /** Something was saved: reload the drawer's data (never the whole page). */
+  onChanged: () => void;
+}) {
   const { t } = useI18n();
-  const router = useRouter();
   const [refreshing, startRefresh] = React.useTransition();
   const [savingRule, startRule] = React.useTransition();
   const [bulkSaving, startBulk] = React.useTransition();
@@ -54,7 +62,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
         prices: lockable.map((v) => ({ euSize: v.euSize!, price: v.proposed! })),
       });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
-      else router.refresh();
+      else onChanged();
     });
   }
 
@@ -67,13 +75,11 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
         prices: locked.map((v) => ({ euSize: v.euSize!, price: null })),
       });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
-      else router.refresh();
+      else onChanged();
     });
   }
 
-  const close = React.useCallback(() => {
-    router.push(closeHref, { scroll: false });
-  }, [router, closeHref]);
+  const close = onClose;
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -88,7 +94,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
     startRefresh(async () => {
       const res = await refreshCatalogProduct({ market: data.market, sku: data.sku });
       if (!res.ok) setError(res.error ?? t.drawer.refreshFailed);
-      else router.refresh();
+      else onChanged();
     });
   }
 
@@ -97,7 +103,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
     startRule(async () => {
       const res = await setProductSaleRule({ sku: data.sku, followSaleRule: !data.followSaleRule });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
-      else router.refresh();
+      else onChanged();
     });
   }
 
@@ -117,7 +123,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
     startPin(async () => {
       const res = await setProductOwnerPin({ sku: data.sku, owner });
       if (!res.ok) setError(res.error ?? t.drawer.saveFailed);
-      else router.refresh();
+      else onChanged();
     });
   }
 
@@ -297,7 +303,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
 
           {/* Store-only products: the live store view, directly editable. */}
           {data.owner === "woo" && (
-            <StorePanel data={data} onSaved={() => router.refresh()} onError={setError} />
+            <StorePanel data={data} onSaved={onChanged} onError={setError} />
           )}
 
           {/* Prices: per-size manual locks. The one panel a non-technical
@@ -351,7 +357,7 @@ export function ProductDrawer({ data, closeHref }: { data: DrawerData; closeHref
                   key={v.id}
                   data={data}
                   variant={v}
-                  onSaved={() => router.refresh()}
+                  onSaved={onChanged}
                   onError={(msg) => setError(msg)}
                 />
               ))}

@@ -19,8 +19,7 @@ import { buildQuery, type QueryParams } from "@/lib/qs";
 import { buildCategoryTree } from "@/lib/catalog";
 import { CatalogFilters } from "@/components/catalog/CatalogFilters";
 import { CardImage } from "@/components/catalog/CardImage";
-import { ProductDrawer } from "@/components/catalog/ProductDrawer";
-import { loadDrawerData } from "@/components/catalog/drawer-data";
+import { CatalogDrawerHost, ProductCardLink } from "@/components/catalog/CatalogDrawerHost";
 import { DbUnavailable } from "@/components/DbUnavailable";
 import { LockIcon } from "@/components/icons";
 import { assertSchemaCurrent } from "@/server/db/probe";
@@ -111,7 +110,6 @@ async function loadPageData(sp: Search) {
   ]);
 
   const catalogSize = ownerCounts.total;
-  const drawer = sp.product ? await loadDrawerData(market, sp.product, config) : null;
   const tree = buildCategoryTree(categories, sp.cat === UNCATEGORIZED ? undefined : sp.cat);
   // Biggest first, and never drop the one the URL is filtering by.
   const topBrands = [...brands].sort((a, b) => b.count - a.count).slice(0, BRAND_LIMIT);
@@ -130,7 +128,6 @@ async function loadPageData(sp: Search) {
     catalogSize,
     ownerCounts,
     lockedCounts,
-    drawer,
   };
 }
 
@@ -160,9 +157,7 @@ export default async function CatalogPage({
     catalogSize,
     ownerCounts,
     lockedCounts,
-    drawer,
   } = data;
-  const closeHref = `/catalog${buildQuery({ ...params, product: undefined })}`;
 
   // Picking a category resets the sub-category; picking a sub keeps its parent.
   const categoryLink = (cat?: string, sub?: string) =>
@@ -199,7 +194,7 @@ export default async function CatalogPage({
       <div className="flex items-start gap-6">
         {/* Category sidebar (desktop): the silhouette tree, not brands. */}
         {categoryTree.length > 0 && (
-          <aside className="sticky top-20 hidden w-52 shrink-0 lg:block">
+          <aside className="sticky top-6 hidden w-52 shrink-0 lg:block">
             <div className="rounded-xl border border-line bg-surface p-2 shadow-xs">
               <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t.discovery.categories}
@@ -347,10 +342,10 @@ export default async function CatalogPage({
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {page.items.map((item, i) => (
-                <Link
+                <ProductCardLink
                   key={item.sku}
+                  sku={item.sku}
                   href={`/catalog${buildQuery({ ...params, product: item.sku })}`}
-                  scroll={false}
                   className="group overflow-hidden rounded-xl border border-line bg-surface shadow-xs transition-[transform,box-shadow,border-color] hover:-translate-y-0.5 hover:border-line-strong hover:shadow-md"
                 >
                   <CardImage src={item.image} alt={item.title || item.sku} eager={i < 8} />
@@ -410,7 +405,7 @@ export default async function CatalogPage({
                       </span>
                     </div>
                   </div>
-                </Link>
+                </ProductCardLink>
               ))}
             </div>
           )}
@@ -436,63 +431,18 @@ export default async function CatalogPage({
         </div>
       </div>
 
-      {drawer && <ProductDrawer data={drawer} closeHref={closeHref} />}
-      {/* A requested product that can't be loaded must say so — a click that
-          silently does nothing is indistinguishable from a broken page. */}
-      {sp.product && !drawer && (
-        <DrawerNotFound
-          sku={sp.product}
-          closeHref={closeHref}
-          title={t.drawer.notFoundTitle}
-          body={t.drawer.notFoundBody}
-          closeLabel={t.drawer.close}
-        />
-      )}
+      {/* The product drawer opens in place and loads its own data. */}
+      <CatalogDrawerHost market={market} />
     </main>
   );
 }
 
-/** Server-rendered stand-in for the drawer when ?product= can't be resolved. */
-function DrawerNotFound({
-  sku,
-  closeHref,
-  title,
-  body,
-  closeLabel,
-}: {
-  sku: string;
-  closeHref: string;
-  title: string;
-  body: string;
-  closeLabel: string;
-}) {
-  return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label={title}>
-      <Link
-        href={closeHref}
-        scroll={false}
-        aria-label={closeLabel}
-        className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
-      />
-      <div className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-line bg-bg shadow-2xl animate-fade-up sm:max-w-lg">
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{title}</div>
-            <div className="truncate font-mono text-[11px] text-faint">{sku}</div>
-          </div>
-          <Link
-            href={closeHref}
-            scroll={false}
-            className="inline-flex h-8 items-center justify-center rounded-md border border-line bg-surface px-3 text-xs font-medium text-ink shadow-xs hover:border-line-strong hover:bg-surface-2"
-          >
-            {closeLabel}
-          </Link>
-        </div>
-        <p className="p-4 text-sm leading-relaxed text-muted">{body}</p>
-      </div>
-    </div>
-  );
-}
+/*
+ * The filter links below don't prefetch. Every filter change re-renders the
+ * page and re-points all of them, and each prefetch was a request of its own
+ * (through the sign-in proxy in production): ~50 per change, for links
+ * that a click resolves just as fast without.
+ */
 
 function SourceTab({
   href,
@@ -511,6 +461,7 @@ function SourceTab({
     <Link
       href={href}
       scroll={false}
+      prefetch={false}
       title={hint}
       className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
         active ? "bg-accent text-accent-fg shadow-xs" : "text-muted hover:bg-surface-2 hover:text-ink"
@@ -542,6 +493,7 @@ function NavRow({
   return (
     <Link
       href={href}
+      prefetch={false}
       className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
         active ? "bg-accent/12 font-semibold text-accent-text" : "text-muted hover:bg-surface-2 hover:text-ink"
       }`}
@@ -556,6 +508,7 @@ function NavChip({ href, active, label }: { href: string; active: boolean; label
   return (
     <Link
       href={href}
+      prefetch={false}
       className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
         active
           ? "border-accent bg-accent/12 text-accent-text"
@@ -572,7 +525,7 @@ function PageLink({ href, disabled, label }: { href: string; disabled: boolean; 
     return <span className="rounded-md px-3 py-1.5 text-faint">{label}</span>;
   }
   return (
-    <Link href={href} className="rounded-md px-3 py-1.5 font-medium text-muted hover:bg-surface-2 hover:text-ink">
+    <Link href={href} prefetch={false} className="rounded-md px-3 py-1.5 font-medium text-muted hover:bg-surface-2 hover:text-ink">
       {label}
     </Link>
   );

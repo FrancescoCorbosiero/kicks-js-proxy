@@ -5,7 +5,7 @@ import { getOverrides } from "@/server/overrides/repo";
 import { skusPinnedTo } from "@/server/overrides/model";
 import { listIngestionRuns, type IngestionHistoryEntry } from "@/server/ingestion/repo";
 import { listApplyHistory, type ApplyHistoryEntry } from "@/server/woo/apply";
-import { getLatestPullRun } from "@/server/woo/pull";
+import { getLatestPullRun, pullInFlight } from "@/server/woo/pull";
 import { wooConfigured } from "@/server/woo/client";
 import { countDuplicateSkus, getSnapshotInfo, type SnapshotInfo } from "@/server/store-json/repo";
 import { feedStats, GS_FEED } from "@/server/feeds/repo";
@@ -79,11 +79,8 @@ export async function loadDashboardData(): Promise<DashboardData> {
     staleCount,
     ttlSeconds,
     snapshot,
-    // A pull abandoned mid-flight (closed tab) keeps status "running" forever;
-    // only advertise it while it's actually advancing.
     runningPull:
-      latestPull?.status === "running" &&
-      Date.now() - latestPull.updatedAt.getTime() < 10 * 60_000
+      latestPull && pullInFlight(latestPull)
         ? { productsFetched: latestPull.productsFetched, totalProducts: latestPull.totalProducts }
         : null,
     lastApply:

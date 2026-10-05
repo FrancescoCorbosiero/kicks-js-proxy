@@ -53,10 +53,17 @@ export const HubConfigSchema = z.object({
      */
     landing: z.string().startsWith("/"),
     /**
-     * Tabs in the top navigation, in order. The old UI gets leaner by
-     * removing entries here; a removed tab's page still exists at its URL.
+     * The guided path, in order: the steps a product walks from the catalog
+     * to a sold order. The dock draws them as one line, starting from the
+     * overview ("/"), which is always there. A page left out still exists
+     * at its URL.
      */
-    nav: z.array(z.string().startsWith("/")).min(1),
+    journey: z.array(z.string().startsWith("/")).min(1),
+    /**
+     * Pages set up once and rarely touched (rules, taxonomies, sources): off
+     * the path, in the dock's setup menu.
+     */
+    setup: z.array(z.string().startsWith("/")).default([]),
   }),
   vetrina: z.object({
     /**

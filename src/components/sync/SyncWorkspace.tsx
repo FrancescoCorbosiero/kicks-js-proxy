@@ -828,7 +828,7 @@ export function SyncWorkspace({
           </div>
 
           {/* Apply bar — cleanup + prices; dry-run first, live apply unlocked by a matching dry run */}
-          <div className="sticky bottom-3 z-20 rounded-xl border border-line bg-surface/95 p-4 shadow-lg backdrop-blur-md">
+          <div className="sticky bottom-[calc(var(--dock-clearance,0px)+0.75rem)] z-20 rounded-xl border border-line bg-surface/95 p-4 shadow-lg backdrop-blur-md">
             <div className="flex flex-wrap items-center gap-3">
               <div className="text-sm">
                 <span className="font-semibold tnum">{t.sync.apply.ready(applyCount)}</span>

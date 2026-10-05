@@ -61,6 +61,14 @@ export async function getLatestPullRun(): Promise<StorePullRunRow | null> {
 }
 
 /**
+ * True while a pull is actually advancing. A pull abandoned mid-flight (closed
+ * tab) keeps status "running" forever, so a stale one doesn't count.
+ */
+export function pullInFlight(run: StorePullRunRow | null): boolean {
+  return run?.status === "running" && Date.now() - run.updatedAt.getTime() < 10 * 60_000;
+}
+
+/**
  * Open a new pull run — or resume the existing running one (there is never a
  * reason to pull twice concurrently against one store).
  */
