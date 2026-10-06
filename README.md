@@ -36,6 +36,12 @@ Vetrina; the admin's opens every shop). Caddy asks Authelia about every request 
 trusts only what Caddy vouches for. Locally there is no sign-in. See
 [docs/auth.md](docs/auth.md).
 
+**Store Hub and Hive Suite.** One writer of product data — this app. What a
+product is, costs and has in stock is decided and written here; WordPress keeps
+what only it can do (email, the media library, the storefront's blocks). Where
+each feature of the hive-commerce plan belongs, and why:
+[docs/hub-and-plugin.md](docs/hub-and-plugin.md).
+
 ### Use `npm run serve`, not `npm run dev`
 
 `npm run dev` is for editing the code. It keeps every module graph it has
@@ -132,6 +138,20 @@ filters/sorts/paginates in SQL.
      Every run lands in `apply_audit`; after a live run the stored snapshot is
      patched to the post-apply state, so the next preview reflects reality
      without a re-pull.
+
+  **Prices changed on WordPress are kept.** The Hub records every price the
+  store takes from it — the sync, Publish, the rebuild — in the price ledger
+  (`src/server/sync/ledger.ts`). A store price that differs from the Hub's
+  last word was changed by someone else, in wp-admin or by another plugin, and
+  no sync writes over it, the automatic ones included: the plan holds that
+  size (a feed product's stock still syncs) and the tab lists it under
+  "Prices changed on WordPress", with both prices. A person decides: **Keep**
+  locks the store's price under its size, so from then on the Hub writes that
+  one; **Use the Hub's price** hands the size back to the rules and writes the
+  product's prices at once. The catalog drawer and the Vetrina's product sheet
+  show the store's price on the size, with the same two answers, and the
+  dock's Sync station counts them. A lock set or cleared in the Hub is the
+  newer word and supersedes the edit.
 - **Publish** (`/publish`) — the catalog→store direction. Every other write
   path only ADJUSTS products the store already has (the sync walks the
   snapshot, and its "create" rows are dropped), so a supplier feed's new
@@ -271,10 +291,19 @@ It is narrower than the tab on purpose:
   is reviewed and applied by hand in the Sync tab. A change that large is a
   pricing edit or a broken feed.
 - Manual price locks are honored, as in the tab.
+- **A price changed on the store is never written over.** The plan keeps the
+  ones the snapshot already shows; and since the snapshot is up to a day old
+  between two pulls, each product is read again right before its write, which
+  keeps the ones changed since — and refreshes the product's copy in the
+  snapshot from the store's answer. Both wait in the Sync tab's list of prices
+  changed on WordPress.
 - Every automatic write appears in the Sync tab's history.
 
-Edits made directly in WooCommerce are seen at the next store pull, which
-the daily sync runs.
+Other edits made directly in WooCommerce are seen at the next store pull,
+which the daily sync runs.
+
+The daily run also trims the run logs the cycles leave behind: stepped syncs
+older than a week, ingestion runs and apply records older than 90 days.
 
 Every run is recorded in the `scheduler_runs` table (feed cycles for a
 week), so a restart knows where it stands. A daily slot that was missed while
