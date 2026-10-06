@@ -263,6 +263,30 @@ export async function getSnapshotProductsBySkus(
 }
 
 /**
+ * The snapshot's products with these store ids, unrolled from the jsonb IN SQL
+ * and ordered by id — the apply's read: it needs the products its run covers,
+ * not the store. Best-effort: [] when unreadable, which reads as "the snapshot
+ * has nothing to say about them", as no snapshot already does.
+ */
+export async function getSnapshotProductsByIds(ids: number[]): Promise<StoreProductModel[]> {
+  const unique = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  if (unique.length === 0) return [];
+  try {
+    const res = await db.execute(sql`
+      select p as product
+      from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
+      where s.id = ${SINGLETON}
+        and ${productId} in (select jsonb_array_elements_text(${JSON.stringify(unique)}::jsonb)::bigint)
+      order by ${productId}
+    `);
+    return rowsOf<{ product: StoreProductModel }>(res).map((r) => r.product);
+  } catch (e) {
+    console.warn("[snapshot] product read skipped:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+/**
  * Every store SKU in its ORIGINAL spelling, deduped by canonical key.
  *
  * listStoreSkus answers "does the store carry this", which only needs the

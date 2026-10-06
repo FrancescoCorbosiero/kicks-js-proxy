@@ -237,7 +237,13 @@ async function refreshCatalog(): Promise<{ refreshed: number; error: string | nu
  * than AUTO_SYNC_MAX_CHANGES variations writes nothing: a change that large is
  * a pricing edit or a broken feed, and either is reviewed in the Sync tab
  * first. Every write lands in the Sync tab's history like a manual apply.
- * The run's plans are dropped afterwards (see deleteRunPlans).
+ *
+ * And more careful, because nobody is watching: a price changed on the store
+ * is never written over. The plan keeps the ones the snapshot already shows
+ * (see storeEditOf), and each product is read again right before its write,
+ * which keeps the ones changed since — the snapshot is up to a day old between
+ * two daily pulls (see live-check.ts). Both land on the Sync tab's list of
+ * prices changed on WordPress, for a person to decide.
  */
 async function syncStore(scope: "store" | "feed"): Promise<StepOutcome | null> {
   const writes = store().autoSync;
@@ -255,49 +261,32 @@ async function syncStore(scope: "store" | "feed"): Promise<StepOutcome | null> {
     if (skus.length === 0) return { ok: true, count: 0, note: "no feed products on the store" };
   }
 
-  const preview = await import("@/server/actions/preview");
-  const { deleteRunPlans } = await import("@/server/plans/repo");
-  const started = await preview.startStoreSync(undefined, skus);
-  if (!started.ok || !started.progress) throw new Error(started.error ?? "the store sync could not start");
-  const runId = started.progress.runId;
-  try {
-    let progress = started.progress;
-    // A step plans 250 SKUs and always moves the cursor or ends the run;
-    // the bound only guards against a run that stops doing either.
-    const maxSteps = Math.ceil(progress.total / 100) + 10;
-    for (let step = 0; !progress.done; step++) {
-      if (progress.status !== "running") throw new Error(progress.error ?? `the store sync was ${progress.status}`);
-      if (step > maxSteps) throw new Error("the store sync did not finish");
-      const next = await preview.advanceStoreSync(runId);
-      if (!next.ok || !next.progress) throw new Error(next.error ?? "a store sync step failed");
-      progress = next.progress;
-    }
-
-    const planned = progress.result?.totals?.update ?? 0;
-    if (planned === 0) return { ok: true, count: 0 };
-    const limit = store().autoSyncMax;
-    if (planned > limit) {
-      throw new Error(
-        `${planned} changes planned, more than the ${limit} an automatic run may write (AUTO_SYNC_MAX_CHANGES): ` +
-          "nothing written. Review and apply them in the Sync tab.",
-      );
-    }
-
-    const { applySync } = await import("@/server/woo/apply");
-    const outcome = await applySync({ runId, priceScope: "all", dryRun: false, sanitize: false, backfillGtins: false });
-    if (outcome.failedTotal > 0) {
-      throw new Error(
-        `${outcome.updated} of ${outcome.variations} changes written, ${outcome.failedTotal} failed: ` +
-          (outcome.failed[0]?.error ?? "no reason given"),
-      );
-    }
-    console.log(
-      `[scheduler] store sync: ${outcome.updated} change(s) written (${scope === "feed" ? "feed products" : "whole store"})`,
+  const { runPriceSync } = await import("@/server/sync/price-sync");
+  const limit = store().autoSyncMax;
+  const { outcome, capped } = await runPriceSync({ skus, liveCheck: true, maxChanges: limit });
+  if (capped != null) {
+    throw new Error(
+      `${capped} changes planned, more than the ${limit} an automatic run may write (AUTO_SYNC_MAX_CHANGES): ` +
+        "nothing written. Review and apply them in the Sync tab.",
     );
-    return { ok: true, count: outcome.updated };
-  } finally {
-    await deleteRunPlans(runId).catch((e) => console.warn(`[scheduler] plans of run ${runId} kept: ${messageOf(e)}`));
   }
+  if (!outcome) return { ok: true, count: 0 };
+  if (outcome.failedTotal > 0) {
+    throw new Error(
+      `${outcome.updated} of ${outcome.variations} changes written, ${outcome.failedTotal} failed: ` +
+        (outcome.failed[0]?.error ?? "no reason given"),
+    );
+  }
+  const kept = outcome.keptStoreEdits;
+  console.log(
+    `[scheduler] store sync: ${outcome.updated} change(s) written (${scope === "feed" ? "feed products" : "whole store"})` +
+      (kept > 0 ? `, ${kept} price(s) changed on the store since the last pull kept` : ""),
+  );
+  return {
+    ok: true,
+    count: outcome.updated,
+    ...(kept > 0 ? { note: `${kept} price(s) changed on the store kept` } : {}),
+  };
 }
 
 /**

@@ -170,3 +170,44 @@ describe.skipIf(!enabled)("another shop's database (real SQL)", () => {
   });
 });
 
+
+describe.skipIf(!enabled)("the apply's scope (real SQL)", () => {
+  it("cleans only what the run previewed — and nothing when it previewed nothing", async () => {
+    const { saveSnapshot, savePlans, applySyncPrices } = await load();
+    const { randomUUID } = await import("node:crypto");
+    // Size 42 twice: the cleanup deletes the stale twin of any product it is given.
+    await saveSnapshot({
+      products: [
+        { id: 7, sku: "TWIN-1", name: "Twin", variations: [vrt(71, "TWIN-1", "42", null), vrt(72, "TWIN-1", "42", null)] },
+      ],
+    } as never);
+    const dryRun = (runId: string) =>
+      applySyncPrices({ runId, priceScope: "all", selections: [], excluded: [], dryRun: true, sanitize: true, backfillGtins: false });
+
+    // A preview of a product the store does not carry: its run touches no store product.
+    const elsewhere = randomUUID();
+    await savePlans(
+      [{ plan: { sku: "NOT-ON-STORE", currency: "EUR", generatedAt: new Date().toISOString(), items: [
+        { stockxVariantId: "x", sizeLabel: "42", storeProductId: null, storeVariationId: null, currentPrice: null, proposedPrice: 99, action: "create" },
+      ] }, source: "kicksdb" }],
+      "IT",
+      elsewhere,
+    );
+    const none = await dryRun(elsewhere);
+    expect(none.ok).toBe(true);
+    expect(none.outcome!.cleanup!.products).toBe(0); // not "every product of the store"
+
+    // A preview that matched the product: its twin is cleaned.
+    const matched = randomUUID();
+    await savePlans(
+      [{ plan: { sku: "TWIN-1", currency: "EUR", generatedAt: new Date().toISOString(), items: [
+        { stockxVariantId: "y", sizeLabel: "42", storeProductId: 7, storeVariationId: 72, currentPrice: 120, proposedPrice: 120, action: "noop" },
+      ] }, source: "kicksdb" }],
+      "IT",
+      matched,
+    );
+    const one = await dryRun(matched);
+    expect(one.outcome!.cleanup!.products).toBe(1);
+    expect(one.outcome!.cleanup!.deletions).toBe(1);
+  });
+});

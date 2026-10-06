@@ -1,4 +1,4 @@
-import type { StoreProductModel } from "@/server/store-json/model";
+import type { StoreProductModel, StoreVariation } from "@/server/store-json/model";
 import type { WooRestProduct, WooRestVariation } from "./client";
 
 /**
@@ -19,16 +19,21 @@ export function toStoreProduct(p: WooRestProduct, variations: WooRestVariation[]
     images: p.images?.[0]?.src ? [{ src: p.images[0].src }] : null,
     // Parent attributes carry the pa_taglia option list the cleanup realigns.
     attributes: p.attributes ?? null,
-    variations: variations.map((v) => ({
-      id: v.id,
-      sku: v.sku ?? null,
-      regular_price: v.regular_price ?? null,
-      sale_price: v.sale_price ?? null,
-      global_unique_id: v.global_unique_id ?? null,
-      stock_quantity: v.stock_quantity ?? null,
-      manage_stock: v.manage_stock ?? null,
-      stock_status: v.stock_status ?? null,
-      attributes: v.attributes ?? null,
-    })),
+    variations: variations.map(toStoreVariation),
+  };
+}
+
+/** One variation, trimmed the same way — what the snapshot keeps of it. */
+export function toStoreVariation(v: WooRestVariation): StoreVariation {
+  return {
+    id: v.id,
+    sku: v.sku ?? null,
+    regular_price: v.regular_price ?? null,
+    sale_price: v.sale_price ?? null,
+    global_unique_id: v.global_unique_id ?? null,
+    stock_quantity: v.stock_quantity ?? null,
+    manage_stock: v.manage_stock ?? null,
+    stock_status: v.stock_status ?? null,
+    attributes: v.attributes ?? null,
   };
 }

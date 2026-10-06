@@ -554,6 +554,45 @@ export const collectionChanges = pgTable(
 
 export type CollectionChangeRow = typeof collectionChanges.$inferSelect;
 
+/**
+ * The price the Hub last wrote to each store variation (src/server/sync/
+ * ledger.ts): what tells a price someone changed in WordPress apart from the
+ * store's own history. Written after every price write that went through (the
+ * sync, the Publisher, the rebuild) and read by every plan, which keeps a store
+ * price that differs instead of writing over it. One row per variation.
+ *
+ * `store_price` is set while the store holds such a price — the "changed on
+ * WordPress" list — and cleared when a person decides, when the store goes back
+ * to the Hub's price, or when the Hub writes the variation again.
+ */
+export const priceLedger = pgTable(
+  "price_ledger",
+  {
+    variationId: integer("variation_id").primaryKey(), // Woo variation id
+    productId: integer("product_id").notNull(), // its parent
+    // The two halves of a lock's key (see overrides/model.ts): keeping a store
+    // price means locking it, under the same identity the sync reads locks by.
+    sku: text("sku").notNull(), // parent SKU, canonical (skuKey)
+    euSize: text("eu_size").notNull().default(""), // canonical EU size, "" when unknown
+    // The regular price the Hub last wrote, or accepted as its own.
+    price: numeric("price", { mode: "number" }).notNull(),
+    writtenAt: timestamp("written_at", { withTimezone: true }).notNull().defaultNow(),
+    // What the store shows instead, kept until a person decides; null = in step.
+    storePrice: numeric("store_price", { mode: "number" }),
+    // When the store was first seen holding `store_price`.
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    // For the list: the product's name and the size as the store labels it.
+    title: text("title").notNull().default(""),
+    sizeLabel: text("size_label").notNull().default(""),
+  },
+  (t) => [
+    index("price_ledger_product_idx").on(t.productId),
+    index("price_ledger_open_idx").on(t.seenAt).where(sql`store_price is not null`),
+  ],
+);
+
+export type PriceLedgerRow = typeof priceLedger.$inferSelect;
+
 export type ConfigRow = typeof config.$inferSelect;
 export type VariantMappingRow = typeof variantMappings.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;

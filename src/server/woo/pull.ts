@@ -6,6 +6,7 @@ import { storePullRuns, storePullProducts, type StorePullRunRow } from "@/server
 import { saveSnapshot } from "@/server/store-json/repo";
 import type { StoreModel, StoreProductModel } from "@/server/store-json/model";
 import { registerWooCatalogEntries } from "@/server/catalog/woo-register";
+import { pruneLedgerToSnapshot } from "@/server/sync/ledger";
 import { getWooClient, wooSiteUrl } from "./client";
 import { toStoreProduct } from "./store-product";
 
@@ -199,6 +200,11 @@ async function completePull(runId: string): Promise<void> {
   // The catalog mirrors the whole store: register store-only products
   // (source "woo") so the vendor sees ALL inventory, not just feed-covered.
   await registerWooCatalogEntries(model);
+
+  // Sizes deleted in WordPress leave the price ledger with the snapshot.
+  await pruneLedgerToSnapshot().catch((e) =>
+    console.warn("[ledger] prune skipped:", e instanceof Error ? e.message : String(e)),
+  );
 
   await db.delete(storePullProducts).where(eq(storePullProducts.runId, runId));
   await db
