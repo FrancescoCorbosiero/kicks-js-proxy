@@ -215,6 +215,41 @@ describe.skipIf(!enabled)("prices changed on the store (real SQL, stand-in store
     expect(await countStoreEdits()).toBe(0);
   });
 
+  it("a size already at the Hub's price is watched from its first plan, never written or not", async () => {
+    const { runPriceSync, saveSnapshot, countStoreEdits } = await load();
+    await setFeedPrice(120); // the store already shows the feed's price: nothing to write
+    const first = await runPriceSync({ skus: [SKU], liveCheck: true });
+    expect(first.outcome).toBeNull();
+    expect(await ledgerRow(11)).toMatchObject({ price: 120, storePrice: null, euSize: "42" });
+
+    // Changed in WordPress, then read by a pull; the feed moves on.
+    store.products.get(1)!.find((v) => v.id === 11)!.regular_price = "149.99";
+    await saveSnapshot({ products: [{ id: 1, sku: SKU, name: "Ledger Low", variations: structuredClone(store.products.get(1)) }] } as never, "rest");
+    await setFeedPrice(135);
+    const next = await runPriceSync({ skus: [SKU], liveCheck: true });
+    expect(next.outcome?.updated).toBe(1); // 43 only
+    expect(storePrice(11)).toBe("149.99");
+    expect(storePrice(12)).toBe("135.00");
+    expect(await countStoreEdits()).toBe(1);
+  });
+
+  it("a full pull forgets deleted sizes and closes the edits of products it no longer brings", async () => {
+    const { db, priceLedger, saveSnapshot, pruneLedgerToSnapshot, noteStoreEdits, recordPriceWrites } = await load();
+    await recordPriceWrites([
+      { variationId: 11, productId: 1, sku: SKU, euSize: "42", price: 130 },
+      { variationId: 19, productId: 1, sku: SKU, euSize: "44", price: 130 }, // deleted in WordPress
+      { variationId: 21, productId: 2, sku: "GONE-1", euSize: "42", price: 90 },
+    ]);
+    await noteStoreEdits([{ variationId: 21, productId: 2, sku: "GONE-1", euSize: "42", storePrice: 99, hubPrice: 90 }]);
+    // The pull brought product 1 (sizes 11 and 12) and not product 2 (unpublished).
+    await saveSnapshot({ products: [{ id: 1, sku: SKU, name: "Ledger Low", variations: structuredClone(store.products.get(1)) }] } as never, "rest");
+
+    await pruneLedgerToSnapshot();
+    const rows = await db.select().from(priceLedger);
+    expect(rows.map((r) => r.variationId).sort()).toEqual([11, 21]);
+    expect(rows.find((r) => r.variationId === 21)).toMatchObject({ price: 90, storePrice: null });
+  });
+
   it("a row the store refuses is a failure, and is not recorded as written", async () => {
     const { runPriceSync } = await load();
     store.refuse.add(12);

@@ -5,7 +5,7 @@ import { countOf } from "@/server/db/rows";
 import { priceLedger, storeSnapshot, type PriceLedgerRow } from "@/server/db/schema";
 import { SNAPSHOT_ID } from "@/server/store-json/repo";
 import { skuKey } from "@/lib/skus";
-import type { LedgerEntry, LedgerSettle, StoreEditNote } from "./store-edit-plan";
+import type { LedgerEntry, LedgerSettle, LedgerWrite, StoreEditNote } from "./store-edit-plan";
 
 /**
  * The price ledger (table price_ledger): what the Hub last wrote to each store
@@ -23,7 +23,7 @@ import type { LedgerEntry, LedgerSettle, StoreEditNote } from "./store-edit-plan
  * Hub's own, and so does handing it back to the rules.
  */
 
-export type { LedgerEntry, LedgerSettle, StoreEditNote } from "./store-edit-plan";
+export type { LedgerEntry, LedgerSettle, LedgerWrite, StoreEditNote } from "./store-edit-plan";
 
 /** Rows per statement: a whole-store apply records tens of thousands. */
 const CHUNK = 500;
@@ -32,19 +32,6 @@ function chunks<T>(items: T[]): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += CHUNK) out.push(items.slice(i, i + CHUNK));
   return out;
-}
-
-/** One variation's price, as the Hub just wrote it. */
-export interface LedgerWrite {
-  variationId: number;
-  productId: number;
-  /** The parent's SKU, any spelling: stored canonical. */
-  sku: string;
-  /** Canonical EU size, when known — needed to keep a later edit as a lock. */
-  euSize?: string | null;
-  price: number;
-  title?: string | null;
-  sizeLabel?: string | null;
 }
 
 /**
@@ -85,6 +72,33 @@ export async function recordPriceWrites(writes: LedgerWrite[]): Promise<void> {
           seenAt: sql`null`,
         },
       });
+  }
+}
+
+/**
+ * Accept these store prices as the Hub's own: sizes the ledger has never seen,
+ * already at the price the rules ask for. A row written meanwhile — a write
+ * that went through between the plan's read and now — is the newer word, and
+ * stays.
+ */
+export async function adoptPrices(rows: LedgerWrite[]): Promise<void> {
+  const byId = new Map<number, LedgerWrite>();
+  for (const w of rows) if (w.variationId > 0 && Number.isFinite(w.price)) byId.set(w.variationId, w);
+  for (const part of chunks([...byId.values()])) {
+    await db
+      .insert(priceLedger)
+      .values(
+        part.map((w) => ({
+          variationId: w.variationId,
+          productId: w.productId,
+          sku: skuKey(w.sku),
+          euSize: w.euSize ?? "",
+          price: w.price,
+          title: w.title ?? "",
+          sizeLabel: w.sizeLabel ?? "",
+        })),
+      )
+      .onConflictDoNothing({ target: priceLedger.variationId });
   }
 }
 
@@ -205,17 +219,22 @@ export async function forgetVariations(variationIds: number[]): Promise<void> {
 }
 
 /**
- * After a full pull: forget the variations a pulled product no longer has —
- * sizes deleted in WordPress. A product the pull did not bring at all (a draft,
- * a private product) is left alone: its sizes may well still be there.
+ * After a full pull, which is the store's word on what it sells:
+ *  - the variations a pulled product no longer has — sizes deleted in
+ *    WordPress — are forgotten;
+ *  - a product the pull did not bring at all (unpublished, trashed, deleted)
+ *    keeps its rows, its sizes may well come back, but leaves the list: no
+ *    sync prices it, there is nothing to decide. Republished, its next plan
+ *    lists the edit again if the store still holds it.
  */
-export async function pruneLedgerToSnapshot(): Promise<number> {
-  const res = await db.execute(sql`
-    with pulled as (
-      select (p->>'id')::bigint as product_id, p->'variations' as variations
-      from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
-      where s.id = ${SNAPSHOT_ID} and jsonb_typeof(p->'variations') = 'array'
-    ),
+export async function pruneLedgerToSnapshot(): Promise<void> {
+  const pulled = sql`
+    select (p->>'id')::bigint as product_id, p->'variations' as variations
+    from ${storeSnapshot} s, jsonb_array_elements(s.data->'products') as p
+    where s.id = ${SNAPSHOT_ID} and jsonb_typeof(p->'variations') = 'array'
+  `;
+  await db.execute(sql`
+    with pulled as (${pulled}),
     present as (
       select (v->>'id')::bigint as variation_id from pulled, jsonb_array_elements(pulled.variations) as v
     )
@@ -223,7 +242,12 @@ export async function pruneLedgerToSnapshot(): Promise<number> {
     where l.product_id in (select product_id from pulled)
       and l.variation_id not in (select variation_id from present where variation_id is not null)
   `);
-  return (res as { rowCount?: number | null }).rowCount ?? 0;
+  await db.execute(sql`
+    with pulled as (${pulled})
+    update ${priceLedger} l
+    set store_price = null, seen_at = null
+    where l.store_price is not null and l.product_id not in (select product_id from pulled)
+  `);
 }
 
 /** The store prices the Hub is keeping — the "changed on WordPress" list, newest first. */

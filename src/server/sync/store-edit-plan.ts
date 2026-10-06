@@ -13,6 +13,11 @@ import { samePrice, type PlanItem } from "@core/core-spine";
  *    store went back to the Hub's last price (an edit undone in WordPress), or
  *    the store and the rules now ask for the same price — then the store's
  *    price is adopted as the Hub's own, and the next change is the rules'.
+ *  - adopt: a size the ledger has never seen, whose store price the plan is
+ *    content with (nothing to write). Without it, a size that stays in step
+ *    would never be written, never recorded — and an edit made to it in
+ *    WordPress would be written over like the store's own history. From its
+ *    first plan on, every size the Hub prices is watched.
  *
  * Anything else leaves the ledger as it is. A kept edit in particular stays on
  * the list while the Hub happens to have nothing to write there (no ask today,
@@ -53,6 +58,19 @@ export interface LedgerSettle {
   price?: number;
 }
 
+/** One variation's price, as the Hub wrote it — or accepts it as its own. */
+export interface LedgerWrite {
+  variationId: number;
+  productId: number;
+  /** The parent's SKU, any spelling: stored canonical. */
+  sku: string;
+  /** Canonical EU size, when known — needed to keep a later edit as a lock. */
+  euSize?: string | null;
+  price: number;
+  title?: string | null;
+  sizeLabel?: string | null;
+}
+
 /** One planned variation, with what the list needs to name it. */
 export interface PlannedRow {
   item: PlanItem;
@@ -67,9 +85,10 @@ export interface PlannedRow {
 export function ledgerUpdatesFor(
   rows: PlannedRow[],
   ledger: ReadonlyMap<number, LedgerEntry>,
-): { notes: StoreEditNote[]; settles: LedgerSettle[] } {
+): { notes: StoreEditNote[]; settles: LedgerSettle[]; adopt: LedgerWrite[] } {
   const notes: StoreEditNote[] = [];
   const settles: LedgerSettle[] = [];
+  const adopt: LedgerWrite[] = [];
   for (const { item, sku, title, sizeLabel } of rows) {
     const variationId = item.storeVariationId;
     if (variationId == null || variationId <= 0 || item.storeProductId == null) continue;
@@ -90,7 +109,25 @@ export function ledgerUpdatesFor(
 
     const entry = ledger.get(variationId);
     const current = item.currentPrice;
-    if (!entry || current == null) continue;
+    if (current == null) continue;
+    if (!entry) {
+      // In step: nothing to write (a no-op, within the anti-churn threshold
+      // or at its lock), or only stock to write next to the same price.
+      const inStep =
+        item.action === "noop" || (item.proposedPrice != null && samePrice(item.proposedPrice, current));
+      if (inStep) {
+        adopt.push({
+          variationId,
+          productId: item.storeProductId,
+          sku,
+          euSize: item.euSize ?? null,
+          price: current,
+          title,
+          sizeLabel,
+        });
+      }
+      continue;
+    }
     if (samePrice(current, entry.price)) {
       // In step. An edit kept earlier was undone on the store.
       if (entry.storePrice != null) settles.push({ variationId });
@@ -100,5 +137,5 @@ export function ledgerUpdatesFor(
       settles.push({ variationId, price: current });
     }
   }
-  return { notes, settles };
+  return { notes, settles, adopt };
 }

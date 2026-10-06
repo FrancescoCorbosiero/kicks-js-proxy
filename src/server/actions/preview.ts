@@ -11,7 +11,7 @@ import {
   listStoreSkuSpellings,
 } from "@/server/store-json/repo";
 import { resolveFromModel, sourceEuSize, variationSizeLabel } from "@/server/store-json/match";
-import { ledgerForProducts, noteStoreEdits, settleStoreEdits } from "@/server/sync/ledger";
+import { adoptPrices, ledgerForProducts, noteStoreEdits, settleStoreEdits } from "@/server/sync/ledger";
 import { ledgerUpdatesFor, type LedgerEntry, type PlannedRow } from "@/server/sync/store-edit-plan";
 import { savePlans, prunePlans, type PlanToSave } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
@@ -255,10 +255,11 @@ async function planChunk(
 
   // What these plans kept, and what is the Hub's again. Best-effort like the
   // read: bookkeeping that fails must never cost the plans.
-  const { notes, settles } = ledgerUpdatesFor(ledgerRows, ledger);
+  const { notes, settles, adopt } = ledgerUpdatesFor(ledgerRows, ledger);
   try {
     await noteStoreEdits(notes);
     await settleStoreEdits(settles);
+    await adoptPrices(adopt);
   } catch (e) {
     console.warn("[ledger] store edits not recorded:", errMessage(e));
   }

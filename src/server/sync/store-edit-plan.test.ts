@@ -79,6 +79,47 @@ describe("ledgerUpdatesFor — what a plan tells the price ledger", () => {
     expect(settles).toEqual([]);
   });
 
+  it("adopts a size it has never seen whose price is already in step", () => {
+    const { adopt, notes, settles } = ledgerUpdatesFor(
+      [row({ action: "noop", currentPrice: 110, proposedPrice: 110 })],
+      ledger([]),
+    );
+    expect(adopt).toEqual([
+      { variationId: 71, productId: 7, sku: "DD1391-100", euSize: "42", price: 110, title: "Dunk Low Panda", sizeLabel: "42" },
+    ]);
+    expect(notes).toEqual([]);
+    expect(settles).toEqual([]);
+  });
+
+  it("adopts the store's price under the anti-churn threshold too: the Hub is content with it", () => {
+    const { adopt } = ledgerUpdatesFor(
+      [row({ action: "noop", currentPrice: 101, proposedPrice: 100, reason: "within minDeltaPercent (3%)" })],
+      ledger([]),
+    );
+    expect(adopt.map((a) => a.price)).toEqual([101]);
+  });
+
+  it("adopts a stock-only write next to the same price", () => {
+    const { adopt } = ledgerUpdatesFor(
+      [row({ action: "update", currentPrice: 110, proposedPrice: 110, stockQuantity: 3, reason: "stock change" })],
+      ledger([]),
+    );
+    expect(adopt.map((a) => a.price)).toEqual([110]);
+  });
+
+  it("does not adopt a size about to be written: the write records it", () => {
+    const { adopt } = ledgerUpdatesFor([row({ currentPrice: 120, proposedPrice: 110 })], ledger([]));
+    expect(adopt).toEqual([]);
+  });
+
+  it("never adopts over the ledger's own word", () => {
+    const { adopt } = ledgerUpdatesFor(
+      [row({ action: "noop", currentPrice: 110, proposedPrice: 110 })],
+      ledger([[71, { price: 110, storePrice: null }]]),
+    );
+    expect(adopt).toEqual([]);
+  });
+
   it("ignores rows that are not on the store", () => {
     const { notes, settles } = ledgerUpdatesFor(
       [row({ storeVariationId: null, storeProductId: null, action: "create" })],
