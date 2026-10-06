@@ -22,6 +22,7 @@ import {
   variationSizeLabel,
 } from "@/server/store-json/match";
 import { skuKey } from "@/lib/skus";
+import { openStoreEditsForSku } from "@/server/sync/ledger";
 
 /** One drawer row: a size variant with its ask, computed price and override state. */
 export interface DrawerVariant {
@@ -34,6 +35,11 @@ export interface DrawerVariant {
   asks: number; // liquidity depth at that ask
   proposed: number | null; // computePrice under the current pricing rules
   manual: number | null; // operator-locked price (overrides subsystem)
+  /**
+   * The store's price for this size was changed outside the Hub (WordPress)
+   * after the Hub last wrote it: the sync keeps it until someone decides.
+   */
+  storeEdit: { variationId: number; storePrice: number; hubPrice: number } | null;
 }
 
 /** One size of a store-only product: live shelf price + managed stock. */
@@ -140,6 +146,7 @@ export async function loadDrawerData(
   if (!entry) return null;
 
   const overrides = await getOverrides().catch(() => null);
+  const storeEdits = await openStoreEditsForSku(entry.sku).catch(() => new Map());
   // Product-level ownership: a GS-owned product shows the FEED's sizes,
   // presented prices (passthrough rule) and real quantities. Coverage is
   // computed pin-blind so the drawer can offer the source switch either way.
@@ -171,6 +178,7 @@ export async function loadDrawerData(
         ? computePrice(v, rule, { medianAsk: medianTierAsk(product, rule.sourceDeliveryType) })
         : null,
       manual: overrides && euSize ? manualPriceFor(overrides, product.sku, euSize) : null,
+      storeEdit: (euSize ? storeEdits.get(euSize) : null) ?? null,
     };
   });
 
@@ -192,6 +200,7 @@ export async function loadDrawerData(
         asks: 0,
         proposed: null,
         manual: price,
+        storeEdit: null,
       });
     }
   }

@@ -441,6 +441,42 @@ export interface PlanItem {
     action: PlanAction;
     reason?: string; // e.g. "no offer for chosen delivery type", "below minAsks"
     locked?: boolean; // operator-set manual price wins over the computed price
+    /**
+     * The store's price was changed outside the Hub (WordPress admin, another
+     * plugin) after the Hub last wrote it. Set on the rows that KEEP it: the
+     * price is not written, whatever the rules say, until a person decides.
+     */
+    storeEdit?: StoreEdit;
+    /** Canonical EU size of the variant (the key a lock is stored under), when known. */
+    euSize?: string;
+}
+
+/**
+ * A price on the store that the Hub did not write: someone changed it in
+ * WordPress (or another plugin did) after the Hub last wrote that variation.
+ */
+export interface StoreEdit {
+    /** What the store shows now — kept. */
+    storePrice: number;
+    /** What the Hub last wrote there (or accepted as its own). */
+    hubPrice: number;
+}
+
+/** True when two prices print the same to the cent. */
+export function samePrice(a: number, b: number): boolean {
+    return Math.abs(a - b) < 0.005;
+}
+
+/**
+ * The store edit on a matched variation, or null when the store shows what the
+ * Hub last wrote — or when the Hub has no record of writing it. A variation the
+ * Hub never wrote is planned as before: taking a store's prices over is its job,
+ * and from its first write on, the variation is watched.
+ */
+export function storeEditOf(m: Pick<VariantMapping, "currentPrice" | "hubPrice">): StoreEdit | null {
+    if (m.hubPrice == null || m.currentPrice == null) return null;
+    if (samePrice(m.currentPrice, m.hubPrice)) return null;
+    return { storePrice: m.currentPrice, hubPrice: m.hubPrice };
 }
 
 export interface Plan {
@@ -460,6 +496,12 @@ export interface VariantMapping {
     currentStock?: number | null;
     saleActive?: boolean; // store variation has a manual discount (sale_price) -> preserve it
     manualPrice?: number | null; // operator-locked price: wins over the computed price
+    /**
+     * The price the Hub last wrote to this variation (or accepted as its own),
+     * from the price ledger. A store price that differs was changed outside
+     * the Hub, and is kept rather than overwritten. Absent = no record.
+     */
+    hubPrice?: number | null;
 }
 
 /** Per-product knobs for buildPlan; all optional so existing callers are unaffected. */
@@ -509,10 +551,29 @@ export function buildPlan(
         const stock = (item: PlanItem): PlanItem =>
             qty !== undefined ? { ...item, stockQuantity: qty } : item;
 
+        /**
+         * A price changed on the store is KEPT: whatever the Hub would write,
+         * it waits until a person decides — keep it (as a lock) or let the Hub
+         * price it again. The same posture as an owner-set sale price: finite
+         * stock still syncs. Asked only where a price would be written, so a
+         * store edit the Hub agrees with (or would leave alone) costs nothing.
+         */
+        const keepStorePrice = (mapping: VariantMapping, edit: StoreEdit, proposedPrice: number): PlanItem => {
+            if (stockChanged) {
+                return {
+                    ...stock(baseItem(v, mapping, null, "update", "stock only — price changed on the store")),
+                    storeEdit: edit,
+                };
+            }
+            return { ...baseItem(v, mapping, proposedPrice, "skip", "price changed on the store — kept"), storeEdit: edit };
+        };
+
         // Highest precedence: an operator-locked manual price. It wins over the
         // sale rule and the computed price, and never drifts on re-runs. Only
         // meaningful for a variation that exists on the store (has a mapping).
         if (m && m.manualPrice != null) {
+            const edit = m.currentPrice === m.manualPrice ? null : storeEditOf(m);
+            if (edit) return { ...keepStorePrice(m, edit, m.manualPrice), locked: true };
             const action = m.currentPrice === m.manualPrice && !stockChanged ? "noop" : "update";
             return {
                 ...stock(baseItem(v, m, m.manualPrice, action, "manual price (locked)")),
@@ -584,6 +645,8 @@ export function buildPlan(
                 `change exceeds maxDeltaPercent (${rule!.maxDeltaPercent}%)`,
             );
         }
+        const edit = storeEditOf(m);
+        if (edit) return keepStorePrice(m, edit, proposed);
         return stock(baseItem(v, m, proposed, "update"));
     });
 

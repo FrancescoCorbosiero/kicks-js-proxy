@@ -10,6 +10,7 @@ import type { ProductCard } from "@/lib/vetrina/types";
 import { loadProductPrices, publishProductPrices } from "@/server/actions/vetrina-prices";
 import { setProductManualPrices } from "@/server/actions/overrides";
 import { updateStoreVariation } from "@/server/actions/store-edit";
+import { repriceStoreEdits } from "@/server/actions/store-edits";
 import { formatCardPrice, formatEuro, parsePrice } from "./format";
 import { External, Lock } from "./icons";
 import { useSheetMount, useStandalone } from "./sheet-mount";
@@ -112,6 +113,23 @@ export function ProductSheet({
       else if (published.unpriced) toast.warning(p.notPriced);
       else toast(p.upToDate);
       if (published.ok && published.updated > 0 && card) onPricesChanged(card.id);
+      await load(d.sku);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** A size changed on WordPress goes back to the Hub's price, written now. */
+  async function restoreHubPrice(d: DrawerData, variationId: number) {
+    setSaving(true);
+    try {
+      const res = await repriceStoreEdits({ ids: [variationId] });
+      if (!res.ok) toast.error(res.error);
+      else if (res.data.error) toast.error(res.data.error);
+      else {
+        toast.success(p.storeEditRepriced);
+        if (card && res.data.updated > 0) onPricesChanged(card.id);
+      }
       await load(d.sku);
     } finally {
       setSaving(false);
@@ -265,6 +283,28 @@ export function ProductSheet({
                                 {p.computed} {formatEuro(v.proposed)}
                               </span>
                               {below && <span className="block text-amber-700 dark:text-amber-400">{p.belowMarket(formatEuro(v.ask))}</span>}
+                              {v.storeEdit && v.euSize && (
+                                <span className="mt-0.5 block text-amber-700 dark:text-amber-400">
+                                  <span className="font-semibold">{p.storeEdit(formatEuro(v.storeEdit.storePrice))}</span>
+                                  <span className="mt-0.5 flex gap-3">
+                                    <button
+                                      type="button"
+                                      className="font-semibold text-primary"
+                                      onClick={() => setEdits((e) => ({ ...e, [v.euSize!]: toInput(v.storeEdit!.storePrice) }))}
+                                    >
+                                      {p.storeEditKeep}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="font-semibold text-primary disabled:opacity-40"
+                                      disabled={saving}
+                                      onClick={() => void restoreHubPrice(data, v.storeEdit!.variationId)}
+                                    >
+                                      {p.storeEditReprice}
+                                    </button>
+                                  </span>
+                                </span>
+                              )}
                             </span>
                             {v.euSize ? (
                               <>

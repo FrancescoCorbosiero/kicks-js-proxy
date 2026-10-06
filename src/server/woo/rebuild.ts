@@ -21,6 +21,7 @@ import type { StoreProductModel, StoreVariation } from "@/server/store-json/mode
 import { skuKey } from "@/lib/skus";
 import { getWooClient, type WooClient } from "./client";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
+import { forgetVariations, recordPriceWrites, type LedgerWrite } from "@/server/sync/ledger";
 
 /**
  * The Rebuild executor — the sledgehammer for products too inconsistent to
@@ -120,6 +121,10 @@ export async function rebuildProducts(
 
   const reports: RebuildProductReport[] = [];
   const executed: { plan: RebuildPlan; created: StoreVariation[]; parentAttributes: unknown }[] = [];
+  // The price ledger's share: the prices the new sizes were created at, and
+  // the old sizes that are gone.
+  const ledgerWrites: LedgerWrite[] = [];
+  const deletedIds: number[] = [];
   const tagliaCache: { id?: number; fetched: boolean } = { fetched: false };
   let created = 0;
   let deleted = 0;
@@ -218,6 +223,20 @@ export async function rebuildProducts(
       const createdRows = res.create.filter((r) => r.error == null && r.id != null);
       created += createdRows.length;
       deleted += plan.deleteVariationIds.length;
+      for (const row of res.delete) if (row.error == null && row.id != null) deletedIds.push(row.id);
+      plan.create.forEach((c, i) => {
+        const row = res.create[i];
+        if (c.price == null || row?.error != null || row?.id == null) return;
+        ledgerWrites.push({
+          variationId: row.id,
+          productId,
+          sku,
+          euSize: c.euNorm,
+          price: c.price,
+          title: typeof fullParent.name === "string" ? fullParent.name : catalog.title,
+          sizeLabel: c.sizeLabel,
+        });
+      });
 
       // Trimmed post-rebuild variations for the snapshot patch.
       const newVariations: StoreVariation[] = plan.create.map((c, i) => ({
@@ -244,6 +263,12 @@ export async function rebuildProducts(
       report.error = e instanceof Error ? e.message : String(e);
     }
   });
+
+  if (!dryRun) {
+    await forgetVariations(deletedIds)
+      .then(() => recordPriceWrites(ledgerWrites))
+      .catch((e) => console.error(`[ledger] rebuild not recorded: ${e instanceof Error ? e.message : String(e)}`));
+  }
 
   // Patch the snapshot to the post-rebuild state of fully-succeeded products —
   // only those products, in SQL. The whole-store read/map/re-serialize this

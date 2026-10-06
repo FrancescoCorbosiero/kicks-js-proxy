@@ -3,8 +3,7 @@
 import { z } from "zod";
 import { getActiveConfig } from "@/server/config/repo";
 import { loadDrawerData, type DrawerData } from "@/components/catalog/drawer-data";
-import { advanceStoreSync, startStoreSync } from "@/server/actions/preview";
-import { applySync } from "@/server/woo/apply";
+import { runPriceSync } from "@/server/sync/price-sync";
 import { getSnapshotInfo } from "@/server/store-json/repo";
 import { skuKey } from "@/lib/skus";
 
@@ -46,29 +45,12 @@ export async function publishProductPrices(input: {
     // The sync matches against the store snapshot; without one there is no
     // variation to write to. Said in the sheet's words, not the Sync tab's.
     if ((await getSnapshotInfo()) == null) return { ok: false, error: "no snapshot", noSnapshot: true };
-    const started = await startStoreSync(undefined, [skuKey(parsed.data.sku)]);
-    if (!started.ok || !started.progress) return { ok: false, error: started.error ?? "sync failed to start" };
-    let progress = started.progress;
-    for (let step = 0; !progress.done && step < MAX_STEPS; step++) {
-      if (progress.status === "failed" || progress.status === "cancelled") break;
-      const next = await advanceStoreSync(progress.runId);
-      if (!next.ok || !next.progress) return { ok: false, error: next.error ?? "sync step failed" };
-      progress = next.progress;
-    }
-    if (!progress.done) return { ok: false, error: progress.error ?? "sync did not finish" };
-
-    const outcome = await applySync({
-      runId: progress.runId,
-      priceScope: "all",
-      dryRun: false,
-      sanitize: false,
-      backfillGtins: false,
-    });
+    const { report, outcome } = await runPriceSync({ skus: [skuKey(parsed.data.sku)], maxSteps: MAX_STEPS });
     // The source had no price for it (unknown SKU, an outage): the lock is
     // saved but nothing could be planned — the sheet says so, not "0 updated".
-    const stats = progress.result?.stats;
+    const stats = report.stats;
     const unpriced = (stats?.notFoundTotal ?? stats?.notFound.length ?? 0) > 0 || (stats?.unanswered ?? 0) > 0;
-    return { ok: true, updated: outcome.updated, failed: outcome.failedTotal, unpriced };
+    return { ok: true, updated: outcome?.updated ?? 0, failed: outcome?.failedTotal ?? 0, unpriced };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

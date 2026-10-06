@@ -4,16 +4,20 @@ import { db } from "@/server/db/client";
 import { applyAudit, type ApplyAuditRow } from "@/server/db/schema";
 import { getPlansByIds, planRunIds, planRunScope } from "@/server/plans/repo";
 import { getActiveConfig } from "@/server/config/repo";
-import { getActiveSnapshot, upsertSnapshotProducts } from "@/server/store-json/repo";
+import { getSnapshotProductsByIds, upsertSnapshotProducts } from "@/server/store-json/repo";
 import { planProductSanitize, type ProductSanitizeOps } from "@/server/store-json/sanitize-plan";
 import { planFeedTakeover } from "@/server/store-json/takeover-plan";
+import { variationSizeLabel } from "@/server/store-json/match";
 import { gsOwnedProducts } from "@/server/feeds/owner";
 import { getOverrides } from "@/server/overrides/repo";
-import type { StoreModel, StoreProductModel } from "@/server/store-json/model";
+import { forgetVariations, noteStoreEdits, recordPriceWrites, type LedgerWrite } from "@/server/sync/ledger";
+import type { StoreProductModel, StoreVariation } from "@/server/store-json/model";
 import { chunk } from "@/server/adapters/http";
 import { skuKey } from "@/lib/skus";
 import { normalizeGtin } from "@/lib/gtin";
 import { getWooClient } from "./client";
+import { decideLiveWrites } from "./live-check";
+import { toStoreVariation } from "./store-product";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
 
 /**
@@ -32,7 +36,10 @@ import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
  * and deletions without touching the store. Every run lands in apply_audit.
  * After a live run, the stored snapshot is patched to the post-apply state for
  * every product that fully succeeded, so the next preview reflects reality
- * without a re-pull.
+ * without a re-pull, and every price the store took goes into the price ledger
+ * (src/server/sync/ledger.ts) — the Hub's last word, which tells a later edit
+ * in WordPress apart. The unattended runs read each product live first and keep
+ * a price changed since the plan was made (liveCheck, see live-check.ts).
  */
 
 export interface ApplySelection {
@@ -73,6 +80,14 @@ export interface ApplyOptions {
    * and a product priced correctly would otherwise never get one.
    */
   backfillGtins?: boolean;
+  /**
+   * Read each product's sizes live right before writing them, and keep any
+   * price the store moved since the plan was made (see live-check.ts). The
+   * unattended runs' last look: their plans are made from a snapshot up to a
+   * day old. Costs one read per product written; the Sync tab, which pulls the
+   * store before planning, does without.
+   */
+  liveCheck?: boolean;
 }
 
 export interface ApplyChange {
@@ -94,6 +109,8 @@ export interface ApplyChange {
    * (or by hand) become listable on an external catalog at all.
    */
   newGtin: string | null;
+  /** Canonical EU size of the variant, from the plan row: the ledger's lock key. */
+  euSize: string | null;
 }
 
 /** Per-product cleanup, compact for the dry-run panel. */
@@ -144,6 +161,11 @@ export interface ApplyOutcome {
   cleanupDetailsTotal: number;
   /** Empty global_unique_id fields filled from the source (never overwritten). */
   gtinsWritten: number;
+  /**
+   * Prices the live check found changed on the store since the plan was made:
+   * kept, not written, and listed with the other prices changed on WordPress.
+   */
+  keptStoreEdits: number;
 }
 
 async function forEachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -212,6 +234,7 @@ async function collectChanges(
           newPrice: writesPrice ? item.proposedPrice : null,
           newStock: writesPrice ? (item.stockQuantity ?? null) : null,
           newGtin,
+          euSize: item.euSize ?? null,
         });
       }
     }
@@ -280,13 +303,22 @@ function summarizeCleanup(ops: ProductSanitizeOps[]): CleanupSummary {
 
 export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   await assertSnapshotIsThisStore();
-  // Read regardless of `sanitize`: the cleanup needs it, and so does the GTIN
-  // back-fill (which must know what the store already holds).
-  const snapshot = await getActiveSnapshot().catch(() => null);
+  const backfill = options.backfillGtins !== false;
 
   // The run's own scope, read in SQL. These three sets used to arrive from the
   // browser, which could only build them while it held every plan.
   const scope = await planRunScope(options.runId);
+  const previewed = new Set(scope.previewedProductIds);
+  const feedOwned = new Set(scope.feedProductIds);
+  const keepAvailable = new Set(scope.kicksdbVariationIds);
+
+  // The snapshot's products this apply needs — never the whole store. The
+  // cleanup and the GTIN back-fill look at every product the run previewed (a
+  // whole-store preview: the whole store, which is genuinely what they cover);
+  // a prices-only apply — the scheduler's every quarter of an hour, the
+  // Vetrina's one product — needs only the products it writes, read below.
+  const wholeRun = options.sanitize || backfill;
+  let products: StoreProductModel[] = wholeRun ? await getSnapshotProductsByIds(scope.previewedProductIds) : [];
 
   // 1. Plan the cleanup over the previewed products. Two regimes:
   //    - KicksDB-owned: the classic sanitize (ghosts, duplicates, pa_taglia).
@@ -294,21 +326,17 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   //      never listed (KicksDB-era leftovers keep selling otherwise), keep
   //      feed-known sizes (their qty is written by the stock sync), realign
   //      pa_taglia. The KicksDB ghost/make-available rules never apply here.
-  const previewed = new Set(scope.previewedProductIds);
-  const feedOwned = new Set(scope.feedProductIds);
-  const keepAvailable = new Set(scope.kicksdbVariationIds);
+  //    Only previewed products: a run that previewed none cleans none.
   const cleanupOps: ProductSanitizeOps[] = [];
-  if (options.sanitize && snapshot) {
-    const feedSkus = snapshot.products
-      .filter((p) => feedOwned.has(p.id) && p.sku)
-      .map((p) => p.sku);
+  if (options.sanitize && products.length > 0) {
+    const feedSkus = products.filter((p) => feedOwned.has(p.id) && p.sku).map((p) => p.sku);
     const owned =
       feedSkus.length > 0
         ? await gsOwnedProducts(feedSkus, "", await getOverrides().catch(() => null))
         : new Map<string, never>();
 
-    for (const product of snapshot.products) {
-      if (previewed.size > 0 && !previewed.has(product.id)) continue;
+    for (const product of products) {
+      if (!previewed.has(product.id)) continue;
       if (feedOwned.has(product.id)) {
         const gs = product.sku ? owned.get(skuKey(product.sku)) : undefined;
         if (!gs) continue; // ownership lapsed between preview and apply — skip
@@ -325,16 +353,13 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
 
   // 2. Collect price writes; drop the ones aimed at variations being deleted.
   const gtinByVariation = new Map<number, string>();
-  for (const product of snapshot?.products ?? []) {
+  for (const product of products) {
     for (const v of product.variations) {
       if (v.global_unique_id) gtinByVariation.set(v.id, String(v.global_unique_id));
     }
   }
   const { planIds, isSelected } = await resolveSelection(options);
-  const allChanges = await collectChanges(planIds, isSelected, {
-    gtinByVariation,
-    backfillGtins: options.backfillGtins !== false,
-  });
+  const allChanges = await collectChanges(planIds, isSelected, { gtinByVariation, backfillGtins: backfill });
   const changes = allChanges.filter((c) => !deletedIds.has(c.storeVariationId));
   const droppedByCleanup = allChanges.length - changes.length;
 
@@ -387,10 +412,14 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
       cleanupDetails: cleanupDetails.slice(0, OUTCOME_SAMPLE),
       cleanupDetailsTotal: cleanupDetails.length,
       gtinsWritten: changes.filter((c) => c.newGtin).length,
+      keptStoreEdits: 0,
     };
   }
 
   // 3. Execute, per parent product: parent PUT → variations batch (writes + deletes).
+  // A prices-only apply reads the products it writes now: the snapshot patch
+  // and the ledger need their names and sizes.
+  if (!wholeRun) products = await getSnapshotProductsByIds(productIds);
   const config = await getActiveConfig();
   const client = getWooClient();
   const concurrency = Math.max(1, config.apply.concurrency ?? 3);
@@ -399,11 +428,29 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   let updated = 0;
   const failed: { stockxVariantId: string; error: string }[] = [];
   const succeeded = new Set<number>();
+  // What each product actually took — the snapshot patch and the ledger
+  // record exactly this, never the plan.
+  const written = new Map<number, ApplyChange[]>();
+  // Products read live before writing: their sizes as the store has them now.
+  const liveSizes = new Map<number, StoreVariation[]>();
+  const kept: { change: ApplyChange; storePrice: number }[] = [];
+  // Variations the store no longer has once this apply is done.
+  const gone: number[] = [];
 
   await forEachLimit(productIds, concurrency, async (productId) => {
     const ops = opsByProduct.get(productId);
-    const prices = priceByProduct.get(productId) ?? [];
+    let prices = priceByProduct.get(productId) ?? [];
     try {
+      if (options.liveCheck && prices.length > 0) {
+        // No answer, no write: a store that cannot be read is not written blind.
+        const fresh = await client.getAllVariations(productId);
+        const decision = decideLiveWrites(prices, fresh);
+        prices = decision.write;
+        kept.push(...decision.kept);
+        gone.push(...decision.gone.map((c) => c.storeVariationId));
+        liveSizes.set(productId, fresh.map(toStoreVariation));
+      }
+
       if (ops?.parentAttributes != null) {
         await client.updateProduct(productId, { attributes: ops.parentAttributes });
       }
@@ -425,18 +472,31 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
         merged.set(c.storeVariationId, row);
       }
 
+      // The store answers row by row: a row it refused is not a write that
+      // happened, whatever the request's status said.
+      const refused = new Map<number, string>();
       const updateChunks = chunk([...merged.values()], batchSize);
       const deleteChunks = chunk(ops?.deleteVariationIds ?? [], batchSize);
       const rounds = Math.max(updateChunks.length, deleteChunks.length);
       for (let i = 0; i < rounds; i++) {
-        await client.batchVariations(productId, {
+        const res = await client.batchVariations(productId, {
           update: updateChunks[i],
           delete: deleteChunks[i],
         });
+        for (const row of res.update) {
+          if (row.error && row.id != null) refused.set(row.id, row.error.message ?? row.error.code ?? "refused");
+        }
       }
 
-      updated += prices.length;
+      const took = prices.filter((c) => !refused.has(c.storeVariationId));
+      for (const c of prices) {
+        const reason = refused.get(c.storeVariationId);
+        if (reason != null) failed.push({ stockxVariantId: c.stockxVariantId, error: reason });
+      }
+      updated += took.length;
+      written.set(productId, took);
       succeeded.add(productId);
+      gone.push(...(ops?.deleteVariationIds ?? []));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       if (prices.length > 0) {
@@ -448,16 +508,23 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
   });
 
   // 4. Patch the stored snapshot to the post-apply state of succeeded products,
-  //    so the next preview reflects reality without a full re-pull.
+  //    so the next preview reflects reality without a full re-pull — from the
+  //    store's own answer where the live check read one.
   //
   //    Only the products that actually succeeded are written, in SQL. Handing
   //    the whole model back to be re-serialized meant ~140 MB of string on top
   //    of the copy already in memory, at the end of the heaviest operation the
-  //    app has. The read above is the one that has to stay: a whole-store
-  //    cleanup genuinely looks at every product.
-  if (succeeded.size > 0 && snapshot) {
-    await upsertSnapshotProducts(patchedProducts(snapshot, succeeded, opsByProduct, priceByProduct));
+  //    app has.
+  if (succeeded.size > 0 && products.length > 0) {
+    await upsertSnapshotProducts(patchedProducts(products, succeeded, opsByProduct, written, liveSizes));
   }
+
+  // 5. The ledger: every price the store took is the Hub's last word on that
+  //    variation, and every price the live check kept is a store edit to list.
+  //    Best-effort, after the fact: the writes happened either way.
+  await recordLedger(products, written, kept, gone).catch((e) =>
+    console.error(`[ledger] not recorded for run ${options.runId}: ${e instanceof Error ? e.message : String(e)}`),
+  );
 
   const status: ApplyAuditRow["status"] =
     failed.length === 0 ? "applied" : succeeded.size > 0 ? "partial" : "failed";
@@ -482,28 +549,71 @@ export async function applySync(options: ApplyOptions): Promise<ApplyOutcome> {
     cleanupDetails: cleanupDetails.slice(0, OUTCOME_SAMPLE),
     cleanupDetailsTotal: cleanupDetails.length,
     gtinsWritten: changes.filter((c) => c.newGtin).length,
+    keptStoreEdits: kept.length,
   };
 }
 
 /**
- * The post-apply state of the products that succeeded — and only those.
- *
- * This used to rebuild the whole products array so the entire model could be
- * written back. The snapshot is patched per product now, so the untouched ones
- * never have to be named at all.
+ * What a live apply tells the price ledger: the variations gone, the prices
+ * written, and the store edits it kept.
+ */
+async function recordLedger(
+  products: StoreProductModel[],
+  written: ReadonlyMap<number, ApplyChange[]>,
+  kept: { change: ApplyChange; storePrice: number }[],
+  gone: number[],
+): Promise<void> {
+  await forgetVariations(gone);
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const describe = (c: ApplyChange) => {
+    const product = byId.get(c.storeProductId);
+    const vrt = product?.variations.find((v) => v.id === c.storeVariationId);
+    return {
+      variationId: c.storeVariationId,
+      productId: c.storeProductId,
+      sku: c.sku,
+      euSize: c.euSize,
+      title: product?.name ?? null,
+      sizeLabel: (product && vrt ? variationSizeLabel(product.sku, vrt) : null) ?? c.euSize ?? c.sizeLabel,
+    };
+  };
+  const writes: LedgerWrite[] = [];
+  for (const list of written.values()) {
+    for (const c of list) if (c.newPrice != null) writes.push({ ...describe(c), price: c.newPrice });
+  }
+  await recordPriceWrites(writes);
+  await noteStoreEdits(
+    kept.map(({ change, storePrice }) => ({
+      ...describe(change),
+      storePrice,
+      // The price the plan was made against is the Hub's baseline when the
+      // ledger has none of its own; failing that, the price it meant to write.
+      hubPrice: change.currentPrice ?? change.newPrice ?? storePrice,
+    })),
+  );
+}
+
+/**
+ * The post-apply state of the products that succeeded — and only those: the
+ * store's own sizes where the live check read them (the snapshot learns the
+ * edits it kept), else the snapshot's after the cleanup, with what each
+ * product took written in.
  */
 function patchedProducts(
-  model: StoreModel,
+  products: StoreProductModel[],
   succeeded: ReadonlySet<number>,
   opsByProduct: ReadonlyMap<number, ProductSanitizeOps>,
-  priceByProduct: ReadonlyMap<number, ApplyChange[]>,
+  written: ReadonlyMap<number, ApplyChange[]>,
+  liveSizes: ReadonlyMap<number, StoreVariation[]>,
 ): StoreProductModel[] {
   const out: StoreProductModel[] = [];
-  for (const p of model.products) {
+  for (const p of products) {
     if (!succeeded.has(p.id)) continue;
-    const next = opsByProduct.get(p.id)?.sanitized ?? p;
+    const ops = opsByProduct.get(p.id);
+    const fresh = liveSizes.get(p.id);
+    const next = ops?.sanitized ?? (fresh ? { ...p, variations: fresh } : p);
     const byId = new Map(next.variations.map((v) => [v.id, v]));
-    for (const c of priceByProduct.get(p.id) ?? []) {
+    for (const c of written.get(p.id) ?? []) {
       const vrt = byId.get(c.storeVariationId);
       if (!vrt) continue;
       if (c.newPrice != null) vrt.regular_price = c.newPrice.toFixed(2);
@@ -512,6 +622,7 @@ function patchedProducts(
         vrt.stock_quantity = c.newStock;
         vrt.stock_status = c.newStock > 0 ? "instock" : "outofstock";
       }
+      if (c.newGtin) vrt.global_unique_id = c.newGtin;
     }
     out.push(next);
   }

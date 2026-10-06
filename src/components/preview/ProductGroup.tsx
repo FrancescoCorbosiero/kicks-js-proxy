@@ -320,7 +320,21 @@ export function ProductGroup({
                     <TableCell>
                       <Badge variant={item.action}>{t.actions[item.action]}</Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-faint">{item.reason ?? ""}</TableCell>
+                    <TableCell className="text-xs text-faint">
+                      {item.storeEdit && (
+                        <Badge
+                          variant="warn"
+                          className="mr-1.5"
+                          title={t.product.storeEditHint(
+                            money(item.storeEdit.storePrice, plan.currency),
+                            money(item.storeEdit.hubPrice, plan.currency),
+                          )}
+                        >
+                          {t.product.storeEdit}
+                        </Badge>
+                      )}
+                      {item.reason ?? ""}
+                    </TableCell>
                   </TableRow>
                 );
               })}

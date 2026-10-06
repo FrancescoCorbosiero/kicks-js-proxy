@@ -23,6 +23,7 @@ import { skuKey } from "@/lib/skus";
 import {
   planPublish,
   planReimportParent,
+  publishedPrices,
   publishedVariations,
   withoutIdentity,
   type PublishPlan,
@@ -32,6 +33,7 @@ import { toStoreProduct } from "./store-product";
 import { getWooClient, type WooClient, type WooRestProduct, type WooRestVariation } from "./client";
 import { withTaxonomyCache } from "./taxonomy-cache";
 import { assertSnapshotIsThisStore } from "@/server/woo/site-guard";
+import { forgetVariations, recordPriceWrites, type LedgerWrite } from "@/server/sync/ledger";
 import { publishing } from "./publishing";
 import { dropMedia, openMediaSkus, queueMedia, setMediaProduct } from "./media";
 import { isHidden } from "./media-plan";
@@ -354,6 +356,10 @@ async function publishClaimed(
    * offered them again on the very next render, and on every render after that.
    */
   const reconciled: StoreProductModel[] = [];
+  // The price ledger's share: what the new sizes were created at, and the old
+  // sizes a reimport replaced.
+  const ledgerWrites: LedgerWrite[] = [];
+  const replacedIds: number[] = [];
   // Identity fields this store's REST schema refused — reported once, not per
   // product, and never fatal.
   const identityRejected = new Set<string>();
@@ -517,6 +523,7 @@ async function publishClaimed(
         });
         createdRows = res.create;
         variations += res.create.filter((r) => r.error == null).length;
+        for (const row of res.delete) if (row.error == null && row.id != null) replacedIds.push(row.id);
         const failedRows = res.create.filter((r) => r.error != null);
         if (failedRows.length > 0) {
           report.error = `${failedRows.length}/${plan.variations.length} variations failed: ${failedRows[0].error?.message ?? "unknown"}`;
@@ -579,6 +586,9 @@ async function publishClaimed(
         created += 1;
       }
       report.storeProductId = productId;
+      for (const p of publishedPrices(plan, createdRows)) {
+        ledgerWrites.push({ ...p, productId, sku, title: plan.title });
+      }
 
       published.push({
         plan,
@@ -606,6 +616,11 @@ async function publishClaimed(
   // footprint, is what ran the heap out mid-publish.
   if (!dryRun && (published.length > 0 || reconciled.length > 0)) {
     await upsertSnapshotProducts([...published.map((p) => p.product), ...reconciled]);
+  }
+  if (!dryRun && (ledgerWrites.length > 0 || replacedIds.length > 0)) {
+    await forgetVariations(replacedIds)
+      .then(() => recordPriceWrites(ledgerWrites))
+      .catch((e) => console.error(`[ledger] publish not recorded: ${e instanceof Error ? e.message : String(e)}`));
   }
 
   const failed = reports.filter((r) => r.error != null).length;

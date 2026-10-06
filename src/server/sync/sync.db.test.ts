@@ -170,3 +170,70 @@ describe.skipIf(!enabled)("another shop's database (real SQL)", () => {
   });
 });
 
+
+describe.skipIf(!enabled)("the apply's scope (real SQL)", () => {
+  it("cleans only what the run previewed — and nothing when it previewed nothing", async () => {
+    const { saveSnapshot, savePlans, applySyncPrices } = await load();
+    const { randomUUID } = await import("node:crypto");
+    // Size 42 twice: the cleanup deletes the stale twin of any product it is given.
+    await saveSnapshot({
+      products: [
+        { id: 7, sku: "TWIN-1", name: "Twin", variations: [vrt(71, "TWIN-1", "42", null), vrt(72, "TWIN-1", "42", null)] },
+      ],
+    } as never);
+    const dryRun = (runId: string) =>
+      applySyncPrices({ runId, priceScope: "all", selections: [], excluded: [], dryRun: true, sanitize: true, backfillGtins: false });
+
+    // A preview of a product the store does not carry: its run touches no store product.
+    const elsewhere = randomUUID();
+    await savePlans(
+      [{ plan: { sku: "NOT-ON-STORE", currency: "EUR", generatedAt: new Date().toISOString(), items: [
+        { stockxVariantId: "x", sizeLabel: "42", storeProductId: null, storeVariationId: null, currentPrice: null, proposedPrice: 99, action: "create" },
+      ] }, source: "kicksdb" }],
+      "IT",
+      elsewhere,
+    );
+    const none = await dryRun(elsewhere);
+    expect(none.ok).toBe(true);
+    expect(none.outcome!.cleanup!.products).toBe(0); // not "every product of the store"
+
+    // A preview that matched the product: its twin is cleaned.
+    const matched = randomUUID();
+    await savePlans(
+      [{ plan: { sku: "TWIN-1", currency: "EUR", generatedAt: new Date().toISOString(), items: [
+        { stockxVariantId: "y", sizeLabel: "42", storeProductId: 7, storeVariationId: 72, currentPrice: 120, proposedPrice: 120, action: "noop" },
+      ] }, source: "kicksdb" }],
+      "IT",
+      matched,
+    );
+    const one = await dryRun(matched);
+    expect(one.outcome!.cleanup!.products).toBe(1);
+    expect(one.outcome!.cleanup!.deletions).toBe(1);
+  });
+});
+
+describe.skipIf(!enabled)("run logs retention (real SQL)", () => {
+  it("drops old logs, never a run that still has plans to apply", async () => {
+    const { eq, db, storeSyncRuns, ingestionRuns, applyAudit, plans, savePlans, createSyncRun } = await load();
+    const { pruneRunLogs } = await import("@/server/retention");
+    const old = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+
+    const stale = await createSyncRun("IT", ["A"]);
+    const withPlans = await createSyncRun("IT", ["B"]);
+    await savePlans([plan("B")], "IT", withPlans.id);
+    const recent = await createSyncRun("IT", ["C"]);
+    await db.update(storeSyncRuns).set({ startedAt: old }).where(eq(storeSyncRuns.id, stale.id));
+    await db.update(storeSyncRuns).set({ startedAt: old }).where(eq(storeSyncRuns.id, withPlans.id));
+    const [oldIngestion] = await db.insert(ingestionRuns).values({ source: "feed:goldensneakers", market: "IT", startedAt: old }).returning();
+    const [oldApply] = await db.insert(applyAudit).values({ status: "applied", dryRun: false, startedAt: old }).returning();
+
+    await pruneRunLogs();
+    const ids = (await db.select({ id: storeSyncRuns.id }).from(storeSyncRuns)).map((r) => r.id);
+    expect(ids).not.toContain(stale.id);
+    expect(ids).toContain(withPlans.id); // its plans are still there
+    expect(ids).toContain(recent.id);
+    expect(await db.select().from(ingestionRuns).where(eq(ingestionRuns.id, oldIngestion.id))).toEqual([]);
+    expect(await db.select().from(applyAudit).where(eq(applyAudit.id, oldApply.id))).toEqual([]);
+    expect((await db.select().from(plans).where(eq(plans.runId, withPlans.id))).length).toBe(1);
+  });
+});

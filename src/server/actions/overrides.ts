@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { getOverridesForWrite, saveOverrides } from "@/server/overrides/repo";
+import { supersedeStoreEdits } from "@/server/sync/ledger";
 import {
   withGlobalSaleRule,
   withProductOwner,
@@ -12,6 +13,18 @@ import {
 export interface OverrideResult {
   ok: boolean;
   error?: string;
+}
+
+/**
+ * A lock set or cleared here is the newest word on those sizes' prices: it
+ * supersedes a price someone changed in WordPress, which the sync would
+ * otherwise keep (see sync/ledger.ts). Best-effort — the lock is saved either
+ * way; at worst the change stays on the list for a person to settle.
+ */
+async function supersede(parentSku: string, euSizes: string[]): Promise<void> {
+  await supersedeStoreEdits(parentSku, euSizes).catch((e) =>
+    console.warn("[ledger] store edits not superseded:", e instanceof Error ? e.message : String(e)),
+  );
 }
 
 const GlobalSaleRuleSchema = z.object({ followSaleRule: z.boolean().nullable() });
@@ -103,6 +116,7 @@ export async function setProductManualPrices(
       next = withVariationPrice(next, parsed.data.parentSku, p.euSize, p.price);
     }
     await saveOverrides(next);
+    await supersede(parsed.data.parentSku, parsed.data.prices.map((p) => p.euSize));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -127,6 +141,7 @@ export async function setVariationManualPrice(
     await saveOverrides(
       withVariationPrice(current, parsed.data.parentSku, parsed.data.euSize, parsed.data.price),
     );
+    await supersede(parsed.data.parentSku, [parsed.data.euSize]);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

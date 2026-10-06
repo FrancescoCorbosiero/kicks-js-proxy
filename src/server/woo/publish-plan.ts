@@ -281,6 +281,24 @@ export function planReimportParent(
  * and which collapses every size of the product into one entry for anything
  * that keys variations by id.
  */
+/**
+ * The prices the store took, by new variation id: what the price ledger
+ * records of a publish. Read off the same create answer as publishedVariations.
+ */
+export function publishedPrices(
+  plan: PublishPlan,
+  createdRows: { id?: number; error?: unknown }[],
+): { variationId: number; euSize: string; sizeLabel: string; price: number }[] {
+  const out: { variationId: number; euSize: string; sizeLabel: string; price: number }[] = [];
+  plan.variations.forEach((v, i) => {
+    const row = createdRows[i];
+    const id = row && row.error == null && typeof row.id === "number" ? row.id : 0;
+    if (id <= 0 || v.price == null) return;
+    out.push({ variationId: id, euSize: v.euNorm, sizeLabel: v.sizeLabel, price: v.price });
+  });
+  return out;
+}
+
 export function publishedVariations(
   plan: PublishPlan,
   createdRows: { id?: number; error?: unknown }[],

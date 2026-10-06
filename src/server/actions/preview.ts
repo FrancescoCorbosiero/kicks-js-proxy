@@ -10,7 +10,9 @@ import {
   getSnapshotProductsBySkus,
   listStoreSkuSpellings,
 } from "@/server/store-json/repo";
-import { resolveFromModel, sourceEuSize } from "@/server/store-json/match";
+import { resolveFromModel, sourceEuSize, variationSizeLabel } from "@/server/store-json/match";
+import { adoptPrices, ledgerForProducts, noteStoreEdits, settleStoreEdits } from "@/server/sync/ledger";
+import { ledgerUpdatesFor, type LedgerEntry, type PlannedRow } from "@/server/sync/store-edit-plan";
 import { savePlans, prunePlans, type PlanToSave } from "@/server/plans/repo";
 import { getCache } from "@/server/cache/redis";
 import { fetchProductsCached } from "@/server/kicks/service";
@@ -168,10 +170,25 @@ async function planChunk(
     followSaleRule: boolean;
   }[] = [];
 
+  // The Hub's last word on every variation these products can match: a store
+  // price that differs from it was changed outside the Hub, and is kept.
+  const ledger = await ledgerForProducts(storeIndex ? [...storeIndex.values()].map((p) => p.id) : []).catch(
+    (e) => {
+      // Planned as before the ledger existed — nothing is held, nothing is lost.
+      console.warn("[ledger] read skipped:", errMessage(e));
+      return new Map<number, LedgerEntry>();
+    },
+  );
+  const ledgerRows: PlannedRow[] = [];
+
   for (const product of products) {
     if (seen.has(skuKey(product.sku))) continue;
     seen.add(skuKey(product.sku));
     const mappings = storeIndex ? resolveFromModel(storeIndex, product) : new Map();
+    for (const m of mappings.values()) {
+      const entry = ledger.get(m.storeVariationId);
+      if (entry) m.hubPrice = entry.price;
+    }
 
     // EU size per variant — needed both for the table and to key manual-price
     // overrides (which are stored by parent SKU + EU size).
@@ -215,7 +232,36 @@ async function planChunk(
         }
       }
     }
+    // Each row carries its lock key, so whatever writes it can tell the ledger
+    // under which size a later edit would be kept.
+    const storeProduct = storeIndex?.get(skuKey(product.sku));
+    const storeLabels = new Map(
+      (storeProduct?.variations ?? []).map((vrt) => [vrt.id, variationSizeLabel(storeProduct!.sku, vrt) ?? ""]),
+    );
+    for (const item of plan.items) {
+      const eu = euSizes[item.stockxVariantId];
+      if (eu) item.euSize = eu;
+      if (item.storeVariationId != null) {
+        ledgerRows.push({
+          item,
+          sku: product.sku,
+          title: product.title,
+          sizeLabel: storeLabels.get(item.storeVariationId) || eu || item.sizeLabel,
+        });
+      }
+    }
     planned.push({ toSave: { plan, source }, product, euSizes, manualPrices, followSaleRule });
+  }
+
+  // What these plans kept, and what is the Hub's again. Best-effort like the
+  // read: bookkeeping that fails must never cost the plans.
+  const { notes, settles, adopt } = ledgerUpdatesFor(ledgerRows, ledger);
+  try {
+    await noteStoreEdits(notes);
+    await settleStoreEdits(settles);
+    await adoptPrices(adopt);
+  } catch (e) {
+    console.warn("[ledger] store edits not recorded:", errMessage(e));
   }
 
   const saved = await savePlans(

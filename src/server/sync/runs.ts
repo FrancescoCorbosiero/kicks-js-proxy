@@ -107,6 +107,15 @@ export async function cancelSyncRun(runId: string): Promise<void> {
 }
 
 /**
+ * Drop a finished run's row — the unattended runs' (see price-sync.ts): every
+ * feed cycle opens one carrying the whole SKU list it walks, and nothing reads
+ * it once its apply is done.
+ */
+export async function deleteSyncRun(runId: string): Promise<void> {
+  await db.delete(storeSyncRuns).where(eq(storeSyncRuns.id, runId));
+}
+
+/**
  * Whether a run may be applied: any run that is not a stepped sync (a manual
  * preview) is complete by construction; a stepped sync only once it is done.
  * A half-walked store is not a plan for the store.

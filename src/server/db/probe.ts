@@ -35,5 +35,7 @@ export async function assertSchemaCurrent(): Promise<void> {
   // 0018: automatic categories — their rules, the store index they read, their log.
   await db.execute(sql`select 1 from "smart_collections" limit 1`);
   await db.execute(sql`select 1 from "store_index" limit 1`);
+  // 0019: the price ledger — every plan reads it to keep prices changed on the store.
+  await db.execute(sql`select 1 from "price_ledger" limit 1`);
   verified = true;
 }

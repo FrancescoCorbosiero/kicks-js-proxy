@@ -40,6 +40,10 @@ export const en: Dictionary = {
     syncHint: (ago) =>
       ago == null ? "Keep the store's prices and stock aligned." : `Last sync: ${ago}.`,
     syncPulling: "Downloading the store…",
+    syncEdits: (n) =>
+      n === 1
+        ? "1 price changed on WordPress: you decide whether to keep it."
+        : `${n} prices changed on WordPress: you decide whether to keep them.`,
     vetrinaHint: "The store's homepage: sections and featured products.",
     ordersHint: (n) =>
       n == null
@@ -269,6 +273,9 @@ export const en: Dictionary = {
     manualClearHint: "Unlock: back to the automatic price",
     locked: "locked",
     saving: "…",
+    storeEdit: "changed on WordPress",
+    storeEditHint: (store, hub) =>
+      `The store charges ${store}; the Hub last wrote ${hub}. The sync does not write over it: decide in "Prices changed on WordPress".`,
   },
   actions: {
     update: "update",
@@ -432,6 +439,13 @@ export const en: Dictionary = {
       "Want to decide a price yourself? Lock it: a locked price is NEVER overwritten by sync. Unlock it whenever you want the automatic price back.",
     lockAll: (n) => `Lock all (${n})`,
     unlockAll: (n) => `Unlock all (${n})`,
+    wpEdit: (price) => `On WordPress: ${price}`,
+    wpEditHint: (hub) =>
+      `Changed on the store after the Hub last wrote it (${hub}): the sync does not write over it until you decide.`,
+    wpEditKeep: "Keep",
+    wpEditKeepHint: "Lock this price: from now on the Hub writes this one",
+    wpEditReprice: "Hub's price",
+    wpEditRepriceHint: "Hand the size back to the rules and write the Hub's price now",
     sourceTitle: "Who decides this product's prices",
     sourceGs: "Supplier",
     sourceKicksdb: "StockX",
@@ -575,6 +589,30 @@ export const en: Dictionary = {
       applied: (n) => `${n} variations updated on the store ✓`,
       partial: (ok, ko) => `${ok} updated, ${ko} failed`,
       failed: "Apply failed",
+    },
+    storeEdits: {
+      title: "Prices changed on WordPress",
+      count: (n) => (n === 1 ? "1 price kept" : `${n} prices kept`),
+      desc: "Someone changed them on the store after the Hub last wrote them — in wp-admin, or another plugin did. The sync does not write over them, the automatic one included: you decide. \"Keep\" locks the store's price, so from now on the Hub writes that one. \"Use the Hub's price\" hands it back to the rules and writes it now.",
+      store: (price) => `Store ${price}`,
+      hub: (price) => `Hub ${price}`,
+      since: (when) => `since ${when}`,
+      keep: "Keep",
+      keepHint: "Lock this price: from now on the Hub writes this one",
+      reprice: "Use the Hub's price",
+      repriceHint: "Hand the size back to the rules and write the Hub's price now",
+      keepAll: (n) => `Keep all (${n})`,
+      repriceAll: (n) => `Use the Hub's price for all (${n})`,
+      confirm: "Sure? Press again to write them to the store",
+      notLockable: "Without an EU size it cannot be locked: use the Hub's price, or fix it in WordPress.",
+      open: "Open in WordPress",
+      more: (n) => `…and ${n} more`,
+      kept: (n) => (n === 1 ? "1 price locked as the store has it ✓" : `${n} prices locked as the store has them ✓`),
+      repriced: (n, written) =>
+        `${n === 1 ? "1 price" : `${n} prices`} handed back to the rules · ${written} written to the store ✓`,
+      repriceLater: (n) =>
+        `${n === 1 ? "1 price" : `${n} prices`} handed back to the rules: the next sync writes ${n === 1 ? "it" : "them"}.`,
+      failed: "That did not work",
     },
     rebuild: {
       title: "Product rebuild",
@@ -1502,6 +1540,10 @@ export const en: Dictionary = {
       rule: (label) => `Margin: ${label}`,
       generalRule: "standard margin",
       belowMarket: (ask) => `Below the market price (${ask})`,
+      storeEdit: (price) => `Changed on WordPress: ${price}`,
+      storeEditKeep: "Keep it",
+      storeEditReprice: "Use the Hub's price",
+      storeEditRepriced: "The Hub's price is back on the site",
       noSnapshot: "Publishing prices needs a store refresh first (Sync).",
       openSite: "Open on site",
       editWp: "Edit in WordPress",
