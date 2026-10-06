@@ -4,6 +4,7 @@ import { countCatalog, countUnpublishedCandidates } from "@/server/catalog/repo"
 import { countOpenOrders } from "@/server/orders/repo";
 import { listApplyHistory } from "@/server/woo/apply";
 import { getLatestPullRun, pullInFlight } from "@/server/woo/pull";
+import { countStoreEdits } from "@/server/sync/ledger";
 import { EMPTY_DOCK_STATUS, type DockStatus } from "@/lib/dock";
 
 /**
@@ -19,12 +20,13 @@ export async function loadDockStatus(): Promise<DockStatus> {
     return EMPTY_DOCK_STATUS;
   }
 
-  const [catalog, toPublish, openOrders, history, latestPull] = await Promise.all([
+  const [catalog, toPublish, openOrders, history, latestPull, storeEdits] = await Promise.all([
     countCatalog(market).catch(() => null),
     countUnpublishedCandidates(market).catch(() => null),
     countOpenOrders().catch(() => null),
     listApplyHistory(10).catch(() => []),
     getLatestPullRun().catch(() => null),
+    countStoreEdits().catch(() => null),
   ]);
 
   const lastLive = history.find(
@@ -37,5 +39,6 @@ export async function loadDockStatus(): Promise<DockStatus> {
     openOrders,
     lastSyncAt: lastLive?.finishedAt ?? lastLive?.startedAt ?? null,
     pulling: pullInFlight(latestPull),
+    storeEdits,
   };
 }

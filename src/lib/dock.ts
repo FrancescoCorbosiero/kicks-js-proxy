@@ -13,6 +13,8 @@ export interface DockStatus {
   lastSyncAt: string | null;
   /** A store pull is advancing right now. */
   pulling: boolean;
+  /** Prices changed on WordPress the sync is keeping, waiting for a decision. */
+  storeEdits: number | null;
 }
 
 export const EMPTY_DOCK_STATUS: DockStatus = {
@@ -21,4 +23,5 @@ export const EMPTY_DOCK_STATUS: DockStatus = {
   openOrders: null,
   lastSyncAt: null,
   pulling: false,
+  storeEdits: null,
 };

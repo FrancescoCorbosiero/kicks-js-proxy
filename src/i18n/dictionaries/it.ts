@@ -47,6 +47,10 @@ export const it = {
     syncHint: (ago: string | null) =>
       ago == null ? "Allinea prezzi e giacenze del negozio." : `Ultima sincronizzazione: ${ago}.`,
     syncPulling: "Scaricamento del negozio in corso…",
+    syncEdits: (n: number) =>
+      n === 1
+        ? "1 prezzo cambiato su WordPress: decidi tu se tenerlo."
+        : `${n} prezzi cambiati su WordPress: decidi tu se tenerli.`,
     vetrinaHint: "La homepage del negozio: sezioni e prodotti in evidenza.",
     ordersHint: (n: number | null) =>
       n == null
@@ -277,6 +281,9 @@ export const it = {
     manualClearHint: "Sblocca: torna al prezzo automatico",
     locked: "bloccato",
     saving: "…",
+    storeEdit: "cambiato su WordPress",
+    storeEditHint: (store: string, hub: string) =>
+      `Sul negozio costa ${store}; l'ultimo prezzo scritto dal Hub era ${hub}. La sincronizzazione non lo sovrascrive: decidi in «Prezzi cambiati su WordPress».`,
   },
   actions: {
     update: "aggiorna",
@@ -441,6 +448,13 @@ export const it = {
       "Vuoi decidere tu un prezzo? Bloccalo: un prezzo bloccato non viene MAI sovrascritto dalla sincronizzazione. Sbloccalo quando vuoi tornare al prezzo automatico.",
     lockAll: (n: number) => `Blocca tutti (${n})`,
     unlockAll: (n: number) => `Sblocca tutti (${n})`,
+    wpEdit: (price: string) => `Su WordPress: ${price}`,
+    wpEditHint: (hub: string) =>
+      `Cambiato sul negozio dopo l'ultima scrittura del Hub (${hub}): la sincronizzazione non lo sovrascrive finché non decidi.`,
+    wpEditKeep: "Tieni",
+    wpEditKeepHint: "Blocca questo prezzo: da ora il Hub scrive questo",
+    wpEditReprice: "Prezzo del Hub",
+    wpEditRepriceHint: "Ridà la taglia alle regole e scrive subito il prezzo del Hub",
     sourceTitle: "Chi decide i prezzi di questo prodotto",
     sourceGs: "Fornitore",
     sourceKicksdb: "StockX",
@@ -589,6 +603,31 @@ export const it = {
       applied: (n: number) => `${n} varianti aggiornate sullo store ✓`,
       partial: (ok: number, ko: number) => `${ok} aggiornate, ${ko} fallite`,
       failed: "Applicazione fallita",
+    },
+    storeEdits: {
+      title: "Prezzi cambiati su WordPress",
+      count: (n: number) => (n === 1 ? "1 prezzo tenuto" : `${n} prezzi tenuti`),
+      desc: "Qualcuno li ha cambiati sul negozio dopo l'ultima scrittura del Hub — da wp-admin, o un altro plugin. La sincronizzazione non li sovrascrive, nemmeno quella automatica: decidi tu. «Tieni» blocca il prezzo del negozio con un lucchetto, così da ora il Hub scrive quello. «Usa il prezzo del Hub» lo ridà alle regole e lo scrive subito.",
+      store: (price: string) => `Negozio ${price}`,
+      hub: (price: string) => `Hub ${price}`,
+      since: (when: string) => `dal ${when}`,
+      keep: "Tieni",
+      keepHint: "Blocca questo prezzo: da ora il Hub scrive questo",
+      reprice: "Usa il prezzo del Hub",
+      repriceHint: "Ridà la taglia alle regole e scrive subito il prezzo del Hub",
+      keepAll: (n: number) => `Tieni tutti (${n})`,
+      repriceAll: (n: number) => `Usa il prezzo del Hub per tutti (${n})`,
+      confirm: "Sicuro? Premi di nuovo per scriverli sul negozio",
+      notLockable: "Senza taglia EU non si può bloccare: usa il prezzo del Hub, o correggilo in WordPress.",
+      open: "Apri in WordPress",
+      more: (n: number) => `…e altri ${n}`,
+      kept: (n: number) =>
+        n === 1 ? "1 prezzo bloccato com'è sul negozio ✓" : `${n} prezzi bloccati come sono sul negozio ✓`,
+      repriced: (n: number, written: number) =>
+        `${n === 1 ? "1 prezzo ridato" : `${n} prezzi ridati`} alle regole · ${written === 1 ? "1 scritto" : `${written} scritti`} sul negozio ✓`,
+      repriceLater: (n: number) =>
+        `${n === 1 ? "1 prezzo ridato" : `${n} prezzi ridati`} alle regole: la prossima sincronizzazione ${n === 1 ? "lo scrive" : "li scrive"}.`,
+      failed: "Operazione non riuscita",
     },
     rebuild: {
       title: "Ricostruzione prodotti",
@@ -1541,6 +1580,10 @@ export const it = {
       rule: (label: string) => `Margine: ${label}`,
       generalRule: "margine standard",
       belowMarket: (ask: string) => `Sotto il prezzo di mercato (${ask})`,
+      storeEdit: (price: string) => `Cambiato su WordPress: ${price}`,
+      storeEditKeep: "Tienilo",
+      storeEditReprice: "Usa il prezzo del Hub",
+      storeEditRepriced: "Prezzo del Hub di nuovo sul sito",
       noSnapshot: "Per pubblicare i prezzi serve prima un aggiornamento dal negozio (Sync).",
       openSite: "Apri sul sito",
       editWp: "Modifica su WordPress",

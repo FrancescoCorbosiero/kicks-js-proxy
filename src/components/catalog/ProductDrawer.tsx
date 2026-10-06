@@ -13,6 +13,7 @@ import {
   setVariationManualPrice,
 } from "@/server/actions/overrides";
 import { updateStoreVariation } from "@/server/actions/store-edit";
+import { repriceStoreEdits } from "@/server/actions/store-edits";
 import { auditPrices, type PriceAuditResult } from "@/server/actions/debug";
 import { LockIcon, UnlockIcon } from "@/components/icons";
 import { CardImage } from "./CardImage";
@@ -717,9 +718,19 @@ function VariantRow({
     });
   }
 
+  /** The size's price changed on WordPress goes back to the rules, written now. */
+  function reprice(variationId: number) {
+    startSaving(async () => {
+      const res = await repriceStoreEdits({ ids: [variationId] });
+      if (res.ok && !res.data.error) onSaved();
+      else onError(res.ok ? (res.data.error ?? t.drawer.saveFailed) : res.error);
+    });
+  }
+
   const sizeLabel = variant.euSize
     ? t.product.eu(variant.euSize)
     : `${variant.sizeLabel} ${variant.sizeType}`;
+  const wp = variant.storeEdit;
 
   return (
     <li className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 px-3 py-2 text-sm">
@@ -728,6 +739,34 @@ function VariantRow({
         {variant.upc && (
           <div className="truncate font-mono text-[10px] text-faint" title={variant.upc}>
             {variant.upc}
+          </div>
+        )}
+        {wp && (
+          <div
+            className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px]"
+            title={t.drawer.wpEditHint(eur.format(wp.hubPrice))}
+          >
+            <span className="font-semibold text-warn tnum">{t.drawer.wpEdit(eur.format(wp.storePrice))}</span>
+            {canLock && (
+              <button
+                type="button"
+                className="font-semibold text-accent-text underline-offset-2 hover:underline disabled:opacity-50"
+                title={t.drawer.wpEditKeepHint}
+                disabled={saving}
+                onClick={() => save(wp.storePrice)}
+              >
+                {t.drawer.wpEditKeep}
+              </button>
+            )}
+            <button
+              type="button"
+              className="font-semibold text-muted underline-offset-2 hover:underline disabled:opacity-50"
+              title={t.drawer.wpEditRepriceHint}
+              disabled={saving}
+              onClick={() => reprice(wp.variationId)}
+            >
+              {t.drawer.wpEditReprice}
+            </button>
           </div>
         )}
       </div>

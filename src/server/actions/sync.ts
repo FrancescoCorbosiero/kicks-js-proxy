@@ -19,6 +19,7 @@ import { getActiveConfig } from "@/server/config/repo";
 import { countUnpublishedCandidates } from "@/server/catalog/repo";
 import { rebuildProducts, type RebuildOutcome } from "@/server/woo/rebuild";
 import { syncRunApplicable } from "@/server/sync/runs";
+import { loadStoreEdits, type StoreEditsState } from "@/server/sync/store-edits";
 import { snapshotSiteMatch } from "@/server/woo/site-guard";
 import { env } from "@/lib/env";
 import { DEFAULT_TIMEZONE } from "@/lib/schedule";
@@ -106,12 +107,14 @@ export interface SyncPageState {
   siteMismatch: { snapshot: string; connected: string } | null;
   /** The shop's time zone: the page prints its dates in it. */
   timeZone: string;
+  /** Prices changed on WordPress that the sync is keeping, for a person to decide. */
+  storeEdits: StoreEditsState | null;
 }
 
 /** Everything the sync page header needs (also used to refresh after actions). */
 export async function getSyncState(): Promise<SyncPageState> {
   const config = await getActiveConfig().catch(() => null);
-  const [latest, history, unpublished, site] = await Promise.all([
+  const [latest, history, unpublished, site, storeEdits] = await Promise.all([
     getLatestPullRun().catch(() => null),
     listApplyHistory().catch(() => [] as ApplyHistoryEntry[]),
     // ONE integer, counted in SQL. This runs on every render of the tab —
@@ -119,11 +122,13 @@ export async function getSyncState(): Promise<SyncPageState> {
     // never be answered by loading the catalog and the snapshot into memory.
     config ? countUnpublishedCandidates(config.source.market) : Promise.resolve(0),
     snapshotSiteMatch().catch(() => ({ status: "unknown" as const })),
+    loadStoreEdits().catch(() => null),
   ]);
   return {
     wooConfigured: wooConfigured(),
     timeZone: env.SCHEDULER_TIMEZONE ?? DEFAULT_TIMEZONE,
     unpublished,
+    storeEdits,
     siteMismatch:
       site.status === "mismatch" ? { snapshot: site.snapshot, connected: site.connected } : null,
     runningPull:

@@ -85,7 +85,8 @@ function describe(
       return {
         icon: "sync",
         label: t.header.navSync,
-        hint: s.pulling ? t.dock.syncPulling : t.dock.syncHint(ago),
+        hint: s.pulling ? t.dock.syncPulling : s.storeEdits ? t.dock.syncEdits(s.storeEdits) : t.dock.syncHint(ago),
+        badge: s.storeEdits ? { text: format(s.storeEdits), tone: "action" } : undefined,
         busy: s.pulling,
       };
     }
