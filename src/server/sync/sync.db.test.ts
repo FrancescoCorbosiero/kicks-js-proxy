@@ -211,3 +211,29 @@ describe.skipIf(!enabled)("the apply's scope (real SQL)", () => {
     expect(one.outcome!.cleanup!.deletions).toBe(1);
   });
 });
+
+describe.skipIf(!enabled)("run logs retention (real SQL)", () => {
+  it("drops old logs, never a run that still has plans to apply", async () => {
+    const { eq, db, storeSyncRuns, ingestionRuns, applyAudit, plans, savePlans, createSyncRun } = await load();
+    const { pruneRunLogs } = await import("@/server/retention");
+    const old = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+
+    const stale = await createSyncRun("IT", ["A"]);
+    const withPlans = await createSyncRun("IT", ["B"]);
+    await savePlans([plan("B")], "IT", withPlans.id);
+    const recent = await createSyncRun("IT", ["C"]);
+    await db.update(storeSyncRuns).set({ startedAt: old }).where(eq(storeSyncRuns.id, stale.id));
+    await db.update(storeSyncRuns).set({ startedAt: old }).where(eq(storeSyncRuns.id, withPlans.id));
+    const [oldIngestion] = await db.insert(ingestionRuns).values({ source: "feed:goldensneakers", market: "IT", startedAt: old }).returning();
+    const [oldApply] = await db.insert(applyAudit).values({ status: "applied", dryRun: false, startedAt: old }).returning();
+
+    await pruneRunLogs();
+    const ids = (await db.select({ id: storeSyncRuns.id }).from(storeSyncRuns)).map((r) => r.id);
+    expect(ids).not.toContain(stale.id);
+    expect(ids).toContain(withPlans.id); // its plans are still there
+    expect(ids).toContain(recent.id);
+    expect(await db.select().from(ingestionRuns).where(eq(ingestionRuns.id, oldIngestion.id))).toEqual([]);
+    expect(await db.select().from(applyAudit).where(eq(applyAudit.id, oldApply.id))).toEqual([]);
+    expect((await db.select().from(plans).where(eq(plans.runId, withPlans.id))).length).toBe(1);
+  });
+});

@@ -488,6 +488,22 @@ async function loadHistory(s: SchedulerState): Promise<Date | null> {
   return served?.slot ? new Date(served.slot) : null;
 }
 
+/** The run logs every cycle adds to, cut back once a day (see retention.ts). Never throws. */
+async function pruneLogs(): Promise<void> {
+  try {
+    const { pruneRunLogs } = await import("@/server/retention");
+    const pruned = await pruneRunLogs();
+    const total = pruned.syncRuns + pruned.ingestionRuns + pruned.applyRuns;
+    if (total > 0) {
+      console.log(
+        `[scheduler] old run logs removed: ${pruned.syncRuns} sync runs, ${pruned.ingestionRuns} ingestion runs, ${pruned.applyRuns} apply records`,
+      );
+    }
+  } catch (e) {
+    console.warn(`[scheduler] old run logs kept: ${messageOf(e)}`);
+  }
+}
+
 /** Tell the monitor behind a heartbeat URL that a run went through. */
 async function heartbeat(url: string | undefined): Promise<void> {
   if (!url) return;
@@ -558,7 +574,10 @@ async function run(job: Job): Promise<StepName[] | null> {
   if (failed.length === 0) {
     await heartbeat(job.kind === "feeds" ? env.SCHEDULER_FEEDS_HEARTBEAT_URL : env.SCHEDULER_HEARTBEAT_URL);
   }
-  if (job.kind === "daily") await history.prune();
+  if (job.kind === "daily") {
+    await history.prune();
+    await pruneLogs();
+  }
   return failed;
 }
 
